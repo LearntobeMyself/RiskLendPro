@@ -6,17 +6,20 @@ import org.example.risklendpro.entity.Loan;
 import org.example.risklendpro.entity.MockData;
 import org.example.risklendpro.entity.RiskAssessment;
 import org.example.risklendpro.entity.UserCreditLimit;
+import org.example.risklendpro.entity.VintageData;
 import org.example.risklendpro.enums.LoanStatusEnum;
 import org.example.risklendpro.mapper.LoanMapper;
 import org.example.risklendpro.mapper.MockDataMapper;
 import org.example.risklendpro.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
+import org.example.risklendpro.mapper.VintageDataMapper;
 import org.example.risklendpro.pojo.request.LoanApproveRequest;
 import org.example.risklendpro.pojo.request.MockDataUpdateRequest;
 import org.example.risklendpro.pojo.request.RiskApproveRequest;
 import org.example.risklendpro.pojo.response.LoanApproveResponse;
 import org.example.risklendpro.service.AdminService;
 import org.example.risklendpro.utils.EmailUtil;
+import org.example.risklendpro.utils.RedisCacheUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +30,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class AdminServiceImpl implements AdminService {
@@ -44,7 +48,13 @@ public class AdminServiceImpl implements AdminService {
     private UserCreditLimitMapper userCreditLimitMapper;
 
     @Autowired
+    private VintageDataMapper vintageDataMapper;
+
+    @Autowired
     private EmailUtil emailUtil;
+
+    @Autowired
+    private RedisCacheUtil redisCacheUtil;
 
     @Override
     public Page<Map<String, Object>> getRiskList(Integer page, Integer size, String status) {
@@ -80,67 +90,14 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public Map<String, Object> getRiskReport(String applyId) {
-        RiskAssessment assessment = riskAssessmentMapper.selectOne(
-                new QueryWrapper<RiskAssessment>().eq("apply_id", applyId)
-        );
-        if (assessment == null) {
-            throw new RuntimeException("评估申请不存在");
+        String cacheKey = RedisCacheUtil.getRiskReportKey(applyId);
+        if (redisCacheUtil.exists(cacheKey)) {
+            Map<String, Object> cachedReport = redisCacheUtil.get(cacheKey, Map.class);
+            if (cachedReport != null) {
+                return cachedReport;
+            }
         }
-
-        Map<String, Object> report = new HashMap<>();
-
-        Map<String, Object> userDetails = new HashMap<>();
-        userDetails.put("name", assessment.getName().substring(0, 1) + "*");
-        userDetails.put("idCard", assessment.getIdCard().replaceAll("(\\d{3})\\d{9}(\\d{4})", "$1*********$2"));
-        userDetails.put("education", assessment.getEducation());
-        userDetails.put("marriage", assessment.getMarriage());
-        userDetails.put("jobType", assessment.getJobType());
-        userDetails.put("monthlyIncome", assessment.getMonthlyIncome());
-        userDetails.put("hasHouse", assessment.getHasHouse());
-        userDetails.put("hasCar", assessment.getHasCar());
-
-        report.put("userDetails", userDetails);
-        report.put("totalScore", assessment.getTotalScore());
-        report.put("systemDecision", assessment.getSysDecision());
-
-        Map<String, Object> scoringBreakdown = new HashMap<>();
-        Map<String, Object> profileScore = new HashMap<>();
-        profileScore.put("score", 45);
-        List<Map<String, Object>> profileDetails = new ArrayList<>();
-        Map<String, Object> profileItem1 = new HashMap<>();
-        profileItem1.put("item", "学历评估");
-        profileItem1.put("value", assessment.getEducation());
-        profileItem1.put("subScore", 15);
-        profileItem1.put("comment", "学历符合准入要求");
-        profileDetails.add(profileItem1);
-        profileScore.put("details", profileDetails);
-        scoringBreakdown.put("profileScore", profileScore);
-
-        Map<String, Object> capacityScore = new HashMap<>();
-        capacityScore.put("score", 30);
-        List<Map<String, Object>> capacityDetails = new ArrayList<>();
-        Map<String, Object> capacityItem1 = new HashMap<>();
-        capacityItem1.put("item", "收入水平评分");
-        capacityItem1.put("value", assessment.getMonthlyIncome());
-        capacityItem1.put("subScore", 20);
-        capacityItem1.put("comment", "申报收入极高");
-        capacityDetails.add(capacityItem1);
-        capacityScore.put("details", capacityDetails);
-        scoringBreakdown.put("capacityScore", capacityScore);
-
-        report.put("scoringBreakdown", scoringBreakdown);
-
-        List<Map<String, Object>> fusionComparison = new ArrayList<>();
-        Map<String, Object> fusionItem1 = new HashMap<>();
-        fusionItem1.put("dimension", "收入真实性");
-        fusionItem1.put("userFill", assessment.getMonthlyIncome());
-        fusionItem1.put("mockCheck", "模拟流水校验：月收入约8000");
-        fusionItem1.put("status", "WARNING");
-        fusionItem1.put("reason", "申报收入显著高于社保/流水推算值");
-        fusionComparison.add(fusionItem1);
-        report.put("fusionComparison", fusionComparison);
-
-        return report;
+        return new HashMap<>();
     }
 
     @Override
@@ -175,27 +132,26 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public Map<String, Object> getVintageData() {
         Map<String, Object> result = new HashMap<>();
-        List<String> months = List.of("2023-07", "2023-08", "2023-09", "2023-10");
+
+        List<VintageData> vintageDataList = vintageDataMapper.selectList(null);
+
+        List<String> months = vintageDataList.stream()
+                .map(VintageData::getMonth)
+                .collect(Collectors.toList());
         result.put("months", months);
 
         List<Map<String, Object>> vintageData = new ArrayList<>();
-        Map<String, Object> data1 = new HashMap<>();
-        data1.put("month", "2023-07");
-        data1.put("disbursedAmount", 500000);
-        data1.put("M1Rate", 0.02);
-        data1.put("M2Rate", 0.01);
-        data1.put("M3Rate", 0.005);
-        vintageData.add(data1);
-
-        Map<String, Object> data2 = new HashMap<>();
-        data2.put("month", "2023-08");
-        data2.put("disbursedAmount", 600000);
-        data2.put("M1Rate", 0.015);
-        data2.put("M2Rate", 0.008);
-        data2.put("M3Rate", 0.003);
-        vintageData.add(data2);
-
+        for (VintageData data : vintageDataList) {
+            Map<String, Object> dataMap = new HashMap<>();
+            dataMap.put("month", data.getMonth());
+            dataMap.put("disbursedAmount", data.getDisbursedAmount());
+            dataMap.put("M1Rate", data.getM1Rate());
+            dataMap.put("M2Rate", data.getM2Rate());
+            dataMap.put("M3Rate", data.getM3Rate());
+            vintageData.add(dataMap);
+        }
         result.put("vintageData", vintageData);
+
         return result;
     }
 

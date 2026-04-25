@@ -15,6 +15,7 @@ import org.example.risklendpro.pojo.response.RiskAssessmentStatusResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentResultResponse;
 import org.example.risklendpro.service.RiskAssessmentService;
 import org.example.risklendpro.utils.EmailUtil;
+import org.example.risklendpro.utils.RedisCacheUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -49,6 +50,9 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
     @Autowired
     private EmailUtil emailUtil;
+
+    @Autowired
+    private RedisCacheUtil redisCacheUtil;
 
     private final RestTemplate restTemplate = new RestTemplate();
     private static final String PYTHON_API_URL = "http://localhost:8000/predict";
@@ -290,6 +294,10 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         riskAssessment.setTotalScore(totalScore != null ? totalScore.intValue() : 0);
         riskAssessment.setSysDecision(sysDecision);
         riskAssessment.setApprovalTime(new Date());
+
+        // 将详细的风控报告存入Redis缓存
+        String cacheKey = RedisCacheUtil.getRiskReportKey(riskAssessment.getApplyId());
+        redisCacheUtil.set(cacheKey, pythonResponse);
 
         // 根据系统决策设置状态
         String status = "";
