@@ -1,0 +1,85 @@
+# 应用配置
+spring:
+  application:
+    name: RiskLendPro
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+  # 云端数据库
+  datasource:
+    url: jdbc:mysql://47.109.109.231:3306/RiskLendPro?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: admin
+    password: admin
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-timeout: 30000
+      maximum-pool-size: 10
+
+  # 邮件服务器配置
+  mail:
+    host: smtp.qq.com
+    port: 465
+    username: 3272548868@qq.com
+    password: zivjkqqmyqffchcf
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          socketFactory:
+            class: javax.net.ssl.SSLSocketFactory
+          auth: true
+          ssl:
+            enable: true
+          timeout: 5000
+          connectiontimeout: 5000
+          writetimeout: 5000
+        debug: true
+
+  # Redis配置
+  data:
+    redis:
+      host: 47.109.109.231
+      port: 6379
+      password: 123456
+      database: 0
+      timeout: 10000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1
+
+  # 安全配置
+  security:
+    user:
+      name: admin
+      password: admin
+
+# 服务器配置
+server:
+  port: 8080
+  servlet:
+    context-path: /api/v1
+
+# MyBatis-Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: org.example.risklendpro.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: assign_id
+
+# JWT配置
+jwt:
+  secret: your_jwt_secret_key_here
+  expire: 7200
+
+# 日志配置
+logging:
+  level:
+    root: info
+    org.example.risklendpro: debug
