@@ -3,22 +3,28 @@ package org.example.risklendpro.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.risklendpro.entity.Loan;
+import org.example.risklendpro.entity.RepaymentPlan;
+import org.example.risklendpro.entity.RepaymentRecord;
 import org.example.risklendpro.entity.User;
 import org.example.risklendpro.entity.UserCreditLimit;
 import org.example.risklendpro.enums.LoanStatusEnum;
 import org.example.risklendpro.mapper.LoanMapper;
+import org.example.risklendpro.mapper.RepaymentPlanMapper;
+import org.example.risklendpro.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.mapper.UserMapper;
 import org.example.risklendpro.pojo.request.LoanRequest;
 import org.example.risklendpro.pojo.response.LoanResponse;
 import org.example.risklendpro.service.LoanService;
 import org.example.risklendpro.utils.EmailUtil;
+import org.example.risklendpro.utils.RepaymentCalculator;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -36,9 +42,13 @@ public class LoanServiceImpl implements LoanService {
     private UserMapper userMapper;
 
     @Autowired
-    private EmailUtil emailUtil;
+    private RepaymentPlanMapper repaymentPlanMapper;
 
-    private static final String ADMIN_EMAIL = "admin@risklendpro.com"; // 管理员邮箱
+    @Autowired
+    private RepaymentRecordMapper repaymentRecordMapper;
+
+    @Autowired
+    private EmailUtil emailUtil;
 
     @Override
     @Transactional
@@ -85,7 +95,12 @@ public class LoanServiceImpl implements LoanService {
 
         loanMapper.insert(loan);
 
-        // 5. 发送邮件通知
+        // 6. 生成还款计划和还款记录（仅当自动审批通过时）
+        if (loan.getAutoApproved()) {
+            generateRepaymentPlan(loan, request.getRepaymentMethod());
+        }
+
+        // 7. 发送邮件通知
         sendLoanNotification(userId, request, remainingLimit, loan.getAutoApproved());
 
         // 6. 构建响应
@@ -225,6 +240,69 @@ public class LoanServiceImpl implements LoanService {
                     remainingLimit.toString()
             );
             
+        }
+    }
+
+    /**
+     * 生成还款计划和还款记录
+     */
+    private void generateRepaymentPlan(Loan loan, String repaymentMethod) {
+        // 1. 创建还款计划
+        RepaymentPlan plan = new RepaymentPlan();
+        plan.setLoanId(loan.getLoanId());
+        plan.setUserId(loan.getUserId());
+        plan.setTotalAmount(loan.getAmount());
+        plan.setPaidAmount(BigDecimal.ZERO);
+        plan.setRemainingAmount(loan.getAmount());
+        plan.setTotalPeriods(loan.getTermMonths());
+        plan.setCurrentPeriod(1);
+        plan.setStatus("ACTIVE");
+        plan.setCreateTime(new Date());
+        plan.setUpdateTime(new Date());
+        
+        repaymentPlanMapper.insert(plan);
+        
+        // 2. 计算每期还款金额
+        List<RepaymentCalculator.RepaymentDetail> details;
+        switch (repaymentMethod) {
+            case "等额本息":
+                details = RepaymentCalculator.calculateEqualPrincipalAndInterest(
+                        loan.getAmount(), loan.getInterestRate(), loan.getTermMonths());
+                break;
+            case "等额本金":
+                details = RepaymentCalculator.calculateEqualPrincipal(
+                        loan.getAmount(), loan.getInterestRate(), loan.getTermMonths());
+                break;
+            case "先息后本":
+                details = RepaymentCalculator.calculateInterestFirst(
+                        loan.getAmount(), loan.getInterestRate(), loan.getTermMonths());
+                break;
+            default:
+                throw new RuntimeException("不支持的还款方式: " + repaymentMethod);
+        }
+        
+        // 3. 创建还款记录
+        Date now = new Date();
+        for (RepaymentCalculator.RepaymentDetail detail : details) {
+            RepaymentRecord record = new RepaymentRecord();
+            record.setPlanId(plan.getPlanId());
+            record.setLoanId(loan.getLoanId());
+            record.setPeriod(detail.getPeriod());
+            record.setPrincipal(detail.getPrincipal());
+            record.setInterest(detail.getInterest());
+            record.setAmount(detail.getAmount());
+            record.setActualAmount(BigDecimal.ZERO);
+            
+            // 计算到期日
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTime(now);
+            calendar.add(Calendar.MONTH, detail.getPeriod());
+            record.setDueDate(calendar.getTime());
+            
+            record.setStatus("PENDING");
+            record.setCreateTime(now);
+            
+            repaymentRecordMapper.insert(record);
         }
     }
 }

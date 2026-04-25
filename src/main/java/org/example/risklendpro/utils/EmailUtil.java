@@ -86,4 +86,65 @@ public class EmailUtil {
                 "RiskLendPro团队";
         sendSimpleEmail(userEmail, subject, content);
     }
+
+    /**
+     * 发送还款提醒通知（到期前3天）
+     * @param userEmail 用户邮箱
+     * @param userName 用户名
+     * @param period 期数
+     * @param amount 还款金额
+     * @param dueDate 到期日期
+     */
+    public void sendRepaymentReminderNotification(String userEmail, String userName, int period, String amount, String dueDate) {
+        String subject = "【RiskLendPro】还款提醒 - 还款即将到期";
+        String content = "尊敬的" + userName + "先生/女士：\n\n" +
+                "您的还款即将到期，请提前做好准备：\n\n" +
+                "期数：第" + period + "期\n" +
+                "还款金额：" + amount + "元\n" +
+                "到期日期：" + dueDate + "\n\n" +
+                "请确保您的账户余额充足，按时还款以保持良好的信用记录。\n\n" +
+                "此致\n" +
+                "RiskLendPro团队";
+        sendSimpleEmail(userEmail, subject, content);
+    }
+
+    /**
+     * 发送还款到期提醒（到期当天）
+     * @param userEmail 用户邮箱
+     * @param userName 用户名
+     * @param period 期数
+     * @param amount 还款金额
+     */
+    public void sendRepaymentDueTodayNotification(String userEmail, String userName, int period, String amount) {
+        String subject = "【RiskLendPro】还款提醒 - 今日为还款日";
+        String content = "尊敬的" + userName + "先生/女士：\n\n" +
+                "今天是您的还款日，请尽快完成还款：\n\n" +
+                "期数：第" + period + "期\n" +
+                "还款金额：" + amount + "元\n\n" +
+                "请确保账户余额充足，及时还款避免逾期影响信用记录。\n\n" +
+                "此致\n" +
+                "RiskLendPro团队";
+        sendSimpleEmail(userEmail, subject, content);
+    }
+
+    /**
+     * 发送逾期通知（逾期第一天）
+     * @param userEmail 用户邮箱
+     * @param userName 用户名
+     * @param period 期数
+     * @param overdueDays 逾期天数
+     * @param amount 还款金额
+     */
+    public void sendOverdueNotification(String userEmail, String userName, int period, int overdueDays, String amount) {
+        String subject = "【RiskLendPro】重要提醒 - 您的还款已逾期";
+        String content = "尊敬的" + userName + "先生/女士：\n\n" +
+                "您的还款已发生逾期，请尽快处理：\n\n" +
+                "期数：第" + period + "期\n" +
+                "逾期天数：" + overdueDays + "天\n" +
+                "还款金额：" + amount + "元\n\n" +
+                "逾期将会影响您的信用记录，请尽快还款。连续逾期可能导致额度降低或借款功能受限。\n\n" +
+                "此致\n" +
+                "RiskLendPro团队";
+        sendSimpleEmail(userEmail, subject, content);
+    }
 }

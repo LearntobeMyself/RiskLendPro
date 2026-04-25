@@ -195,7 +195,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
      * 异步调用 Python 接口进行风控评估
      */
     @Async
-    private void callPythonRiskAssessment(RiskAssessment riskAssessment, RiskAssessmentRequest request) {
+    public void callPythonRiskAssessment(RiskAssessment riskAssessment, RiskAssessmentRequest request) {
         try {
             // 1. 构建请求数据
             Map<String, Object> requestData = new HashMap<>();
@@ -280,7 +280,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
      * 根据 Python 接口返回的结果更新评估记录
      */
     @Transactional
-    private void updateAssessmentResult(RiskAssessment riskAssessment, Map<String, Object> pythonResponse) {
+    public void updateAssessmentResult(RiskAssessment riskAssessment, Map<String, Object> pythonResponse) {
         // 解析 Python 响应
         Double totalScore = (Double) pythonResponse.get("total_score");
         String sysDecision = (String) pythonResponse.get("sys_decision");
