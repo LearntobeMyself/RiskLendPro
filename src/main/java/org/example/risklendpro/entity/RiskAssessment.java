@@ -1,6 +1,8 @@
 package org.example.risklendpro.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import java.math.BigDecimal;
@@ -9,6 +11,8 @@ import java.util.Date;
 @Data
 @TableName("risk_assessment")
 public class RiskAssessment {
+    //TODO：风险评估有点问题，JWT身份认证，过期时间
+    @TableId(type = IdType.INPUT)
     @TableField("apply_id")
     private String applyId;
     @TableField("user_id")

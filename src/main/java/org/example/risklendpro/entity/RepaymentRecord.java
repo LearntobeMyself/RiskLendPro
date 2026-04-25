@@ -1,6 +1,8 @@
 package org.example.risklendpro.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import java.math.BigDecimal;
@@ -9,6 +11,7 @@ import java.util.Date;
 @Data
 @TableName("repayment_record")
 public class RepaymentRecord {
+    @TableId(type = IdType.AUTO)
     @TableField("record_id")
     private Long recordId;
     @TableField("plan_id")

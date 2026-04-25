@@ -88,6 +88,26 @@ public class EmailUtil {
     }
 
     /**
+     * 发送借款拒绝通知
+     * @param userEmail 用户邮箱
+     * @param userName 用户名
+     * @param loanAmount 借款金额
+     * @param reason 拒绝原因
+     */
+    public void sendLoanRejectNotification(String userEmail, String userName, String loanAmount, String reason) {
+        String subject = "【RiskLendPro】借款申请审批结果通知";
+        String content = "尊敬的" + userName + "先生/女士：\n\n" +
+                "您的借款申请已处理，详情如下：\n\n" +
+                "借款金额：" + loanAmount + "元\n" +
+                "状态：已拒绝\n" +
+                "拒绝原因：" + reason + "\n\n" +
+                "如有疑问，请联系客服。\n\n" +
+                "此致\n" +
+                "RiskLendPro团队";
+        sendSimpleEmail(userEmail, subject, content);
+    }
+
+    /**
      * 发送还款提醒通知（到期前3天）
      * @param userEmail 用户邮箱
      * @param userName 用户名

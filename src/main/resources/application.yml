@@ -14,7 +14,6 @@ spring:
     hikari:
       connection-timeout: 30000
       maximum-pool-size: 10
-
   # 邮件服务器配置
   mail:
     host: smtp.qq.com
