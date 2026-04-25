@@ -1,16 +1,22 @@
 package org.example.risklendpro.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.risklendpro.entity.Loan;
+import org.example.risklendpro.entity.User;
+import org.example.risklendpro.entity.UserCreditLimit;
 import org.example.risklendpro.enums.LoanStatusEnum;
 import org.example.risklendpro.mapper.LoanMapper;
+import org.example.risklendpro.mapper.UserCreditLimitMapper;
+import org.example.risklendpro.mapper.UserMapper;
 import org.example.risklendpro.pojo.request.LoanRequest;
 import org.example.risklendpro.pojo.response.LoanResponse;
 import org.example.risklendpro.service.LoanService;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.utils.EmailUtil;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Date;
@@ -23,14 +29,35 @@ public class LoanServiceImpl implements LoanService {
     @Autowired
     private LoanMapper loanMapper;
 
+    @Autowired
+    private UserCreditLimitMapper userCreditLimitMapper;
+
+    @Autowired
+    private UserMapper userMapper;
+
+    @Autowired
+    private EmailUtil emailUtil;
+
+    private static final String ADMIN_EMAIL = "admin@risklendpro.com"; // 管理员邮箱
+
     @Override
+    @Transactional
     public LoanResponse requestLoan(Long userId, LoanRequest request) {
-        // TODO: 检查用户是否有未处理逾期
+        // 1. 检查用户是否有未处理逾期
+        checkOverdue(userId);
 
-        // TODO: 检查用户剩余额度
-        BigDecimal remainingLimit = new BigDecimal("20000"); // 模拟剩余额度
+        // 2. 检查用户剩余额度
+        UserCreditLimit creditLimit = getUserCreditLimit(userId);
+        if (creditLimit == null) {
+            throw new RuntimeException("用户尚未完成授信评估，无法借款");
+        }
 
-        // 保存贷款记录
+        BigDecimal remainingLimit = creditLimit.getRemainingLimit();
+        if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RuntimeException("您的额度已用完，无法借款");
+        }
+
+        // 3. 保存贷款记录
         Loan loan = new Loan();
         loan.setUserId(userId);
         loan.setAmount(request.getAmount());
@@ -41,21 +68,27 @@ public class LoanServiceImpl implements LoanService {
         loan.setCreateTime(new Date());
         loan.setUpdateTime(new Date());
 
+        // 4. 根据额度判断处理方式
         if (request.getAmount().compareTo(remainingLimit) <= 0) {
-            // 额度内借款，自动审批通过
+            // 4.1 额度内借款，自动审批通过
             loan.setStatus(LoanStatusEnum.DISBURRSED.getCode());
             loan.setDisbursementTime(new Date());
             loan.setAutoApproved(true);
-            // TODO: 扣减额度
+            
+            // 4.2 扣减额度
+            deductCreditLimit(creditLimit, request.getAmount());
         } else {
-            // 额度外借款，需要审批
+            // 4.3 额度外借款，需要审批
             loan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
             loan.setAutoApproved(false);
         }
 
         loanMapper.insert(loan);
 
-        // 构建响应
+        // 5. 发送邮件通知
+        sendLoanNotification(userId, request, remainingLimit, loan.getAutoApproved());
+
+        // 6. 构建响应
         LoanResponse response = new LoanResponse();
         BeanUtils.copyProperties(loan, response);
         if (loan.getAutoApproved()) {
@@ -126,5 +159,72 @@ public class LoanServiceImpl implements LoanService {
         resultPage.setPages(loanPage.getPages());
         
         return resultPage;
+    }
+
+    /**
+     * 检查用户是否有未处理逾期
+     */
+    private void checkOverdue(Long userId) {
+        QueryWrapper<Loan> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("user_id", userId);
+        queryWrapper.eq("status", LoanStatusEnum.OVERDUE.getCode());
+        
+        long overdueCount = loanMapper.selectCount(queryWrapper);
+        if (overdueCount > 0) {
+            throw new RuntimeException("存在未处理逾期记录，无法发起新借款");
+        }
+    }
+
+    /**
+     * 获取用户信用额度
+     */
+    private UserCreditLimit getUserCreditLimit(Long userId) {
+        return userCreditLimitMapper.selectOne(
+                new QueryWrapper<UserCreditLimit>().eq("user_id", userId)
+        );
+    }
+
+    /**
+     * 扣减用户信用额度
+     */
+    private void deductCreditLimit(UserCreditLimit creditLimit, BigDecimal amount) {
+        // 计算新的已用额度和剩余额度
+        BigDecimal newUsedLimit = creditLimit.getUsedLimit().add(amount);
+        BigDecimal newRemainingLimit = creditLimit.getTotalLimit().subtract(newUsedLimit);
+        
+        // 更新额度记录
+        creditLimit.setUsedLimit(newUsedLimit);
+        creditLimit.setRemainingLimit(newRemainingLimit);
+        creditLimit.setLastUpdateTime(new Date());
+        
+        userCreditLimitMapper.updateById(creditLimit);
+    }
+
+    /**
+     * 发送借款通知
+     */
+    private void sendLoanNotification(Long userId, LoanRequest request, BigDecimal remainingLimit, boolean autoApproved) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            return;
+        }
+
+        if (autoApproved) {
+            // 发送借款成功通知给用户
+            emailUtil.sendLoanSuccessNotification(
+                    user.getEmail(),
+                    user.getRealName(),
+                    request.getAmount().toString()
+            );
+        } else {
+            // 发送借款审批通知给用户
+            emailUtil.sendLoanApprovalNotification(
+                    user.getEmail(),
+                    user.getRealName(),
+                    request.getAmount().toString(),
+                    remainingLimit.toString()
+            );
+            
+        }
     }
 }

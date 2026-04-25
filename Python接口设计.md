@@ -46,30 +46,30 @@
 
 **字段说明**:
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_data | Object | 是 | 用户自填数据 |
-| user_data.idCard | String | 是 | 身份证号 |
-| user_data.name | String | 是 | 用户姓名 |
-| user_data.phone | String | 是 | 手机号码 |
-| user_data.email | String | 是 | 邮箱 |
-| user_data.gender | Integer | 是 | 性别（0-女, 1-男） |
-| user_data.birthday | String | 是 | 出生日期（YYYY-MM-DD） |
-| user_data.education | String | 是 | 教育程度 |
-| user_data.marriage | String | 是 | 婚姻状况 |
-| user_data.jobType | String | 是 | 职业类型 |
-| user_data.monthlyIncome | String | 是 | 月收入 |
-| user_data.hasHouse | Boolean | 是 | 是否有房 |
-| user_data.hasCar | Boolean | 是 | 是否有车 |
-| user_data.contactPhone | String | 是 | 紧急联系人电话 |
-| mock_data | Object | 是 | 模拟征信数据 |
-| mock_data.isBlacklist | Boolean | 是 | 是否黑名单 |
-| mock_data.overdueCount | Integer | 是 | 逾期次数 |
-| mock_data.loanCount | Integer | 是 | 多头借贷平台数 |
-| mock_data.recentQueryCount | Integer | 是 | 近期查询次数 |
-| behavior_data | Object | 是 | 行为与环境数据 |
-| behavior_data.applyTime | String | 是 | 申请时间（YYYY-MM-DD HH:MM:SS） |
-| behavior_data.isEmulator | Boolean | 是 | 是否模拟器 |
+| 字段                          | 类型      | 必填 | 说明                        |
+| --------------------------- | ------- | -- | ------------------------- |
+| user\_data                  | Object  | 是  | 用户自填数据                    |
+| user\_data.idCard           | String  | 是  | 身份证号                      |
+| user\_data.name             | String  | 是  | 用户姓名                      |
+| user\_data.phone            | String  | 是  | 手机号码                      |
+| user\_data.email            | String  | 是  | 邮箱                        |
+| user\_data.gender           | Integer | 是  | 性别（0-女, 1-男）              |
+| user\_data.birthday         | String  | 是  | 出生日期（YYYY-MM-DD）          |
+| user\_data.education        | String  | 是  | 教育程度                      |
+| user\_data.marriage         | String  | 是  | 婚姻状况                      |
+| user\_data.jobType          | String  | 是  | 职业类型                      |
+| user\_data.monthlyIncome    | String  | 是  | 月收入                       |
+| user\_data.hasHouse         | Boolean | 是  | 是否有房                      |
+| user\_data.hasCar           | Boolean | 是  | 是否有车                      |
+| user\_data.contactPhone     | String  | 是  | 紧急联系人电话                   |
+| mock\_data                  | Object  | 是  | 模拟征信数据                    |
+| mock\_data.isBlacklist      | Boolean | 是  | 是否黑名单                     |
+| mock\_data.overdueCount     | Integer | 是  | 逾期次数                      |
+| mock\_data.loanCount        | Integer | 是  | 多头借贷平台数                   |
+| mock\_data.recentQueryCount | Integer | 是  | 近期查询次数                    |
+| behavior\_data              | Object  | 是  | 行为与环境数据                   |
+| behavior\_data.applyTime    | String  | 是  | 申请时间（YYYY-MM-DD HH:MM:SS） |
+| behavior\_data.isEmulator   | Boolean | 是  | 是否模拟器                     |
 
 #### 响应体 (Response Body)
 
@@ -201,17 +201,17 @@
 
 **字段说明**:
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| total_score | Float | 总评分（0-100） |
-| sys_decision | String | 系统决策（APPROVE/REVIEW/REJECT） |
-| credit_limit | Integer | 授信额度 |
-| scoring_breakdown | Object | 评分详细拆解 |
-| scoring_breakdown.profile_score | Object | 基础画像评分 |
-| scoring_breakdown.capacity_score | Object | 经济实力评分 |
-| scoring_breakdown.external_risk_adj | Object | 外部风险调整 |
-| scoring_breakdown.behavior_adj | Object | 行为调整 |
-| fusion_comparison | Array | 数据融合比对 |
+| 字段                                     | 类型      | 说明                   |
+| -------------------------------------- | ------- | -------------------- |
+| total\_score                           | Float   | 总评分（0-100）           |
+| sys\_decision                          | String  | 系统决策（APPROVE/REJECT） |
+| credit\_limit                          | Integer | 授信额度                 |
+| scoring\_breakdown                     | Object  | 评分详细拆解               |
+| scoring\_breakdown.profile\_score      | Object  | 基础画像评分               |
+| scoring\_breakdown.capacity\_score     | Object  | 经济实力评分               |
+| scoring\_breakdown.external\_risk\_adj | Object  | 外部风险调整               |
+| scoring\_breakdown.behavior\_adj       | Object  | 行为调整                 |
+| fusion\_comparison                     | Array   | 数据融合比对               |
 
 ### 2.2 健康检查接口
 
