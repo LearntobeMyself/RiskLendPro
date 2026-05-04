@@ -5,13 +5,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.risklendpro.pojo.request.LimitAdjustRequest;
 import org.example.risklendpro.pojo.request.RiskApproveRequest;
 import org.example.risklendpro.pojo.request.LoanApproveRequest;
-import org.example.risklendpro.pojo.request.MockDataUpdateRequest;
 import org.example.risklendpro.pojo.response.CommonResponse;
-import org.example.risklendpro.pojo.response.LimitAdjustResponse;
 import org.example.risklendpro.pojo.response.LoanApproveResponse;
 import org.example.risklendpro.service.AdminService;
 import org.example.risklendpro.service.UserCreditLimitService;
-import org.example.risklendpro.utils.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,8 +17,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import jakarta.servlet.http.HttpServletRequest;
 
 @Tag(name = "管理员审批与看板模块", description = "管理员审批和数据分析相关接口")
 @RestController
@@ -89,10 +84,4 @@ public class AdminController {
         return CommonResponse.success("审批成功，已邮件通知用户", response);
     }
 
-    @Operation(summary = "更新模拟数据", description = "管理员为某个身份证号设置\"黑名单\"或\"逾期次数\"等模拟数据")
-    @PostMapping("/mock/update")
-    public CommonResponse<Void> mockUpdate(@RequestBody MockDataUpdateRequest request) {
-        adminService.updateMockData(request);
-        return CommonResponse.success(null);
-    }
 }

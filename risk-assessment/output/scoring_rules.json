@@ -1,0 +1,317 @@
+{
+  "version": "v3.0",
+  "description": "基于LendingClub数据训练的评分规则，优化版",
+  "feature_weights": {
+    "age": -0.18716646822058758,
+    "income": -4.8058222476140185e-05,
+    "multi_head_loan_count": -0.12116818587614542,
+    "credit_query_count_3m": 0.16909540672093953,
+    "overdue_count_12m": 6.364955822920818,
+    "dti": -0.08805685011485952,
+    "device_is_virtual": -0.007063011286260459,
+    "ip_is_proxy": 0.002414552939400228,
+    "age_bin_age_26_35": -0.022611489688241865,
+    "age_bin_age_36_50": -0.01739916509081645,
+    "age_bin_age_51_plus": 0.030240240252102864,
+    "income_bin_income_5000_15000": -0.1091841788927219,
+    "income_bin_income_15000_plus": 0.015145505729234341,
+    "multi_head_bin_multi_head_4_6": -0.030894255378268554,
+    "multi_head_bin_multi_head_7_plus": -0.02725333795512888,
+    "credit_query_bin_credit_query_4_8": 0.000775726381348959,
+    "credit_query_bin_credit_query_9_plus": 0.0,
+    "overdue_bin_overdue_12m_1_2": 0.0,
+    "overdue_bin_overdue_12m_3_plus": 2.1216519409224435,
+    "dti_bin_dti_medium": 0.005795826587311769,
+    "dti_bin_dti_high": 0.0
+  },
+  "intercept": -0.028473600448408246,
+  "thresholds": {
+    "auto_approve": 75,
+    "manual_review": 50
+  },
+  "scorecard": {
+    "base_score": 600,
+    "pdo": 80,
+    "target_score": 70,
+    "target_odds": 1
+  },
+  "feature_scores": {
+    "age": {
+      "description": "年龄评分",
+      "groups": [
+        {
+          "range": [
+            22,
+            25
+          ],
+          "score": -10,
+          "reason": "年轻，还款能力不稳定"
+        },
+        {
+          "range": [
+            25,
+            30
+          ],
+          "score": -5,
+          "reason": "较年轻"
+        },
+        {
+          "range": [
+            30,
+            40
+          ],
+          "score": 8,
+          "reason": "黄金年龄段，还款能力强"
+        },
+        {
+          "range": [
+            40,
+            50
+          ],
+          "score": 5,
+          "reason": "稳定年龄段"
+        },
+        {
+          "range": [
+            50,
+            60
+          ],
+          "score": -3,
+          "reason": "年龄较大"
+        }
+      ]
+    },
+    "income": {
+      "description": "月收入评分",
+      "groups": [
+        {
+          "range": [
+            0,
+            3000
+          ],
+          "score": -15,
+          "reason": "收入较低"
+        },
+        {
+          "range": [
+            3000,
+            8000
+          ],
+          "score": -5,
+          "reason": "收入一般"
+        },
+        {
+          "range": [
+            8000,
+            15000
+          ],
+          "score": 5,
+          "reason": "收入中等"
+        },
+        {
+          "range": [
+            15000,
+            999999
+          ],
+          "score": 15,
+          "reason": "收入较高"
+        }
+      ]
+    },
+    "multi_head_loan_count": {
+      "description": "多头借贷评分",
+      "groups": [
+        {
+          "range": [
+            0,
+            3
+          ],
+          "score": 0,
+          "reason": "正常"
+        },
+        {
+          "range": [
+            3,
+            6
+          ],
+          "score": -10,
+          "reason": "中等多头"
+        },
+        {
+          "range": [
+            6,
+            10
+          ],
+          "score": -20,
+          "reason": "高多头"
+        },
+        {
+          "range": [
+            10,
+            999
+          ],
+          "score": -30,
+          "reason": "极高多头"
+        }
+      ]
+    },
+    "credit_query_count_3m": {
+      "description": "征信查询评分",
+      "groups": [
+        {
+          "range": [
+            0,
+            3
+          ],
+          "score": 0,
+          "reason": "正常"
+        },
+        {
+          "range": [
+            3,
+            6
+          ],
+          "score": -5,
+          "reason": "查询较多"
+        },
+        {
+          "range": [
+            6,
+            10
+          ],
+          "score": -10,
+          "reason": "查询频繁"
+        },
+        {
+          "range": [
+            10,
+            999
+          ],
+          "score": -15,
+          "reason": "异常频繁"
+        }
+      ]
+    },
+    "overdue_count_12m": {
+      "description": "逾期评分",
+      "groups": [
+        {
+          "range": [
+            0,
+            1
+          ],
+          "score": 0,
+          "reason": "无逾期"
+        },
+        {
+          "range": [
+            1,
+            2
+          ],
+          "score": -15,
+          "reason": "有逾期记录"
+        },
+        {
+          "range": [
+            2,
+            3
+          ],
+          "score": -25,
+          "reason": "多次逾期"
+        },
+        {
+          "range": [
+            3,
+            99
+          ],
+          "score": -40,
+          "reason": "严重逾期"
+        }
+      ]
+    },
+    "dti": {
+      "description": "负债收入比评分",
+      "groups": [
+        {
+          "range": [
+            0,
+            15
+          ],
+          "score": 5,
+          "reason": "负债低"
+        },
+        {
+          "range": [
+            15,
+            30
+          ],
+          "score": 0,
+          "reason": "负债正常"
+        },
+        {
+          "range": [
+            30,
+            100
+          ],
+          "score": -15,
+          "reason": "负债较高"
+        }
+      ]
+    },
+    "job_type": {
+      "description": "工作类型评分",
+      "scores": {
+        "公务员": 15,
+        "企事业单位": 10,
+        "私营企业": 0,
+        "其他": -5
+      }
+    },
+    "education": {
+      "description": "学历评分",
+      "scores": {
+        "博士": 15,
+        "硕士": 10,
+        "本科": 5,
+        "高中及以下": -5
+      }
+    },
+    "has_house": {
+      "description": "房产评分",
+      "has": 10,
+      "none": 0
+    },
+    "has_car": {
+      "description": "车产评分",
+      "has": 5,
+      "none": 0
+    },
+    "marriage": {
+      "description": "婚姻评分",
+      "married": 5,
+      "single": 0
+    }
+  },
+  "training_data": {
+    "total_count": 39786,
+    "default_rate": 0.14251244156235862,
+    "avg_age": 40.48811139596843,
+    "avg_income": 5748.255562928333,
+    "avg_multi_head": 9.294023023173981,
+    "avg_credit_query": 0.2558186296687277,
+    "feature_correlations": {
+      "overdue_count_12m": 1.0,
+      "multi_head_loan_count": -0.0102,
+      "credit_query_count_3m": 0.055,
+      "income": -0.0412,
+      "dti": 0.042,
+      "age": -0.0014
+    }
+  },
+  "model_metrics": {
+    "accuracy": 1.0,
+    "auc": 1.0,
+    "avg_prob_default": 0.1397,
+    "avg_score": 90
+  }
+}

@@ -1,11 +1,10 @@
 package org.example.risklendpro.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import org.example.risklendpro.entity.MockData;
 import org.example.risklendpro.entity.RiskAssessment;
 import org.example.risklendpro.entity.User;
 import org.example.risklendpro.entity.UserCreditLimit;
-import org.example.risklendpro.mapper.MockDataMapper;
+import org.example.risklendpro.enums.StatusEnum;
 import org.example.risklendpro.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.mapper.UserMapper;
@@ -13,23 +12,20 @@ import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 import org.example.risklendpro.pojo.response.RiskAssessmentResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentStatusResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentResultResponse;
+import org.example.risklendpro.service.CreditScoreEngine;
 import org.example.risklendpro.service.RiskAssessmentService;
 import org.example.risklendpro.utils.EmailUtil;
 import org.example.risklendpro.utils.RedisCacheUtil;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
-import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -46,7 +42,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     private UserCreditLimitMapper userCreditLimitMapper;
 
     @Autowired
-    private MockDataMapper mockDataMapper;
+    private CreditScoreEngine creditScoreEngine;
 
     @Autowired
     private EmailUtil emailUtil;
@@ -54,33 +50,26 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     @Autowired
     private RedisCacheUtil redisCacheUtil;
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private static final String PYTHON_API_URL = "http://localhost:8000/predict";
-
     @Override
     @Transactional
     public RiskAssessmentResponse submit(Long userId, RiskAssessmentRequest request) {
-        // 1. 通过userId查询用户
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new RuntimeException("用户不存在");
         }
 
-        // 2. 检查用户是否已有正在处理中的评估申请
         RiskAssessment existingAssessment = riskAssessmentMapper.selectOne(
                 new QueryWrapper<RiskAssessment>()
                         .eq("user_id", userId)
-                        .in("status", "WAITING", "MANUAL_REVIEW")
+                        .eq("status", "WAITING")
                         .eq("is_final", false)
         );
         if (existingAssessment != null) {
             throw new RuntimeException("您已有正在处理中的评估申请，请等待处理完成");
         }
 
-        // 3. 生成申请ID
         String applyId = generateApplyId();
 
-        // 4. 构建风控评估对象并保存到数据库
         RiskAssessment riskAssessment = new RiskAssessment();
         riskAssessment.setApplyId(applyId);
         riskAssessment.setUserId(userId);
@@ -97,20 +86,17 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         riskAssessment.setHasHouse(request.getHasHouse());
         riskAssessment.setHasCar(request.getHasCar());
         riskAssessment.setContactPhone(request.getContactPhone());
-        riskAssessment.setStatus("WAITING");
+        riskAssessment.setStatus(StatusEnum.WAITING.getValue());
         riskAssessment.setSubmitTime(new Date());
         riskAssessment.setIsFinal(false);
 
         riskAssessmentMapper.insert(riskAssessment);
 
-        // 5. 更新用户评估状态为评估中
-        user.setAssessmentStatus("ASSESSING");
+        user.setAssessmentStatus(StatusEnum.WAITING.getValue());
         userMapper.updateById(user);
 
-        // 6. 异步调用 Python 进行风控评估
-        callPythonRiskAssessment(riskAssessment, request);
+        executeRiskAssessment(riskAssessment, request);
 
-        // 7. 构建响应
         RiskAssessmentResponse response = new RiskAssessmentResponse();
         response.setApplyId(applyId);
         response.setSubmitTime(riskAssessment.getSubmitTime());
@@ -151,14 +137,12 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             throw new RuntimeException("评估尚未完成");
         }
 
-        // 如果评估通过且有额度，创建用户额度记录
-        if ("FINAL_PASS".equals(riskAssessment.getStatus()) && riskAssessment.getCreditLimit() != null) {
+        if (StatusEnum.FINAL_PASS.getValue().equals(riskAssessment.getStatus()) && riskAssessment.getCreditLimit() != null) {
             UserCreditLimit existingLimit = userCreditLimitMapper.selectOne(
                     new QueryWrapper<UserCreditLimit>().eq("user_id", riskAssessment.getUserId())
             );
 
             if (existingLimit == null) {
-                // 创建新的额度记录
                 UserCreditLimit creditLimit = new UserCreditLimit();
                 creditLimit.setUserId(riskAssessment.getUserId());
                 creditLimit.setTotalLimit(riskAssessment.getCreditLimit());
@@ -169,14 +153,12 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                 creditLimit.setLastUpdateTime(new Date());
                 userCreditLimitMapper.insert(creditLimit);
             } else {
-                // 更新现有额度记录
                 existingLimit.setTotalLimit(riskAssessment.getCreditLimit());
                 existingLimit.setRemainingLimit(riskAssessment.getCreditLimit().subtract(existingLimit.getUsedLimit()));
                 existingLimit.setLastUpdateTime(new Date());
                 userCreditLimitMapper.updateById(existingLimit);
             }
 
-            // 更新用户评估状态为已通过
             User user = userMapper.selectById(riskAssessment.getUserId());
             if (user != null) {
                 user.setAssessmentStatus("APPROVED");
@@ -195,179 +177,165 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         return response;
     }
 
-    /**
-     * 异步调用 Python 接口进行风控评估
-     */
-    @Async
-    public void callPythonRiskAssessment(RiskAssessment riskAssessment, RiskAssessmentRequest request) {
+    @Transactional
+    public void executeRiskAssessment(RiskAssessment riskAssessment, RiskAssessmentRequest request) {
         try {
-            // 1. 构建请求数据
-            Map<String, Object> requestData = new HashMap<>();
+            String idCard = request.getIdCard();
 
-            // 用户数据
-            Map<String, Object> userData = new HashMap<>();
-            userData.put("idCard", request.getIdCard());
-            userData.put("name", request.getName());
-            userData.put("phone", request.getPhone());
-            userData.put("email", request.getEmail());
-            userData.put("gender", request.getGender());
-            userData.put("birthday", request.getBirthday());
-            userData.put("education", request.getEducation());
-            userData.put("marriage", request.getMarriage());
-            userData.put("jobType", request.getJobType());
-            userData.put("monthlyIncome", request.getMonthlyIncome());
-            userData.put("hasHouse", request.getHasHouse());
-            userData.put("hasCar", request.getHasCar());
-            userData.put("contactPhone", request.getContactPhone());
+            if (creditScoreEngine.isInBlacklist(idCard)) {
+                riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+                riskAssessment.setSysDecision("REJECT");
+                riskAssessment.setTotalScore(0);
+                riskAssessment.setCreditLimit(BigDecimal.ZERO);
+                riskAssessment.setIsFinal(true);
+                riskAssessment.setAuditRemark("命中黑名单");
+                riskAssessment.setApprovalTime(new Date());
+                riskAssessmentMapper.updateById(riskAssessment);
 
-            // 从数据库查询模拟征信数据
-            Map<String, Object> mockData = getMockDataFromDatabase(request.getIdCard());
-
-            // 行为数据
-            Map<String, Object> behaviorData = new HashMap<>();
-            behaviorData.put("applyTime", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
-            behaviorData.put("isEmulator", false);
-
-            requestData.put("user_data", userData);
-            requestData.put("mock_data", mockData);
-            requestData.put("behavior_data", behaviorData);
-
-            // 2. 构建请求头
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestData, headers);
-
-            // 3. 调用 Python 接口
-            Map<String, Object> response = restTemplate.postForObject(PYTHON_API_URL, entity, Map.class);
-
-            // 4. 处理响应
-            if (response != null) {
-                updateAssessmentResult(riskAssessment, response);
+                sendNotification(riskAssessment, "评估拒绝", "0");
+                return;
             }
+
+            int score = creditScoreEngine.calculateScore(request);
+
+            String decision = creditScoreEngine.getDecision(score);
+
+            double creditLimit = creditScoreEngine.calculateCreditLimitWithFeatures(
+                score, request.getMonthlyIncome(), request.getIdCard());
+
+            riskAssessment.setTotalScore(score);
+            riskAssessment.setSysDecision(decision);
+            riskAssessment.setApprovalTime(new Date());
+
+            Map<String, Object> report = buildRiskReport(request, score, decision, creditLimit);
+            String cacheKey = RedisCacheUtil.getRiskReportKey(riskAssessment.getApplyId());
+            redisCacheUtil.set(cacheKey, report);
+
+            switch (decision) {
+                case "APPROVE":
+                    riskAssessment.setStatus(StatusEnum.FINAL_PASS.getValue());
+                    riskAssessment.setIsFinal(true);
+                    if (creditLimit > 0) {
+                        riskAssessment.setCreditLimit(BigDecimal.valueOf(creditLimit));
+                        Calendar calendar = Calendar.getInstance();
+                        calendar.add(Calendar.YEAR, 1);
+                        riskAssessment.setExpireDate(calendar.getTime());
+                    }
+                    sendNotification(riskAssessment, "评估通过", String.valueOf((int) creditLimit));
+                    break;
+                case "REVIEW":
+                    riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+                    riskAssessment.setIsFinal(false);
+                    break;
+                case "REJECT":
+                    riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+                    riskAssessment.setIsFinal(true);
+                    riskAssessment.setCreditLimit(BigDecimal.ZERO);
+                    sendNotification(riskAssessment, "评估拒绝", "0");
+                    break;
+            }
+
+            riskAssessmentMapper.updateById(riskAssessment);
+
         } catch (Exception e) {
-            // 处理异常，更新评估状态为失败
-            riskAssessment.setStatus("SYSTEM_REJECT");
+            riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
             riskAssessment.setIsFinal(true);
-            riskAssessment.setAuditRemark("风控评估服务异常: " + e.getMessage());
+            riskAssessment.setAuditRemark("风控评估异常: " + e.getMessage());
             riskAssessmentMapper.updateById(riskAssessment);
         }
     }
 
-    /**
-     * 从数据库查询模拟征信数据
-     */
-    private Map<String, Object> getMockDataFromDatabase(String idCard) {
-        Map<String, Object> mockData = new HashMap<>();
-        
-        // 根据身份证号查询模拟数据
-        MockData data = mockDataMapper.selectOne(
-                new QueryWrapper<MockData>().eq("id_card", idCard)
-        );
-        
-        if (data != null) {
-            mockData.put("isBlacklist", data.getIsBlacklist());
-            mockData.put("overdueCount", data.getOverdueCount());
-            mockData.put("loanCount", data.getLoanCount());
-            mockData.put("recentQueryCount", data.getRecentQueryCount());
-        } else {
-            // 如果没有找到模拟数据，使用默认值
-            mockData.put("isBlacklist", false);
-            mockData.put("overdueCount", 0);
-            mockData.put("loanCount", 0);
-            mockData.put("recentQueryCount", 0);
+    private Map<String, Object> buildRiskReport(RiskAssessmentRequest request, int score, String decision, double creditLimit) {
+        Map<String, Object> report = new HashMap<>();
+
+        CreditScoreEngine.ScoreDetailReport detailReport = creditScoreEngine.getScoreDetailReport(request);
+
+        Map<String, Object> userDetails = new HashMap<>();
+        userDetails.put("name", maskName(request.getName()));
+        userDetails.put("idCard", maskIdCard(request.getIdCard()));
+        userDetails.put("education", request.getEducation());
+        userDetails.put("marriage", request.getMarriage());
+        userDetails.put("jobType", request.getJobType());
+        userDetails.put("monthlyIncome", request.getMonthlyIncome());
+        userDetails.put("hasHouse", request.getHasHouse());
+        userDetails.put("hasCar", request.getHasCar());
+        userDetails.put("age", calculateAge(request.getBirthday()));
+
+        report.put("userDetails", userDetails);
+
+        report.put("totalScore", score);
+        report.put("systemDecision", decision);
+        report.put("suggestedAmount", (int) creditLimit);
+
+        List<Map<String, Object>> scoreDetails = new ArrayList<>();
+        for (CreditScoreEngine.ScoreContribution contribution : detailReport.getScoreDetails()) {
+            Map<String, Object> detailMap = new HashMap<>();
+            detailMap.put("feature", contribution.getFeature());
+            detailMap.put("value", contribution.getValue());
+            detailMap.put("weight", contribution.getWeight());
+            detailMap.put("contribution", contribution.getContribution());
+            detailMap.put("description", contribution.getDescription());
+            scoreDetails.add(detailMap);
         }
-        
-        return mockData;
+        report.put("scoreDetails", scoreDetails);
+
+        Map<String, Object> externalFeatures = new HashMap<>();
+        externalFeatures.put("creditScore", detailReport.getExternalFeatures().getCreditScore());
+        externalFeatures.put("overdueCount12m", detailReport.getExternalFeatures().getOverdueCount12m());
+        externalFeatures.put("creditQueryCount3m", detailReport.getExternalFeatures().getCreditQueryCount3m());
+        externalFeatures.put("multiHeadLoanCount", detailReport.getExternalFeatures().getMultiHeadLoanCount());
+        externalFeatures.put("multiHeadLoanTotalAmount", detailReport.getExternalFeatures().getMultiHeadLoanTotalAmount());
+        externalFeatures.put("deviceIsVirtual", detailReport.getExternalFeatures().getDeviceIsVirtual());
+        externalFeatures.put("ipIsProxy", detailReport.getExternalFeatures().getIpIsProxy());
+        externalFeatures.put("dataSource", detailReport.getExternalFeatures().getDataSource());
+        externalFeatures.put("updatedAt", detailReport.getExternalFeatures().getUpdatedAt());
+        report.put("externalFeatures", externalFeatures);
+
+        Map<String, Object> blacklistCheck = new HashMap<>();
+        blacklistCheck.put("hit", detailReport.getBlacklistCheck().isHit());
+        blacklistCheck.put("source", detailReport.getBlacklistCheck().getSource());
+        blacklistCheck.put("reason", detailReport.getBlacklistCheck().getReason());
+        report.put("blacklistCheck", blacklistCheck);
+
+        return report;
     }
 
-    /**
-     * 根据 Python 接口返回的结果更新评估记录
-     */
-    @Transactional
-    public void updateAssessmentResult(RiskAssessment riskAssessment, Map<String, Object> pythonResponse) {
-        // 解析 Python 响应
-        Double totalScore = (Double) pythonResponse.get("total_score");
-        String sysDecision = (String) pythonResponse.get("sys_decision");
-        Integer creditLimit = (Integer) pythonResponse.get("credit_limit");
-
-        // 更新评估记录
-        riskAssessment.setTotalScore(totalScore != null ? totalScore.intValue() : 0);
-        riskAssessment.setSysDecision(sysDecision);
-        riskAssessment.setApprovalTime(new Date());
-
-        // 将详细的风控报告存入Redis缓存
-        String cacheKey = RedisCacheUtil.getRiskReportKey(riskAssessment.getApplyId());
-        redisCacheUtil.set(cacheKey, pythonResponse);
-
-        // 根据系统决策设置状态
-        String status = "";
-        String statusTitle = "";
-        String creditLimitStr = "0";
-
-        switch (sysDecision) {
-            case "APPROVE":
-                riskAssessment.setStatus("FINAL_PASS");
-                riskAssessment.setIsFinal(true);
-                status = "已通过";
-                statusTitle = "评估通过";
-                if (creditLimit != null && creditLimit > 0) {
-                    riskAssessment.setCreditLimit(new BigDecimal(creditLimit));
-                    creditLimitStr = String.valueOf(creditLimit);
-                    // 设置额度失效日期（1年后）
-                    Calendar calendar = Calendar.getInstance();
-                    calendar.add(Calendar.YEAR, 1);
-                    riskAssessment.setExpireDate(calendar.getTime());
-                }
-                break;
-            case "REVIEW":
-                riskAssessment.setStatus("MANUAL_REVIEW");
-                riskAssessment.setIsFinal(false);
-                status = "人工复核中";
-                statusTitle = "人工复核";
-                break;
-            case "REJECT":
-                riskAssessment.setStatus("SYSTEM_REJECT");
-                riskAssessment.setIsFinal(true);
-                status = "已拒绝";
-                statusTitle = "评估拒绝";
-                break;
-            default:
-                riskAssessment.setStatus("SYSTEM_REJECT");
-                riskAssessment.setIsFinal(true);
-                status = "已拒绝";
-                statusTitle = "评估拒绝";
+    private String maskName(String name) {
+        if (name == null || name.length() == 0) {
+            return "";
         }
+        return name.charAt(0) + "*".repeat(name.length() - 1);
+    }
 
-        riskAssessmentMapper.updateById(riskAssessment);
+    private String maskIdCard(String idCard) {
+        if (idCard == null || idCard.length() != 18) {
+            return idCard;
+        }
+        return idCard.substring(0, 3) + "**********" + idCard.substring(13);
+    }
 
-        // 如果评估完成，更新用户评估状态并发送邮件通知
-        if (riskAssessment.getIsFinal()) {
-            User user = userMapper.selectById(riskAssessment.getUserId());
-            if (user != null) {
-                user.setAssessmentStatus("APPROVED".equals(riskAssessment.getStatus()) ? "APPROVED" : "REJECTED");
-                userMapper.updateById(user);
+    private int calculateAge(String birthday) {
+        int birthYear = Integer.parseInt(birthday.substring(0, 4));
+        int currentYear = java.time.LocalDate.now().getYear();
+        return currentYear - birthYear;
+    }
 
-                // 发送邮件通知用户
-                emailUtil.sendRiskAssessmentNotification(
-                        user.getEmail(),
-                        user.getRealName(),
-                        statusTitle,
-                        creditLimitStr
-                );
-            }
+    private void sendNotification(RiskAssessment riskAssessment, String status, String creditLimit) {
+        User user = userMapper.selectById(riskAssessment.getUserId());
+        if (user != null) {
+            emailUtil.sendRiskAssessmentNotification(
+                    user.getEmail(),
+                    user.getRealName(),
+                    status,
+                    creditLimit
+            );
         }
     }
 
-    /**
-     * 生成申请ID
-     */
     private String generateApplyId() {
         return "L" + System.currentTimeMillis() + UUID.randomUUID().toString().substring(0, 4);
     }
 
-    /**
-     * 获取状态标题
-     */
     private String getStatusTitle(String status) {
         return switch (status) {
             case "WAITING" -> "评估中";

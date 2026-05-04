@@ -2,7 +2,6 @@ package org.example.risklendpro.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.risklendpro.pojo.request.LoanApproveRequest;
-import org.example.risklendpro.pojo.request.MockDataUpdateRequest;
 import org.example.risklendpro.pojo.request.RiskApproveRequest;
 import org.example.risklendpro.pojo.response.LoanApproveResponse;
 import java.util.Map;
@@ -48,8 +47,4 @@ public interface AdminService {
      */
     LoanApproveResponse approveLoan(LoanApproveRequest request);
 
-    /**
-     * 更新模拟数据
-     */
-    void updateMockData(MockDataUpdateRequest request);
 }

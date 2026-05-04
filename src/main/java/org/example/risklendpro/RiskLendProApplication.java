@@ -7,7 +7,6 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 @SpringBootApplication
-@MapperScan("org.example.risklendpro.mapper")// 扫描 mapper 包
 @EnableTransactionManagement
 @EnableAsync
 public class RiskLendProApplication {

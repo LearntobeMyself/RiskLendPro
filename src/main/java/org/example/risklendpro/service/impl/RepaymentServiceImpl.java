@@ -155,8 +155,10 @@ public class RepaymentServiceImpl implements RepaymentService {
 
     @Override
     public Map<String, Long> getOverdueStatistics() {
-        // 总数
-        long totalCount = repaymentPlanMapper.selectCount(null);
+        // 活跃状态的还款计划总数（排除已完成的）
+        QueryWrapper<RepaymentPlan> activeQuery = new QueryWrapper<>();
+        activeQuery.ne("status", "COMPLETED");
+        long totalCount = repaymentPlanMapper.selectCount(activeQuery);
 
         // 逾期数
         QueryWrapper<RepaymentPlan> overdueQuery = new QueryWrapper<>();

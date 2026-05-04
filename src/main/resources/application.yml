@@ -5,15 +5,28 @@ spring:
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
-  # 云端数据库
+
+  # 多数据源配置
   datasource:
-    url: jdbc:mysql://47.109.109.231:3306/RiskLendPro?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
-    username: admin
-    password: admin
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    hikari:
-      connection-timeout: 30000
-      maximum-pool-size: 10
+    # 主数据源 - RiskLendPro（业务数据）
+    primary:
+      jdbc-url: jdbc:mysql://47.109.109.231:3306/RiskLendPro?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      username: admin
+      password: admin
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      hikari:
+        connection-timeout: 30000
+        maximum-pool-size: 10
+    # 从数据源 - credit_data_db（Python同步的风控数据）
+    credit:
+      jdbc-url: jdbc:mysql://47.109.109.231:3306/credit_data_db?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      username: admin
+      password: admin
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      hikari:
+        connection-timeout: 30000
+        maximum-pool-size: 5
+
   # 邮件服务器配置
   mail:
     host: smtp.qq.com
@@ -61,9 +74,8 @@ server:
   servlet:
     context-path: /api/v1
 
-# MyBatis-Plus配置
+# MyBatis-Plus配置（使用@Select注解，无需XML）
 mybatis-plus:
-  mapper-locations: classpath*:/mapper/**/*.xml
   type-aliases-package: org.example.risklendpro.entity
   configuration:
     map-underscore-to-camel-case: true

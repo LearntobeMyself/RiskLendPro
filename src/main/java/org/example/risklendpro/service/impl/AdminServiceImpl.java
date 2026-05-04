@@ -6,14 +6,12 @@ import org.example.risklendpro.entity.*;
 import org.example.risklendpro.enums.LoanStatusEnum;
 import org.example.risklendpro.mapper.*;
 import org.example.risklendpro.pojo.request.LoanApproveRequest;
-import org.example.risklendpro.pojo.request.MockDataUpdateRequest;
 import org.example.risklendpro.pojo.request.RiskApproveRequest;
 import org.example.risklendpro.pojo.response.LoanApproveResponse;
 import org.example.risklendpro.service.AdminService;
 import org.example.risklendpro.utils.EmailUtil;
 import org.example.risklendpro.utils.RedisCacheUtil;
 import org.example.risklendpro.utils.RepaymentCalculator;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,9 +30,6 @@ public class AdminServiceImpl implements AdminService {
 
     @Autowired
     private LoanMapper loanMapper;
-
-    @Autowired
-    private MockDataMapper mockDataMapper;
 
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
@@ -114,6 +109,9 @@ public class AdminServiceImpl implements AdminService {
         if ("PASS".equals(request.getAuditResult())) {
             assessment.setStatus("FINAL_PASS");
             assessment.setCreditLimit(request.getCreditLimit());
+
+            // 创建或更新用户额度记录
+            createOrUpdateUserCreditLimit(assessment.getUserId(), request.getCreditLimit());
         } else {
             assessment.setStatus("FINAL_REJECT");
         }
@@ -128,6 +126,34 @@ public class AdminServiceImpl implements AdminService {
                 "PASS".equals(request.getAuditResult()) ? "评估通过" : "评估拒绝",
                 request.getCreditLimit() != null ? request.getCreditLimit().toString() : "0"
         );
+    }
+
+    /**
+     * 创建或更新用户额度记录
+     */
+    private void createOrUpdateUserCreditLimit(Long userId, BigDecimal creditLimit) {
+        QueryWrapper<UserCreditLimit> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("user_id", userId);
+        UserCreditLimit existingLimit = userCreditLimitMapper.selectOne(queryWrapper);
+
+        if (existingLimit == null) {
+            // 创建新的额度记录
+            UserCreditLimit newLimit = new UserCreditLimit();
+            newLimit.setUserId(userId);
+            newLimit.setTotalLimit(creditLimit);
+            newLimit.setUsedLimit(BigDecimal.ZERO);
+            newLimit.setRemainingLimit(creditLimit);
+            newLimit.setOverdueAmount(BigDecimal.ZERO);
+            newLimit.setHasOverdue(false);
+            newLimit.setLastUpdateTime(new Date());
+            userCreditLimitMapper.insert(newLimit);
+        } else {
+            // 更新现有额度记录
+            existingLimit.setTotalLimit(creditLimit);
+            existingLimit.setRemainingLimit(creditLimit.subtract(existingLimit.getUsedLimit()));
+            existingLimit.setLastUpdateTime(new Date());
+            userCreditLimitMapper.updateById(existingLimit);
+        }
     }
 
     @Override
@@ -326,37 +352,6 @@ public class AdminServiceImpl implements AdminService {
         response.setApproveTime(new Date());
 
         return response;
-    }
-
-    @Override
-    public void updateMockData(MockDataUpdateRequest request) {
-        MockData mockData = mockDataMapper.selectOne(
-                new QueryWrapper<MockData>().eq("id_card", request.getIdCard())
-        );
-
-        if (mockData == null) {
-            mockData = new MockData();
-            mockData.setIdCard(request.getIdCard());
-            mockData.setIsBlacklist(request.getIsBlacklist());
-            mockData.setOverdueCount(request.getOverdueCount());
-            mockData.setLoanCount(request.getLoanCount());
-            mockData.setRecentQueryCount(request.getRecentQueryCount());
-            mockDataMapper.insert(mockData);
-        } else {
-            if (request.getIsBlacklist() != null) {
-                mockData.setIsBlacklist(request.getIsBlacklist());
-            }
-            if (request.getOverdueCount() != null) {
-                mockData.setOverdueCount(request.getOverdueCount());
-            }
-            if (request.getLoanCount() != null) {
-                mockData.setLoanCount(request.getLoanCount());
-            }
-            if (request.getRecentQueryCount() != null) {
-                mockData.setRecentQueryCount(request.getRecentQueryCount());
-            }
-            mockDataMapper.updateById(mockData);
-        }
     }
 
     private Map<String, Object> calculateRollRate() {

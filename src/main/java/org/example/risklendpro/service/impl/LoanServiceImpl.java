@@ -5,16 +5,21 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.risklendpro.entity.Loan;
 import org.example.risklendpro.entity.RepaymentPlan;
 import org.example.risklendpro.entity.RepaymentRecord;
+import org.example.risklendpro.entity.RiskAssessment;
 import org.example.risklendpro.entity.User;
 import org.example.risklendpro.entity.UserCreditLimit;
 import org.example.risklendpro.enums.LoanStatusEnum;
+import org.example.risklendpro.enums.StatusEnum;
 import org.example.risklendpro.mapper.LoanMapper;
 import org.example.risklendpro.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.mapper.RepaymentRecordMapper;
+import org.example.risklendpro.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.mapper.UserMapper;
 import org.example.risklendpro.pojo.request.LoanRequest;
+import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 import org.example.risklendpro.pojo.response.LoanResponse;
+import org.example.risklendpro.service.CreditScoreEngine;
 import org.example.risklendpro.service.LoanService;
 import org.example.risklendpro.utils.EmailUtil;
 import org.example.risklendpro.utils.RepaymentCalculator;
@@ -48,26 +53,70 @@ public class LoanServiceImpl implements LoanService {
     private RepaymentRecordMapper repaymentRecordMapper;
 
     @Autowired
+    private RiskAssessmentMapper riskAssessmentMapper;
+
+    @Autowired
+    private CreditScoreEngine creditScoreEngine;
+
+    @Autowired
     private EmailUtil emailUtil;
 
     @Override
     @Transactional
     public LoanResponse requestLoan(Long userId, LoanRequest request) {
-        // 1. 检查用户是否有未处理逾期
-        checkOverdue(userId);
-
-        // 2. 检查用户剩余额度
-        UserCreditLimit creditLimit = getUserCreditLimit(userId);
-        if (creditLimit == null) {
+        // 1. 获取用户最新授信评估信息（用于获取身份证等必要信息）
+        RiskAssessment latestAssessment = riskAssessmentMapper.selectOne(
+            new QueryWrapper<RiskAssessment>()
+                .eq("user_id", userId)
+                .eq("is_final", true)
+                .orderByDesc("approval_time")
+                .last("LIMIT 1")
+        );
+        
+        if (latestAssessment == null) {
             throw new RuntimeException("用户尚未完成授信评估，无法借款");
         }
+        
+        // 2. 检查用户是否有未处理逾期
+        checkOverdue(userId);
 
+        // 3. 重新进行风控评估（每次借款前都需要重新评估）
+        int newScore = creditScoreEngine.calculateScore(buildRiskRequest(latestAssessment));
+        String newDecision = creditScoreEngine.getDecision(newScore);
+
+        // 4. 如果风控评估未通过，拒绝借款
+        if (!"APPROVE".equals(newDecision)) {
+            throw new RuntimeException("您的风控评估未通过（评分：" + newScore + "），无法借款");
+        }
+
+        // 5. 计算新的授信额度
+        double newCreditLimit = creditScoreEngine.calculateCreditLimitWithFeatures(
+            newScore, latestAssessment.getMonthlyIncome(), latestAssessment.getIdCard());
+
+        // 6. 检查用户是否有授信额度
+        UserCreditLimit creditLimit = getUserCreditLimit(userId);
+        if (creditLimit == null) {
+            throw new RuntimeException("用户尚未获得授信额度，无法借款");
+        }
+
+        // 7. 检查用户剩余额度
         BigDecimal remainingLimit = creditLimit.getRemainingLimit();
         if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
             throw new RuntimeException("您的额度已用完，无法借款");
         }
 
-        // 3. 保存贷款记录
+        // 8. 检查借款金额是否有效
+        if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RuntimeException("借款金额必须大于0");
+        }
+
+        // 9. 检查还款期限是否有效
+        if (request.getTermMonths() == null || request.getTermMonths() < 1) {
+            throw new RuntimeException("还款期限必须大于0");
+        }
+
+        // 所有前置检查通过，开始创建贷款记录
+        // 6. 保存贷款记录
         Loan loan = new Loan();
         loan.setUserId(userId);
         loan.setAmount(request.getAmount());
@@ -304,5 +353,23 @@ public class LoanServiceImpl implements LoanService {
             
             repaymentRecordMapper.insert(record);
         }
+    }
+
+    private RiskAssessmentRequest buildRiskRequest(RiskAssessment assessment) {
+        RiskAssessmentRequest request = new RiskAssessmentRequest();
+        request.setIdCard(assessment.getIdCard());
+        request.setName(assessment.getName());
+        request.setPhone(assessment.getPhone());
+        request.setEmail(assessment.getEmail());
+        request.setGender(assessment.getGender());
+        request.setBirthday(assessment.getBirthday() != null ? assessment.getBirthday().toString() : null);
+        request.setEducation(assessment.getEducation());
+        request.setMarriage(assessment.getMarriage());
+        request.setJobType(assessment.getJobType());
+        request.setMonthlyIncome(assessment.getMonthlyIncome());
+        request.setHasHouse(assessment.getHasHouse());
+        request.setHasCar(assessment.getHasCar());
+        request.setContactPhone(assessment.getContactPhone());
+        return request;
     }
 }
