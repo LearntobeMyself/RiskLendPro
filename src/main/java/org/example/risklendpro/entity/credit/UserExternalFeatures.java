@@ -5,32 +5,99 @@ import java.math.BigDecimal;
 import java.util.Date;
 
 /**
- * 用户外部特征实体类 - 从credit_data_db数据库读取
+ * 用户外部行为特征实体类 - 从credit_data_db数据库读取
+ * 对应表: user_external_features
+ * 数据来源: Home Credit
  */
 @Data
 public class UserExternalFeatures {
+    /**
+     * 主键ID
+     */
     private Long id;
-    private Long userId;
-    private String idCard;
     
-    // 征信相关
-    private Integer creditScore;
-    private Integer overdueCount12m;
-    private Integer creditQueryCount3m;
+    /**
+     * 用户关联ID（用于Java查询映射）
+     */
+    private Long skIdCurr;
     
-    // 多头借贷相关
-    private Integer multiHeadLoanCount;
-    private BigDecimal multiHeadLoanTotalAmount;
+    /**
+     * 出生日期天数（负数，验真：核对年龄）
+     */
+    private Integer daysBirth;
     
-    // 负债收入比
-    private Integer dti;
+    /**
+     * 入职天数（负数，验真：核对工作年限）
+     */
+    private Integer daysEmployed;
     
-    // 反欺诈行为数据
-    private Integer deviceIsVirtual;
-    private Integer deviceChangeCount30d;
-    private Integer ipIsProxy;
+    /**
+     * 后台记录收入（验真：核实收入）
+     */
+    private BigDecimal amtIncomeTotal;
     
-    // 元数据
+    /**
+     * 近1周征信查询次数（评分：评估多头风险）
+     */
+    private Integer creditBureauWeek;
+    
+    /**
+     * 近1月征信查询次数（评分：评估多头风险）
+     */
+    private Integer creditBureauMon;
+    
+    /**
+     * 手机换号天数（评分：评估稳定性）
+     */
+    private Integer daysLastPhoneChange;
+    
+    /**
+     * 活跃贷款数（评分/验真：负债水平）
+     */
+    private Integer activeLoansCount;
+    
+    /**
+     * 第三方评分A（评分：权重极高）
+     */
+    private BigDecimal extSource2;
+    
+    /**
+     * 第三方评分B（评分：补充权威评价）
+     */
+    private BigDecimal extSource3;
+    
+    /**
+     * 是否有车（0=否，1=是，验真：核实资产）
+     */
+    private Integer flagOwnCar;
+    
+    /**
+     * 职业类型（评分：职业风险分级）
+     */
+    private String occupationType;
+    
+    /**
+     * 学历（验真：核实背景）
+     */
+    private String educationType;
+    
+    /**
+     * 历史标签（0=正常，1=逾期，回测：验证模型）
+     */
+    private Integer target;
+    
+    /**
+     * 历史被拒次数（拦截：严重风险则拒绝）
+     */
+    private Integer prevRefusedCount;
+    
+    /**
+     * 数据来源
+     */
     private String dataSource;
+    
+    /**
+     * 最后更新时间
+     */
     private Date updatedAt;
 }

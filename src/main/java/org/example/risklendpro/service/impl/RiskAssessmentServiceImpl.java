@@ -4,10 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.risklendpro.entity.RiskAssessment;
 import org.example.risklendpro.entity.User;
 import org.example.risklendpro.entity.UserCreditLimit;
+import org.example.risklendpro.entity.credit.ScoringRules;
+import org.example.risklendpro.entity.credit.UserExternalFeatures;
 import org.example.risklendpro.enums.StatusEnum;
 import org.example.risklendpro.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.mapper.UserMapper;
+import org.example.risklendpro.mapper.credit.ScoringRulesMapper;
+import org.example.risklendpro.mapper.credit.UserExternalFeaturesMapper;
 import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 import org.example.risklendpro.pojo.response.RiskAssessmentResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentStatusResponse;
@@ -21,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -37,6 +42,12 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
     @Autowired
     private UserMapper userMapper;
+
+    @Autowired
+    private UserExternalFeaturesMapper userExternalFeaturesMapper;
+
+    @Autowired
+    private ScoringRulesMapper scoringRulesMapper;
 
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
@@ -58,14 +69,13 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             throw new RuntimeException("用户不存在");
         }
 
-        RiskAssessment existingAssessment = riskAssessmentMapper.selectOne(
-                new QueryWrapper<RiskAssessment>()
-                        .eq("user_id", userId)
-                        .eq("status", "WAITING")
-                        .eq("is_final", false)
-        );
-        if (existingAssessment != null) {
-            throw new RuntimeException("您已有正在处理中的评估申请，请等待处理完成");
+        if (!user.getIdCard().equals(request.getIdCard())) {
+            throw new RuntimeException("身份信息不一致，请使用本人身份信息申请");
+        }
+
+        int age = calculateAge(request.getBirthday());
+        if (age < 18) {
+            throw new RuntimeException("年龄不足无法提供服务");
         }
 
         String applyId = generateApplyId();
@@ -90,6 +100,104 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         riskAssessment.setSubmitTime(new Date());
         riskAssessment.setIsFinal(false);
 
+        CreditScoreEngine.BlacklistMatchResult blacklistResult = creditScoreEngine.checkBlacklist(request.getName(), request.getIdCard());
+        
+        List<String> riskTags = new ArrayList<>();
+        
+        if (blacklistResult.isReject()) {
+            riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            riskAssessment.setIsFinal(true);
+            riskAssessment.setAuditRemark("BLACKLIST_MATCH_LEVEL_3: 姓名+地域+出生年份命中黑名单");
+            riskAssessmentMapper.insert(riskAssessment);
+            
+            user.setAssessmentStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            userMapper.updateById(user);
+            
+            RiskAssessmentResponse response = new RiskAssessmentResponse();
+            response.setApplyId(applyId);
+            response.setSubmitTime(new Date());
+            response.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            return response;
+        }
+        
+        if (blacklistResult.isNeedManualReview()) {
+            riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            riskAssessment.setAuditRemark("BLACKLIST_MATCH_LEVEL_2: 姓名+地域命中黑名单");
+            riskAssessmentMapper.insert(riskAssessment);
+            
+            user.setAssessmentStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            userMapper.updateById(user);
+            
+            RiskAssessmentResponse response = new RiskAssessmentResponse();
+            response.setApplyId(applyId);
+            response.setSubmitTime(new Date());
+            response.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            return response;
+        }
+        
+        if (blacklistResult.getMatchLevel() == CreditScoreEngine.MatchLevel.NAME_ONLY) {
+            riskTags.add("BLACKLIST_NAME_ONLY");
+        }
+
+        UserExternalFeatures externalFeatures = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(request.getIdCard()));
+        DataVerificationResult verificationResult = verifyUserData(request, externalFeatures);
+        
+        if (verificationResult.isReject()) {
+            riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            riskAssessment.setIsFinal(true);
+            riskAssessment.setAuditRemark("DATA_VERIFICATION_FAILED: " + verificationResult.getReason());
+            riskAssessmentMapper.insert(riskAssessment);
+            
+            user.setAssessmentStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            userMapper.updateById(user);
+            
+            RiskAssessmentResponse response = new RiskAssessmentResponse();
+            response.setApplyId(applyId);
+            response.setSubmitTime(new Date());
+            response.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            return response;
+        }
+        
+        if (verificationResult.isNeedManualReview()) {
+            riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            riskAssessment.setAuditRemark("INCOME_OUTLIER: " + verificationResult.getReason());
+            riskAssessmentMapper.insert(riskAssessment);
+            
+            user.setAssessmentStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            userMapper.updateById(user);
+            
+            RiskAssessmentResponse response = new RiskAssessmentResponse();
+            response.setApplyId(applyId);
+            response.setSubmitTime(new Date());
+            response.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            return response;
+        }
+        
+        if (verificationResult.getReason() != null) {
+            riskTags.add("INCOME_TOLERANCE: " + verificationResult.getReason());
+        }
+
+        RiskAssessment existingAssessment = riskAssessmentMapper.selectOne(
+                new QueryWrapper<RiskAssessment>()
+                        .eq("user_id", userId)
+                        .orderByDesc("submit_time")
+                        .last("LIMIT 1")
+        );
+
+        if (existingAssessment != null) {
+            String status = existingAssessment.getStatus();
+            if ("FINAL_PASS".equals(status)) {
+                throw new RuntimeException("您的评估申请已通过，请勿重复提交");
+            } else if ("WAITING".equals(status) || "MANUAL_REVIEW".equals(status)) {
+                throw new RuntimeException("您已有正在处理中的评估申请，请等待处理完成");
+            } else {
+                long daysSinceLastApply = calculateDaysSinceLastApply(existingAssessment.getSubmitTime());
+                if (daysSinceLastApply < 30) {
+                    throw new RuntimeException("建议您保持良好的信用记录，" + (30 - daysSinceLastApply) + "天后可尝试再次申请");
+                }
+            }
+        }
+
         riskAssessmentMapper.insert(riskAssessment);
 
         user.setAssessmentStatus(StatusEnum.WAITING.getValue());
@@ -103,6 +211,14 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         response.setStatus(riskAssessment.getStatus());
 
         return response;
+    }
+
+    private long calculateDaysSinceLastApply(Date lastSubmitTime) {
+        if (lastSubmitTime == null) {
+            return 30;
+        }
+        long diff = new Date().getTime() - lastSubmitTime.getTime();
+        return diff / (1000 * 60 * 60 * 24);
     }
 
     @Override
@@ -180,34 +296,18 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     @Transactional
     public void executeRiskAssessment(RiskAssessment riskAssessment, RiskAssessmentRequest request) {
         try {
-            String idCard = request.getIdCard();
-
-            if (creditScoreEngine.isInBlacklist(idCard)) {
-                riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
-                riskAssessment.setSysDecision("REJECT");
-                riskAssessment.setTotalScore(0);
-                riskAssessment.setCreditLimit(BigDecimal.ZERO);
-                riskAssessment.setIsFinal(true);
-                riskAssessment.setAuditRemark("命中黑名单");
-                riskAssessment.setApprovalTime(new Date());
-                riskAssessmentMapper.updateById(riskAssessment);
-
-                sendNotification(riskAssessment, "评估拒绝", "0");
-                return;
-            }
-
-            int score = creditScoreEngine.calculateScore(request);
-
-            String decision = creditScoreEngine.getDecision(score);
+            CreditScoreEngine.ScoreDetailReport detailReport = creditScoreEngine.getScoreDetailReport(request);
+            double score = detailReport.getTotalScore();
+            String decision = detailReport.getDecision();
 
             double creditLimit = creditScoreEngine.calculateCreditLimitWithFeatures(
                 score, request.getMonthlyIncome(), request.getIdCard());
 
-            riskAssessment.setTotalScore(score);
+            riskAssessment.setTotalScore((int) Math.round(score));
             riskAssessment.setSysDecision(decision);
             riskAssessment.setApprovalTime(new Date());
 
-            Map<String, Object> report = buildRiskReport(request, score, decision, creditLimit);
+            Map<String, Object> report = buildRiskReport(request, detailReport, creditLimit);
             String cacheKey = RedisCacheUtil.getRiskReportKey(riskAssessment.getApplyId());
             redisCacheUtil.set(cacheKey, report);
 
@@ -223,14 +323,23 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                     }
                     sendNotification(riskAssessment, "评估通过", String.valueOf((int) creditLimit));
                     break;
-                case "REVIEW":
+                case "MANUAL_REVIEW":
                     riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
                     riskAssessment.setIsFinal(false);
+                    String scoreTag = getScoreTag((int) Math.round(score));
+                    if (riskAssessment.getAuditRemark() == null || riskAssessment.getAuditRemark().isEmpty()) {
+                        riskAssessment.setAuditRemark(scoreTag);
+                    } else {
+                        riskAssessment.setAuditRemark(riskAssessment.getAuditRemark() + ", " + scoreTag);
+                    }
                     break;
                 case "REJECT":
                     riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
                     riskAssessment.setIsFinal(true);
                     riskAssessment.setCreditLimit(BigDecimal.ZERO);
+                    if (riskAssessment.getAuditRemark() == null || riskAssessment.getAuditRemark().isEmpty()) {
+                        riskAssessment.setAuditRemark("SCORE_LOW: 信用分过低");
+                    }
                     sendNotification(riskAssessment, "评估拒绝", "0");
                     break;
             }
@@ -245,10 +354,10 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         }
     }
 
-    private Map<String, Object> buildRiskReport(RiskAssessmentRequest request, int score, String decision, double creditLimit) {
+    private Map<String, Object> buildRiskReport(RiskAssessmentRequest request,
+                                                CreditScoreEngine.ScoreDetailReport detailReport,
+                                                double creditLimit) {
         Map<String, Object> report = new HashMap<>();
-
-        CreditScoreEngine.ScoreDetailReport detailReport = creditScoreEngine.getScoreDetailReport(request);
 
         Map<String, Object> userDetails = new HashMap<>();
         userDetails.put("name", maskName(request.getName()));
@@ -263,15 +372,19 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
         report.put("userDetails", userDetails);
 
-        report.put("totalScore", score);
-        report.put("systemDecision", decision);
+        report.put("totalScore", detailReport.getTotalScore());
+        report.put("systemDecision", detailReport.getDecision());
         report.put("suggestedAmount", (int) creditLimit);
 
         List<Map<String, Object>> scoreDetails = new ArrayList<>();
         for (CreditScoreEngine.ScoreContribution contribution : detailReport.getScoreDetails()) {
             Map<String, Object> detailMap = new HashMap<>();
             detailMap.put("feature", contribution.getFeature());
-            detailMap.put("value", contribution.getValue());
+            try {
+                detailMap.put("value", Double.parseDouble(contribution.getValue()));
+            } catch (NumberFormatException e) {
+                detailMap.put("value", contribution.getValue());
+            }
             detailMap.put("weight", contribution.getWeight());
             detailMap.put("contribution", contribution.getContribution());
             detailMap.put("description", contribution.getDescription());
@@ -345,5 +458,89 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             case "FINAL_REJECT" -> "已拒绝";
             default -> "未知状态";
         };
+    }
+
+    private DataVerificationResult verifyUserData(RiskAssessmentRequest request, UserExternalFeatures externalFeatures) {
+        if (externalFeatures == null) {
+            return new DataVerificationResult(false, false, null);
+        }
+
+        double backendIncome = externalFeatures.getAmtIncomeTotal() != null 
+                ? externalFeatures.getAmtIncomeTotal().doubleValue() / 12 
+                : 0;
+
+        if (backendIncome > 0) {
+            double[] range = getIncomeRange(request.getMonthlyIncome());
+            double lowerBound = range[0];
+            double upperBound = range[1];
+            
+            if (backendIncome >= lowerBound && backendIncome <= upperBound) {
+                return new DataVerificationResult(false, false, 
+                        String.format("收入在自填区间内 (自填: %s, 后台: %.2f)", request.getMonthlyIncome(), backendIncome));
+            } else if (backendIncome < lowerBound) {
+                double ratio = (lowerBound - backendIncome) / backendIncome;
+                if (ratio > 0.5) {
+                    return new DataVerificationResult(true, false, 
+                            String.format("收入虚报超过50%% (自填区间: %s, 后台: %.2f, 偏差: %.1f%%)", 
+                                    request.getMonthlyIncome(), backendIncome, ratio * 100));
+                } else if (ratio > 0.15) {
+                    return new DataVerificationResult(false, true, 
+                            String.format("收入偏差在15%%-50%%之间 (自填区间: %s, 后台: %.2f, 偏差: %.1f%%)", 
+                                    request.getMonthlyIncome(), backendIncome, ratio * 100));
+                } else {
+                    return new DataVerificationResult(false, false, 
+                            String.format("收入偏差在15%%以内 (自填区间: %s, 后台: %.2f, 已取后台值)", 
+                                    request.getMonthlyIncome(), backendIncome));
+                }
+            }
+        }
+
+        return new DataVerificationResult(false, false, null);
+    }
+
+    private double[] getIncomeRange(String monthlyIncome) {
+        return switch (monthlyIncome) {
+            case "3000以下" -> new double[]{0, 3000};
+            case "3000-5000" -> new double[]{3000, 5000};
+            case "5000-8000" -> new double[]{5000, 8000};
+            case "8000-15000" -> new double[]{8000, 15000};
+            case "15000以上" -> new double[]{15000, Double.MAX_VALUE};
+            default -> new double[]{0, Double.MAX_VALUE};
+        };
+    }
+
+    private String getScoreTag(int score) {
+        if (score < 580) {
+            return "SCORE_LOW: 信用分过低";
+        } else if (score >= 580 && score < 720) {
+            return "SCORE_MANUAL_REVIEW: 信用分区间需人工审核";
+        } else if (score >= 720) {
+            return "SCORE_MEDIUM: 信用分中等";
+        }
+        return "";
+    }
+
+    private static class DataVerificationResult {
+        private final boolean reject;
+        private final boolean needManualReview;
+        private final String reason;
+
+        public DataVerificationResult(boolean reject, boolean needManualReview, String reason) {
+            this.reject = reject;
+            this.needManualReview = needManualReview;
+            this.reason = reason;
+        }
+
+        public boolean isReject() {
+            return reject;
+        }
+
+        public boolean isNeedManualReview() {
+            return needManualReview;
+        }
+
+        public String getReason() {
+            return reason;
+        }
     }
 }

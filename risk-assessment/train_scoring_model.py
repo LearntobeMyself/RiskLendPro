@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import re
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score
@@ -8,33 +9,140 @@ import os
 
 os.makedirs("output", exist_ok=True)
 
-def calculate_scorecard_score(prob_default, base_score=600, pdo=80, target_score=70, target_odds=1):
+
+def edu_tier_from_lc_grade(series):
+    """LC 申请时点 grade → 与 Java 学历档位对齐的三档（系数由 CSV 训练得出）。"""
+
+    def one(v):
+        if pd.isna(v):
+            return "low"
+        s = str(v).strip().upper()
+        if s in ("A", "B"):
+            return "high"
+        if s == "C":
+            return "mid"
+        return "low"
+
+    return series.map(one)
+
+
+def job_stable_from_lc_emp_length(series):
+    """LC emp_length：10+ 年或解析数字≥5 → 稳定就业代理（对齐 Java 公务员/企事业单位）。"""
+
+    def one(val):
+        if pd.isna(val):
+            return 0
+        s = str(val).lower()
+        if "10+" in s:
+            return 1
+        m = re.search(r"(\d+)", s)
+        if m:
+            try:
+                if int(m.group(1)) >= 5:
+                    return 1
+            except ValueError:
+                pass
+        return 0
+
+    return series.map(one)
+
+
+def house_owner_from_lc_home_ownership(series):
+    """LC home_ownership：自有/按揭 → 1，其余 → 0（对齐 Java hasHouse）。"""
+
+    def one(v):
+        if pd.isna(v):
+            return 0
+        return 1 if str(v).strip().upper() in ("OWN", "MORTGAGE") else 0
+
+    return series.map(one)
+
+def calculate_scorecard_score(prob_default, scorecard=None):
     """
-    将违约概率转换为标准评分卡分数 (10-90)
-    
-    参数:
-        prob_default: 违约概率 (0-1)
-        base_score: 基础分，默认600
-        pdo: Points to Double the Odds，调整为80让分数变化更平缓
-        target_score: 目标分数对应的分数，调整为70作为平均分
-        target_odds: 目标分数对应的赔率，调整为1让基准更合理
-    
-    返回:
-        10-90的信用分数
+    将违约概率映射为信用分，与 Java CreditScoreEngineImpl.scorecardFromProb 一致。
+
+    - scale=inverse_prob_0_100：round(100*(1-p)) 再 clamp（旧版）。
+    - scale=odds_pdo：PDO+log-odds 映射，低 p 区间对 Δp 更敏感；再 clamp 到 min/max。
     """
-    if prob_default >= 0.99:
-        return 10
-    if prob_default <= 0.01:
-        return 90
-    
-    odds = prob_default / (1 - prob_default)
+    sc = scorecard or {}
+    scale = sc.get("scale", "odds_pdo")
+    if scale == "inverse_prob_0_100":
+        min_s = int(sc.get("min_score", 0))
+        max_s = int(sc.get("max_score", 100))
+    else:
+        min_s = int(sc.get("min_score", 350))
+        max_s = int(sc.get("max_score", 950))
+
+    eps = 1e-9
+    p = float(np.clip(prob_default, eps, 1.0 - eps))
+
+    if scale == "inverse_prob_0_100":
+        score = round(100.0 * (1.0 - p))
+        return float(max(min_s, min(max_s, score)))
+
+    pdo = float(sc.get("pdo", 80))
+    target_score = float(sc.get("target_score", 650))
+    target_odds = float(sc.get("target_odds", 1))
+    odds = p / (1.0 - p)
     factor = -pdo / np.log(2)
     offset = target_score - factor * np.log(target_odds)
-    
     score = offset + factor * np.log(odds)
-    score = max(10, min(90, score))
-    
-    return round(score, 2)
+    return float(max(min_s, min(max_s, round(score, 2))))
+
+
+def scores_odds_pdo_batch(probs, scorecard):
+    """校验集向量映射；返回 (raw, clipped)。"""
+    sc = scorecard or {}
+    min_s = int(sc.get("min_score", 350))
+    max_s = int(sc.get("max_score", 950))
+    pdo = float(sc.get("pdo", 80))
+    target_score = float(sc.get("target_score", 650))
+    target_odds = float(sc.get("target_odds", 1))
+    eps = 1e-9
+    p = np.clip(np.asarray(probs, dtype=np.float64), eps, 1.0 - eps)
+    odds = p / (1.0 - p)
+    factor = -pdo / np.log(2)
+    offset = target_score - factor * np.log(target_odds)
+    raw = offset + factor * np.log(odds)
+    clipped = np.clip(np.round(raw, 2), min_s, max_s)
+    return raw, clipped
+
+
+def calibrate_odds_pdo_scorecard(probs, min_s=350, max_s=950, span_frac=0.82):
+    """
+    用校验集违约概率标定 PDO：约 5%–95% 分位的 ln(odds) 跨度映射到量表跨度的 span_frac，
+    中位 odds 锚到 target_score=(min_s+max_s)/2。
+    """
+    eps = 1e-9
+    p = np.clip(np.asarray(probs, dtype=np.float64), eps, 1.0 - eps)
+    odds = p / (1.0 - p)
+    o5 = float(np.quantile(odds, 0.05))
+    o95 = float(np.quantile(odds, 0.95))
+    o50 = float(np.quantile(odds, 0.50))
+    log_den = np.log(o95 + eps) - np.log(o5 + eps)
+    if log_den < 1e-6:
+        log_den = 1e-6
+    span = float(max_s - min_s)
+    factor = -(span * float(span_frac)) / log_den
+    pdo = float(-factor * np.log(2.0))
+    target_odds = max(o50, eps)
+    target_score = (min_s + max_s) / 2.0
+    return {
+        "scale": "odds_pdo",
+        "min_score": min_s,
+        "max_score": max_s,
+        "pdo": round(pdo, 6),
+        "target_score": round(target_score, 4),
+        "target_odds": round(target_odds, 10),
+        "_calibration": {
+            "span_frac": span_frac,
+            "odds_p05": round(o5, 8),
+            "odds_p50": round(o50, 8),
+            "odds_p95": round(o95, 8),
+            "note": "PDO 由校验集 odds 分位跨度反推；Java 仅消费 scale/pdo/target_*/min/max",
+        },
+    }
+
 
 def analyze_feature_default_rates(df):
     """分析各特征与违约率的关系，用于生成评分规则"""
@@ -188,17 +296,32 @@ def analyze_feature_default_rates(df):
     return results
 
 def bin_features(df):
+    """
+    与 Java CreditScoreEngineImpl 约定一致的分箱 + one-hot（drop_first）。
+    方案 A：分箱后对已与 dummy 重复的原始连续列做删除，避免同一信号被计数两次，
+    导致系数过大、概率饱和、评分总贴在 10/90。
+    保留 device_is_virtual / ip_is_proxy（未参与上述分箱）。
+    """
     df = df.copy()
-    
+
     df['age_bin'] = pd.cut(df['age'], bins=[0, 25, 35, 50, 100], labels=['age_0_25', 'age_26_35', 'age_36_50', 'age_51_plus'])
     df['income_bin'] = pd.cut(df['income'], bins=[0, 5000, 15000, float('inf')], labels=['income_below_5000', 'income_5000_15000', 'income_15000_plus'])
     df['multi_head_bin'] = pd.cut(df['multi_head_loan_count'], bins=[-1, 3, 6, float('inf')], labels=['multi_head_0_3', 'multi_head_4_6', 'multi_head_7_plus'])
     df['credit_query_bin'] = pd.cut(df['credit_query_count_3m'], bins=[-1, 3, 8, float('inf')], labels=['credit_query_0_3', 'credit_query_4_8', 'credit_query_9_plus'])
     df['overdue_bin'] = pd.cut(df['overdue_count_12m'], bins=[-1, 0, 2, float('inf')], labels=['overdue_12m_0', 'overdue_12m_1_2', 'overdue_12m_3_plus'])
     df['dti_bin'] = pd.cut(df['dti'], bins=[-1, 15, 30, float('inf')], labels=['dti_low', 'dti_medium', 'dti_high'])
-    
+
     df = pd.get_dummies(df, columns=['age_bin', 'income_bin', 'multi_head_bin', 'credit_query_bin', 'overdue_bin', 'dti_bin'], drop_first=True)
-    
+
+    if "edu_tier" in df.columns:
+        df["edu_tier"] = pd.Categorical(df["edu_tier"], categories=["low", "mid", "high"], ordered=True)
+        df = pd.get_dummies(df, columns=["edu_tier"], prefix="edu_tier", drop_first=True)
+
+    redundant_raw = ['age', 'income', 'multi_head_loan_count', 'credit_query_count_3m', 'overdue_count_12m', 'dti']
+    to_drop = [c for c in redundant_raw if c in df.columns]
+    if to_drop:
+        df = df.drop(columns=to_drop)
+
     return df
 
 def process_lending_club_data(df):
@@ -212,16 +335,53 @@ def process_lending_club_data(df):
     df['credit_query_count_3m'] = (df['inq_last_6mths'] / 2).fillna(0).astype(int)
     
     df['multi_head_loan_count'] = df['open_acc'].fillna(0).astype(int)
-    
-    df['overdue_count_12m'] = df.apply(lambda row: 3 if row['loan_status'] == 'Charged Off' else 0, axis=1)
-    
+
+    # 申请时点逾期次数：禁止用 loan_status 反推（与 defaulted 等价 → 标签泄漏）
+    delinq_col = None
+    for name in ("delinq_2yrs", "delinq_2yr"):
+        if name in df.columns:
+            delinq_col = name
+            break
+    if delinq_col is not None:
+        df["overdue_count_12m"] = (
+            pd.to_numeric(df[delinq_col], errors="coerce").fillna(0).clip(0, 30).astype(int)
+        )
+        print(f"Lending Club：使用申请时点字段 {delinq_col} → overdue_count_12m")
+    else:
+        df["overdue_count_12m"] = 0
+        print(
+            "警告：未找到 delinq_2yrs / delinq_2yr，overdue_count_12m 置 0。"
+            "请勿用 loan_status 构造逾期特征。"
+        )
+
     df['dti'] = df['dti'].fillna(df['dti'].median())
-    
-    df['age'] = np.random.randint(22, 60, len(df))
-    
-    df['device_is_virtual'] = np.random.choice([0, 1], len(df), p=[0.97, 0.03])
-    df['ip_is_proxy'] = np.random.choice([0, 1], len(df), p=[0.95, 0.05])
-    
+
+    rng = np.random.default_rng(42)
+    df["age"] = rng.integers(22, 60, size=len(df))
+    df["device_is_virtual"] = rng.choice([0, 1], size=len(df), p=[0.97, 0.03])
+    df["ip_is_proxy"] = rng.choice([0, 1], size=len(df), p=[0.95, 0.05])
+
+    # 申请表代理特征：仅用 LC 列推导（与 scoring_rules.feature_derivation 一致）
+    if "grade" in df.columns:
+        df["edu_tier"] = edu_tier_from_lc_grade(df["grade"])
+    else:
+        df["edu_tier"] = "low"
+        print("警告：LC 缺少 grade，edu_tier 暂置为 low")
+
+    if "home_ownership" in df.columns:
+        df["house_owner"] = house_owner_from_lc_home_ownership(df["home_ownership"]).astype(int)
+    else:
+        df["house_owner"] = 0
+        print("警告：LC 缺少 home_ownership，house_owner 置 0")
+
+    if "emp_length" in df.columns:
+        df["job_stable"] = job_stable_from_lc_emp_length(df["emp_length"]).astype(int)
+    else:
+        df["job_stable"] = 0
+        print("警告：LC 缺少 emp_length，job_stable 置 0")
+
+    df["has_car_stated"] = 0
+
     df['defaulted'] = (df['loan_status'] == 'Charged Off').astype(int)
     
     return df
@@ -244,37 +404,63 @@ def train_scoring_model(csv_path="data/training_data.csv"):
     except FileNotFoundError:
         print(f"使用模拟数据进行训练")
         n = 1000
+        rng = np.random.default_rng(42)
         users = pd.DataFrame({
-            "id_card": [f"510106{np.random.randint(1970,2005):04d}{np.random.randint(1,13):02d}{np.random.randint(1,29):02d}{i:04d}" for i in range(n)],
-            "age": np.random.randint(22, 60, n),
-            "income": np.random.randint(3000, 50000, n),
-            "multi_head_loan_count": np.random.poisson(lam=2, size=n).clip(0, 15),
-            "credit_query_count_3m": np.random.poisson(lam=3, size=n).clip(0, 20),
-            "overdue_count_12m": np.random.choice([0, 1, 2, 3, 5], n, p=[0.75, 0.12, 0.07, 0.04, 0.02]),
-            "dti": np.random.randint(0, 40, n),
-            "device_is_virtual": np.random.choice([0, 1], n, p=[0.97, 0.03]),
-            "ip_is_proxy": np.random.choice([0, 1], n, p=[0.95, 0.05])
+            "id_card": [f"510106{rng.integers(1970, 2005):04d}{rng.integers(1, 13):02d}{rng.integers(1, 29):02d}{i:04d}" for i in range(n)],
+            "age": rng.integers(22, 60, size=n),
+            "income": rng.integers(3000, 50000, size=n),
+            "multi_head_loan_count": rng.poisson(lam=2, size=n).clip(0, 15),
+            "credit_query_count_3m": rng.poisson(lam=3, size=n).clip(0, 20),
+            "overdue_count_12m": rng.choice([0, 1, 2, 3, 5], size=n, p=[0.75, 0.12, 0.07, 0.04, 0.02]),
+            "dti": rng.integers(0, 40, size=n),
+            "device_is_virtual": rng.choice([0, 1], size=n, p=[0.97, 0.03]),
+            "ip_is_proxy": rng.choice([0, 1], size=n, p=[0.95, 0.05])
         })
+        users["edu_tier"] = rng.choice(["low", "mid", "high"], size=n, p=[0.25, 0.45, 0.3])
+        users["house_owner"] = rng.choice([0, 1], size=n, p=[0.35, 0.65]).astype(int)
+        users["job_stable"] = rng.choice([0, 1], size=n, p=[0.4, 0.6]).astype(int)
+        users["has_car_stated"] = rng.choice([0, 1], size=n, p=[0.45, 0.55]).astype(int)
+        users["marriage_married"] = rng.choice([0, 1], size=n, p=[0.42, 0.58]).astype(int)
         users["defaulted"] = (
             (users["multi_head_loan_count"] > 6) |
             (users["credit_query_count_3m"] > 10) |
             (users["overdue_count_12m"] >= 3) |
             (users["income"] < 5000) |
             (users["device_is_virtual"] == 1) |
-            (users["dti"] > 30)
+            (users["dti"] > 30) |
+            (users["edu_tier"] == "low") |
+            (users["house_owner"] == 0)
         ).astype(int)
         df = users
     
     feature_analysis = analyze_feature_default_rates(df)
-    
-    X = df[['age', 'income', 'multi_head_loan_count', 'credit_query_count_3m', 'overdue_count_12m', 'dti', 'device_is_virtual', 'ip_is_proxy']]
+
+    base_numeric = [
+        "age",
+        "income",
+        "multi_head_loan_count",
+        "credit_query_count_3m",
+        "overdue_count_12m",
+        "dti",
+        "device_is_virtual",
+        "ip_is_proxy",
+    ]
+    app_numeric = ["edu_tier", "house_owner", "job_stable", "has_car_stated"]
+    if "marriage_married" in df.columns:
+        app_numeric.append("marriage_married")
+    feature_cols = [c for c in base_numeric + app_numeric if c in df.columns]
+    X = df[feature_cols]
     y = df['defaulted']
     
     X_binned = bin_features(X)
     
     X_train, X_test, y_train, y_test = train_test_split(X_binned, y, test_size=0.2, random_state=42)
     
-    model = LogisticRegression(class_weight='balanced', random_state=42, max_iter=200)
+    # C<1 增强 L2，抑制系数爆炸与 sigmoid 饱和。若需概率校准可在此基础上套
+    # CalibratedClassifierCV(method="sigmoid", cv=3)，并另行持久化校准参数供推理使用。
+    model = LogisticRegression(
+        class_weight="balanced", random_state=42, max_iter=400, C=0.3, solver="lbfgs"
+    )
     model.fit(X_train, y_train)
     
     y_pred = model.predict(X_test)
@@ -293,9 +479,31 @@ def train_scoring_model(csv_path="data/training_data.csv"):
     print(f"\n模型权重:")
     for feature, weight in sorted(feature_weights.items(), key=lambda x: abs(x[1]), reverse=True):
         print(f"{feature}: {weight:.4f}")
-    
+
+    qs = np.quantile(y_pred_proba, [0.05, 0.25, 0.5, 0.75, 0.95])
+    print(f"\n测试集违约概率分位数(5/25/50/75/95%): {qs}")
+
+    scorecard_cfg = calibrate_odds_pdo_scorecard(y_pred_proba, min_s=350, max_s=950, span_frac=0.82)
+    raw_lr, clipped_lr = scores_odds_pdo_batch(y_pred_proba, scorecard_cfg)
+    lo = float(scorecard_cfg["min_score"])
+    hi = float(scorecard_cfg["max_score"])
+    pct_floor = float(np.mean(raw_lr < lo))
+    pct_ceil = float(np.mean(raw_lr > hi))
+    print(
+        f"PDO 标定: pdo={scorecard_cfg['pdo']}, target_odds={scorecard_cfg['target_odds']}, "
+        f"夹紧 raw<min={pct_floor:.2%}, raw>max={pct_ceil:.2%}"
+    )
+
+    auto_ap = float(np.quantile(clipped_lr, 0.82))
+    man_rev = float(np.quantile(clipped_lr, 0.48))
+    thresholds_cfg = {
+        "auto_approve": round(auto_ap),
+        "manual_review": round(man_rev),
+        "_note": "测试集 LR+PDO 分数分位导出（非旧 80/50 线性换算）；可按业务再调",
+    }
+
     prob_default_avg = y_pred_proba.mean()
-    avg_score = calculate_scorecard_score(prob_default_avg)
+    avg_score = calculate_scorecard_score(prob_default_avg, scorecard_cfg)
     
     feature_correlations = {
         "overdue_count_12m": round(float(df['overdue_count_12m'].corr(df['defaulted'])), 4),
@@ -306,21 +514,52 @@ def train_scoring_model(csv_path="data/training_data.csv"):
         "age": round(float(df['age'].corr(df['defaulted'])), 4)
     }
     
+    feature_derivation = {
+        "edu_tier": (
+            "训练(LC): grade A,B→high; C→mid; D/E/F/G/缺失→low。推理(Java): 博士/硕士→high，本科→mid，高中及以下→low。"
+            "共享 edu_tier_mid / edu_tier_high 系数。"
+        ),
+        "house_owner": (
+            "训练(LC): home_ownership∈{OWN,MORTGAGE}→1，否则→0。推理(Java): hasHouse==true→1。"
+        ),
+        "job_stable": (
+            "训练(LC): emp_length 含 10+ 或解析年限≥5→1，否则→0。推理(Java): jobType∈{公务员,企事业单位}→1，否则→0。"
+        ),
+        "has_car_stated": (
+            "训练(LC): 无车字段，列恒为 0；系数主要来自模拟数据或未来含车 CSV。推理(Java): hasCar==true→1。"
+        ),
+        "marriage_married": (
+            "训练(LC): 通常无该列则不进入矩阵；模拟路径含 0/1。推理(Java): 已婚→1。若无权重则贡献为 0。"
+        ),
+    }
+
+    # 路径 A：LR+PDO 分之上的策略加减分（单位：350–950 量表上的分）
+    application_rule_bonus = {
+        "enabled": True,
+        "cap_absolute_sum": 55,
+        "notes": (
+            "主分数为 PDO+log-odds；bonus 与 LR 系数无关。"
+            "cap/bonus 按量表跨度设定，勿与旧 0–100 线性倍乘混用。"
+        ),
+        "married_equals_bonus": {"match": "已婚", "bonus": 18},
+        "has_car_bonus": 12,
+        "age_rules": [
+            {"lte": 25, "bonus": -22, "reason": "年龄≤25 低龄违约率偏高"},
+            {"gte": 26, "lte": 35, "bonus": 0, "reason": "26–35 基准档"},
+            {"gte": 36, "lte": 50, "bonus": 16, "reason": "36–50 风险相对较低"},
+            {"gte": 51, "bonus": 10, "reason": "51+"},
+        ],
+    }
+
     rules = {
-        "version": "v3.0",
-        "description": "基于LendingClub数据训练的评分规则，优化版",
+        "version": "v5.0",
+        "description": "PDO+log-odds 映射至 350–950（校验集标定）；策略 bonus 同量表",
+        "feature_derivation": feature_derivation,
         "feature_weights": feature_weights,
         "intercept": float(model.intercept_[0]),
-        "thresholds": {
-            "auto_approve": 75,
-            "manual_review": 50
-        },
-        "scorecard": {
-            "base_score": 600,
-            "pdo": 80,
-            "target_score": 70,
-            "target_odds": 1
-        },
+        "thresholds": thresholds_cfg,
+        "scorecard": scorecard_cfg,
+        "application_rule_bonus": application_rule_bonus,
         "feature_scores": {
             "age": {
                 "description": "年龄评分",
@@ -423,7 +662,13 @@ def train_scoring_model(csv_path="data/training_data.csv"):
             "accuracy": accuracy,
             "auc": auc,
             "avg_prob_default": round(float(prob_default_avg), 4),
-            "avg_score": avg_score
+            "avg_score": avg_score,
+            "scorecard_lr_clip_pct_below_min": round(pct_floor, 4),
+            "scorecard_lr_clip_pct_above_max": round(pct_ceil, 4),
+            "score_quantiles_test_lr_only": [
+                round(float(x), 2)
+                for x in np.quantile(clipped_lr, [0.05, 0.25, 0.5, 0.75, 0.95]).tolist()
+            ],
         }
     }
     
@@ -438,17 +683,39 @@ def train_scoring_model(csv_path="data/training_data.csv"):
         'prob_default': [0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5],
         'desc': ['极低风险', '低风险', '中低风险', '中等风险', '中高风险', '高风险', '极高风险']
     })
-    test_samples['score'] = test_samples['prob_default'].apply(calculate_scorecard_score)
+    test_samples["score"] = test_samples["prob_default"].apply(
+        lambda p: calculate_scorecard_score(p, scorecard_cfg)
+    )
     print("\n评分卡分数示例:")
     print(test_samples.to_string(index=False))
     
     try:
-        from load_to_mysql import load_scoring_rules_to_mysql
+        from load_to_mysql import load_scoring_rules_to_mysql, load_sample_external_features_to_mysql
         load_scoring_rules_to_mysql()
+        load_sample_external_features_to_mysql()
     except ImportError:
-        print("\n提示：运行 python load_to_mysql.py 将评分规则写入数据库")
+        print("\n提示：运行 python load_to_mysql.py 将评分规则与联调示例外部特征写入数据库")
     
     return rules
+
+
+# =============================================================================
+# 3.3 用户外部特征表（索引：id_card）——联调示例
+# 数据源码：load_to_mysql.SAMPLE_EXTERNAL_FEATURES_ROWS；写入：
+#   load_to_mysql.load_sample_external_features_to_mysql()
+# train_scoring_model 训练结束时会尝试自动 upsert；亦可 python load_to_mysql.py（步骤4b）。
+# 注册/风控手机号示例：13800148001 起（见 UserRegisterRequest）。
+#
+# 可选 DTI：ALTER TABLE user_external_features ADD COLUMN dti INT ... 后在 load_to_mysql 扩展 ROWS。
+# =============================================================================
+
+try:
+    from load_to_mysql import build_sample_external_features_sql
+
+    SAMPLE_EXTERNAL_FEATURES_SQL = build_sample_external_features_sql()
+except ImportError:
+    SAMPLE_EXTERNAL_FEATURES_SQL = ""
+
 
 if __name__ == "__main__":
     train_scoring_model()

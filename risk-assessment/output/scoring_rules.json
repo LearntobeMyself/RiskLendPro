@@ -1,39 +1,89 @@
 {
-  "version": "v3.0",
-  "description": "基于LendingClub数据训练的评分规则，优化版",
-  "feature_weights": {
-    "age": -0.18716646822058758,
-    "income": -4.8058222476140185e-05,
-    "multi_head_loan_count": -0.12116818587614542,
-    "credit_query_count_3m": 0.16909540672093953,
-    "overdue_count_12m": 6.364955822920818,
-    "dti": -0.08805685011485952,
-    "device_is_virtual": -0.007063011286260459,
-    "ip_is_proxy": 0.002414552939400228,
-    "age_bin_age_26_35": -0.022611489688241865,
-    "age_bin_age_36_50": -0.01739916509081645,
-    "age_bin_age_51_plus": 0.030240240252102864,
-    "income_bin_income_5000_15000": -0.1091841788927219,
-    "income_bin_income_15000_plus": 0.015145505729234341,
-    "multi_head_bin_multi_head_4_6": -0.030894255378268554,
-    "multi_head_bin_multi_head_7_plus": -0.02725333795512888,
-    "credit_query_bin_credit_query_4_8": 0.000775726381348959,
-    "credit_query_bin_credit_query_9_plus": 0.0,
-    "overdue_bin_overdue_12m_1_2": 0.0,
-    "overdue_bin_overdue_12m_3_plus": 2.1216519409224435,
-    "dti_bin_dti_medium": 0.005795826587311769,
-    "dti_bin_dti_high": 0.0
+  "version": "v5.0",
+  "description": "PDO+log-odds 映射至 350–950（校验集标定）；策略 bonus 同量表",
+  "feature_derivation": {
+    "edu_tier": "训练(LC): grade A,B→high; C→mid; D/E/F/G/缺失→low。推理(Java): 博士/硕士→high，本科→mid，高中及以下→low。共享 edu_tier_mid / edu_tier_high 系数。",
+    "house_owner": "训练(LC): home_ownership∈{OWN,MORTGAGE}→1，否则→0。推理(Java): hasHouse==true→1。",
+    "job_stable": "训练(LC): emp_length 含 10+ 或解析年限≥5→1，否则→0。推理(Java): jobType∈{公务员,企事业单位}→1，否则→0。",
+    "has_car_stated": "训练(LC): 无车字段，列恒为 0；系数主要来自模拟数据或未来含车 CSV。推理(Java): hasCar==true→1。",
+    "marriage_married": "训练(LC): 通常无该列则不进入矩阵；模拟路径含 0/1。推理(Java): 已婚→1。若无权重则贡献为 0。"
   },
-  "intercept": -0.028473600448408246,
+  "feature_weights": {
+    "device_is_virtual": -0.03540415517636731,
+    "ip_is_proxy": -0.12380824695236563,
+    "house_owner": 0.007896807190202918,
+    "job_stable": 0.08966078745156768,
+    "has_car_stated": 0.0,
+    "age_bin_age_26_35": 0.05107957516695493,
+    "age_bin_age_36_50": 0.0403531068192106,
+    "age_bin_age_51_plus": 0.035369689316629545,
+    "income_bin_income_5000_15000": -0.457159680636603,
+    "income_bin_income_15000_plus": -0.6466556523673903,
+    "multi_head_bin_multi_head_4_6": -0.08341027992524705,
+    "multi_head_bin_multi_head_7_plus": -0.012725856619818138,
+    "credit_query_bin_credit_query_4_8": 0.04820541313639992,
+    "credit_query_bin_credit_query_9_plus": 0.0,
+    "overdue_bin_overdue_12m_1_2": -0.02360488690459464,
+    "overdue_bin_overdue_12m_3_plus": -0.05772545939319952,
+    "dti_bin_dti_medium": 0.09649401428857844,
+    "dti_bin_dti_high": 0.0,
+    "edu_tier_mid": -0.4749181364103886,
+    "edu_tier_high": -1.144989051590354
+  },
+  "intercept": 0.7602607080720707,
   "thresholds": {
-    "auto_approve": 75,
-    "manual_review": 50
+    "auto_approve": 787,
+    "manual_review": 638,
+    "_note": "测试集 LR+PDO 分数分位导出（非旧 80/50 线性换算）；可按业务再调"
   },
   "scorecard": {
-    "base_score": 600,
-    "pdo": 80,
-    "target_score": 70,
-    "target_odds": 1
+    "scale": "odds_pdo",
+    "min_score": 350,
+    "max_score": 950,
+    "pdo": 201.702717,
+    "target_score": 650.0,
+    "target_odds": 0.7850688928,
+    "_calibration": {
+      "span_frac": 0.82,
+      "odds_p05": 0.44076466,
+      "odds_p50": 0.78506889,
+      "odds_p95": 2.3905024,
+      "note": "PDO 由校验集 odds 分位跨度反推；Java 仅消费 scale/pdo/target_*/min/max"
+    }
+  },
+  "application_rule_bonus": {
+    "enabled": true,
+    "cap_absolute_sum": 55,
+    "notes": "主分数为 PDO+log-odds；bonus 与 LR 系数无关。cap/bonus 按量表跨度设定，勿与旧 0–100 线性倍乘混用。",
+    "married_equals_bonus": {
+      "match": "已婚",
+      "bonus": 18
+    },
+    "has_car_bonus": 12,
+    "age_rules": [
+      {
+        "lte": 25,
+        "bonus": -22,
+        "reason": "年龄≤25 低龄违约率偏高"
+      },
+      {
+        "gte": 26,
+        "lte": 35,
+        "bonus": 0,
+        "reason": "26–35 基准档"
+      },
+      {
+        "gte": 36,
+        "lte": 50,
+        "bonus": 16,
+        "reason": "36–50 风险相对较低"
+      },
+      {
+        "gte": 51,
+        "bonus": 10,
+        "reason": "51+"
+      }
+    ]
   },
   "feature_scores": {
     "age": {
@@ -295,23 +345,32 @@
   "training_data": {
     "total_count": 39786,
     "default_rate": 0.14251244156235862,
-    "avg_age": 40.48811139596843,
+    "avg_age": 40.4632282712512,
     "avg_income": 5748.255562928333,
     "avg_multi_head": 9.294023023173981,
     "avg_credit_query": 0.2558186296687277,
     "feature_correlations": {
-      "overdue_count_12m": 1.0,
+      "overdue_count_12m": 0.0202,
       "multi_head_loan_count": -0.0102,
       "credit_query_count_3m": 0.055,
       "income": -0.0412,
       "dti": 0.042,
-      "age": -0.0014
+      "age": 0.0023
     }
   },
   "model_metrics": {
-    "accuracy": 1.0,
-    "auc": 1.0,
-    "avg_prob_default": 0.1397,
-    "avg_score": 90
+    "accuracy": 0.6516712741894949,
+    "auc": 0.6618874715837333,
+    "avg_prob_default": 0.4755,
+    "avg_score": 608.09,
+    "scorecard_lr_clip_pct_below_min": 0.0847,
+    "scorecard_lr_clip_pct_above_max": 0.0,
+    "score_quantiles_test_lr_only": [
+      350.0,
+      474.7,
+      650.0,
+      750.34,
+      817.98
+    ]
   }
 }

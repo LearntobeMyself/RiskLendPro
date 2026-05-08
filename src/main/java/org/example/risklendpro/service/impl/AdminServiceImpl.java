@@ -78,10 +78,41 @@ public class AdminServiceImpl implements AdminService {
             record.put("sysDecision", assessment.getSysDecision());
             record.put("status", assessment.getStatus());
             record.put("applyTime", assessment.getSubmitTime());
+            record.put("auditRemark", assessment.getAuditRemark());
+            record.put("riskTags", parseRiskTags(assessment.getAuditRemark()));
             records.add(record);
         }
         responsePage.setRecords(records);
         return responsePage;
+    }
+
+    private List<String> parseRiskTags(String auditRemark) {
+        List<String> tags = new ArrayList<>();
+        if (auditRemark == null || auditRemark.isEmpty()) {
+            return tags;
+        }
+        
+        if (auditRemark.contains("BLACKLIST_MATCH_LEVEL_2")) {
+            tags.add("姓名+地域命中黑名单");
+        } else if (auditRemark.contains("BLACKLIST_NAME_ONLY")) {
+            tags.add("仅姓名命中黑名单");
+        }
+        
+        if (auditRemark.contains("INCOME_OUTLIER")) {
+            tags.add("收入异常(需人工复核)");
+        } else if (auditRemark.contains("INCOME_TOLERANCE")) {
+            tags.add("收入偏差(已自动通过)");
+        }
+        
+        if (auditRemark.contains("SCORE_MANUAL_REVIEW")) {
+            tags.add("信用分区间需人工审核");
+        } else if (auditRemark.contains("SCORE_LOW")) {
+            tags.add("信用分过低");
+        } else if (auditRemark.contains("SCORE_MEDIUM")) {
+            tags.add("信用分中等");
+        }
+        
+        return tags;
     }
 
     @Override

@@ -4,6 +4,7 @@ from mysql.connector import Error
 from dotenv import load_dotenv
 import os
 import json
+from datetime import datetime
 
 load_dotenv()
 
@@ -39,60 +40,88 @@ def create_tables_if_not_exists():
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
+        cursor.execute("DROP TABLE IF EXISTS blacklist")
         create_blacklist_table = """
-            CREATE TABLE IF NOT EXISTS blacklist (
+            CREATE TABLE blacklist (
                 id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-                id_card VARCHAR(18) NOT NULL COMMENT '身份证号',
-                phone VARCHAR(20) COMMENT '手机号',
-                reason VARCHAR(200) NOT NULL COMMENT '拉黑原因',
-                source VARCHAR(50) NOT NULL COMMENT '来源',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '拉黑时间',
-                expire_at DATETIME NULL COMMENT '过期时间',
-                UNIQUE KEY uk_id_card (id_card)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='黑名单表';
+                name VARCHAR(100) NOT NULL COMMENT '被执行人姓名/名称（匹配第一维度）',
+                area_code VARCHAR(20) COMMENT '地区编码（由执行法院转换，匹配第二维度）',
+                birth_year INT COMMENT '出生年份（从出生日期提取，匹配第三维度）',
+                case_no VARCHAR(50) COMMENT '案号（人工审批时核对具体案件）',
+                court_name VARCHAR(100) COMMENT '执行法院（辅助展示）',
+                duty_status VARCHAR(50) COMMENT '被执行人履行情况（判定风险严重程度）',
+                behavior_details VARCHAR(500) COMMENT '失信被执行人行为情况（具体原因）',
+                risk_level VARCHAR(10) COMMENT '风险等级（HIGH/MEDIUM/LOW）',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+                expire_at DATETIME NULL COMMENT '过期时间（NULL=永久）',
+                KEY idx_name (name),
+                KEY idx_area_code (area_code),
+                KEY idx_birth_year (birth_year),
+                KEY idx_risk_level (risk_level)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='失信被执行人黑名单表';
         """
         cursor.execute(create_blacklist_table)
+        print("创建黑名单表完成")
         
+        cursor.execute("DROP TABLE IF EXISTS user_external_features")
         create_features_table = """
-            CREATE TABLE IF NOT EXISTS user_external_features (
+            CREATE TABLE user_external_features (
                 id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-                id_card VARCHAR(18) NOT NULL COMMENT '身份证号',
-                credit_score INT COMMENT '央行征信分',
-                overdue_count_12m INT DEFAULT 0 COMMENT '近12月逾期次数',
-                credit_query_count_3m INT DEFAULT 0 COMMENT '近3月征信查询次数',
-                multi_head_loan_count INT DEFAULT 0 COMMENT '多头借贷平台数',
-                multi_head_loan_total_amount DECIMAL(15,2) DEFAULT 0 COMMENT '多头借贷总金额',
-                device_is_virtual TINYINT(1) DEFAULT 0 COMMENT '是否虚拟设备',
-                device_change_count_30d INT DEFAULT 0 COMMENT '近30天更换设备次数',
-                ip_is_proxy TINYINT(1) DEFAULT 0 COMMENT '是否代理IP',
+                sk_id_curr BIGINT NOT NULL COMMENT '用户关联ID（用于Java查询映射）',
+                days_birth INT DEFAULT 0 COMMENT '出生日期天数（负数，验真：核对年龄）',
+                days_employed INT DEFAULT 0 COMMENT '入职天数（负数，验真：核对工作年限）',
+                amt_income_total DECIMAL(15,2) DEFAULT 0 COMMENT '后台记录收入（验真：核实收入）',
+                credit_bureau_week INT DEFAULT 0 COMMENT '近1周征信查询次数（评分：评估多头风险）',
+                credit_bureau_mon INT DEFAULT 0 COMMENT '近1月征信查询次数（评分：评估多头风险）',
+                days_last_phone_change INT DEFAULT 0 COMMENT '手机换号天数（评分：评估稳定性）',
+                active_loans_count INT DEFAULT 0 COMMENT '活跃贷款数（评分/验真：负债水平）',
+                ext_source_2 DECIMAL(10,6) DEFAULT 0 COMMENT '第三方评分A（评分：权重极高）',
+                ext_source_3 DECIMAL(10,6) DEFAULT 0 COMMENT '第三方评分B（评分：补充权威评价）',
+                flag_own_car TINYINT(1) DEFAULT 0 COMMENT '是否有车（0=否，1=是，验真：核实资产）',
+                occupation_type VARCHAR(50) COMMENT '职业类型（评分：职业风险分级）',
+                education_type VARCHAR(50) COMMENT '学历（验真：核实背景）',
+                target TINYINT(1) DEFAULT 0 COMMENT '历史标签（0=正常，1=逾期，回测：验证模型）',
+                prev_refused_count INT DEFAULT 0 COMMENT '历史被拒次数（拦截：严重风险则拒绝）',
                 data_source VARCHAR(50) COMMENT '数据来源',
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY uk_id_card (id_card)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户外部特征表';
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '最后更新时间',
+                UNIQUE KEY uk_sk_id_curr (sk_id_curr),
+                KEY idx_days_birth (days_birth),
+                KEY idx_target (target),
+                KEY idx_prev_refused (prev_refused_count)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户外部行为特征表（来自Home Credit数据）';
         """
         cursor.execute(create_features_table)
-        
+        print("创建用户特征表完成")
+
+        cursor.execute("DROP TABLE IF EXISTS scoring_rules")
         create_rules_table = """
-            CREATE TABLE IF NOT EXISTS scoring_rules (
-                id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+            CREATE TABLE scoring_rules (
+                id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
                 version VARCHAR(20) NOT NULL COMMENT '规则版本号',
-                rule_content JSON NOT NULL COMMENT '特征权重JSON',
-                intercept DECIMAL(8,4) NOT NULL COMMENT '模型截距',
-                threshold_auto_approve DECIMAL(5,2) NOT NULL COMMENT '自动通过阈值',
-                threshold_manual_review DECIMAL(5,2) NOT NULL COMMENT '人工审核阈值',
-                is_active TINYINT(1) DEFAULT 0 COMMENT '是否激活',
-                trained_at DATETIME COMMENT '训练时间',
-                training_data_count INT COMMENT '训练数据量',
-                accuracy DECIMAL(5,4) COMMENT '模型准确率',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                rule_content JSON NOT NULL COMMENT '完整规则JSON备份',
+                feature_weights JSON NOT NULL COMMENT 'LR特征权重 rules.feature_weights',
+                scorecard JSON NOT NULL COMMENT '评分卡规则 rules.scorecard',
+                application_rule_bonus JSON NULL COMMENT '申请表策略加成规则',
+                feature_scores JSON NULL COMMENT '旧版逐项评分规则',
+                feature_derivation JSON NULL COMMENT '特征推导说明',
+                intercept DECIMAL(16,8) NOT NULL COMMENT '逻辑回归截距项',
+                threshold_auto_approve DECIMAL(10,2) NOT NULL COMMENT '自动通过阈值（PDO量表）',
+                threshold_manual_review DECIMAL(10,2) NOT NULL COMMENT '人工审核阈值（PDO量表）',
+                is_active TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否激活（0=否，1=是）',
+                trained_at DATETIME NULL COMMENT '模型训练时间',
+                training_data_count INT NULL COMMENT '训练数据量',
+                accuracy DECIMAL(10,6) NULL COMMENT '模型准确率',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+                PRIMARY KEY (id),
                 UNIQUE KEY uk_version (version),
                 KEY idx_is_active (is_active)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评分规则配置表';
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='风控评分规则表——解析列+全量JSON';
         """
         cursor.execute(create_rules_table)
+        print("创建评分规则表完成")
         
         conn.commit()
-        print("所有表检查/创建完成")
+        print("所有表创建完成")
         
     except Error as e:
         print(f"创建表失败: {e}")
@@ -103,33 +132,47 @@ def create_tables_if_not_exists():
             cursor.close()
             conn.close()
 
-def get_db_connection():
-    return mysql.connector.connect(**DB_CONFIG)
+def get_db_connection(retry_count=0, max_retries=3):
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        return conn
+    except Error as e:
+        if retry_count < max_retries:
+            print(f"连接数据库失败，重试 {retry_count + 1}/{max_retries}...")
+            return get_db_connection(retry_count + 1, max_retries)
+        else:
+            raise e
 
 def load_blacklist_to_mysql():
     df = pd.read_csv("data/cleaned/cleaned_blacklist.csv", encoding="utf-8-sig")
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = None
+    cursor = None
     
     try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO blacklist (
+                name, area_code, birth_year, case_no, 
+                court_name, duty_status, behavior_details, 
+                risk_level, created_at, expire_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
         for _, row in df.iterrows():
-            sql = """
-                INSERT INTO blacklist (id_card, phone, reason, source, created_at, expire_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    phone = VALUES(phone),
-                    reason = VALUES(reason),
-                    source = VALUES(source),
-                    expire_at = VALUES(expire_at)
-            """
             expire_at = None if pd.isna(row["expire_at"]) else row["expire_at"]
             cursor.execute(sql, (
-                row["id_card"],
-                row["phone"],
-                row["reason"],
-                row["source"],
-                row["created_at"],
+                None if pd.isna(row["name"]) else row["name"],
+                None if pd.isna(row["area_code"]) else row["area_code"],
+                None if pd.isna(row["birth_year"]) else row["birth_year"],
+                None if pd.isna(row["case_no"]) else row["case_no"],
+                None if pd.isna(row["court_name"]) else row["court_name"],
+                None if pd.isna(row["duty_status"]) else row["duty_status"],
+                None if pd.isna(row["behavior_details"]) else row["behavior_details"],
+                None if pd.isna(row["risk_level"]) else row["risk_level"],
+                None if pd.isna(row["created_at"]) else row["created_at"],
                 expire_at
             ))
         
@@ -138,24 +181,15 @@ def load_blacklist_to_mysql():
     
     except Exception as e:
         print(f"写入黑名单数据失败: {e}")
-        conn.rollback()
+        if conn:
+            conn.rollback()
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
 
 BATCH_SIZE = 100
-MAX_RETRIES = 3
-
-def get_db_connection(retry_count=0):
-    try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-        return conn
-    except Error as e:
-        if retry_count < MAX_RETRIES:
-            print(f"连接数据库失败，重试 {retry_count + 1}/{MAX_RETRIES}...")
-            return get_db_connection(retry_count + 1)
-        else:
-            raise e
 
 def load_user_features_to_mysql():
     df = pd.read_csv("data/cleaned/cleaned_user_features.csv", encoding="utf-8-sig")
@@ -170,41 +204,37 @@ def load_user_features_to_mysql():
         total_rows = len(df)
         inserted_rows = 0
         
+        sql = """
+            INSERT INTO user_external_features (
+                sk_id_curr, days_birth, days_employed, amt_income_total,
+                credit_bureau_week, credit_bureau_mon, days_last_phone_change,
+                active_loans_count, ext_source_2, ext_source_3,
+                flag_own_car, occupation_type, education_type,
+                target, prev_refused_count, data_source, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
         for i in range(0, total_rows, BATCH_SIZE):
             batch = df.iloc[i:i+BATCH_SIZE]
             for _, row in batch.iterrows():
-                sql = """
-                    INSERT INTO user_external_features (
-                        id_card, credit_score, overdue_count_12m, 
-                        credit_query_count_3m, multi_head_loan_count,
-                        multi_head_loan_total_amount, device_is_virtual,
-                        device_change_count_30d, ip_is_proxy,
-                        data_source, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        credit_score = VALUES(credit_score),
-                        overdue_count_12m = VALUES(overdue_count_12m),
-                        credit_query_count_3m = VALUES(credit_query_count_3m),
-                        multi_head_loan_count = VALUES(multi_head_loan_count),
-                        multi_head_loan_total_amount = VALUES(multi_head_loan_total_amount),
-                        device_is_virtual = VALUES(device_is_virtual),
-                        device_change_count_30d = VALUES(device_change_count_30d),
-                        ip_is_proxy = VALUES(ip_is_proxy),
-                        data_source = VALUES(data_source),
-                        updated_at = VALUES(updated_at)
-                """
                 cursor.execute(sql, (
-                    row["id_card"],
-                    row["credit_score"],
-                    row["overdue_count_12m"],
-                    row["credit_query_count_3m"],
-                    row["multi_head_loan_count"],
-                    row["multi_head_loan_total_amount"],
-                    row["device_is_virtual"],
-                    row["device_change_count_30d"],
-                    row["ip_is_proxy"],
-                    row["data_source"],
-                    row["updated_at"]
+                    int(row["id_card"]),
+                    int(row["age"]),
+                    int(row["employment_years"] * 10),
+                    float(row["AMT_INCOME_TOTAL"]),
+                    int(row["credit_query_week"]),
+                    int(row["credit_query_month"]),
+                    int(row["phone_change_days"]),
+                    int(row["active_loans_count"]),
+                    float(row["ext_source_2"]),
+                    float(row["ext_source_3"]),
+                    int(row["has_car"]),
+                    row["occupation_type"],
+                    row["education"],
+                    int(row["has_default_history"]),
+                    int(row["prev_refused_count"]),
+                    "Home Credit",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 ))
             
             conn.commit()
@@ -226,8 +256,33 @@ def load_user_features_to_mysql():
         if conn and conn.is_connected():
             conn.close()
 
+SAMPLE_EXTERNAL_FEATURES_ROWS = [
+    ("110101198503151001", 780, 0, 1, 1, 5000.00, 0, 0, 0, "SAMPLE_TRAIN_MODEL_DOC"),
+    ("110101198503151002", 680, 0, 6, 5, 45000.00, 0, 1, 0, "SAMPLE_TRAIN_MODEL_DOC"),
+    ("110101198503151003", 520, 4, 15, 12, 280000.00, 0, 2, 0, "SAMPLE_TRAIN_MODEL_DOC"),
+    ("110101198503151004", 650, 0, 2, 2, 12000.00, 1, 3, 1, "SAMPLE_TRAIN_MODEL_DOC"),
+]
+
+def build_sample_external_features_sql():
+    lines = ["-- Persona A–D：与 load_sample_external_features_to_mysql() 写入内容一致"]
+    for row in SAMPLE_EXTERNAL_FEATURES_ROWS:
+        lines.append(
+            "INSERT INTO user_external_features (\n"
+            "    id_card, credit_score, overdue_count_12m, credit_query_count_3m,\n"
+            "    multi_head_loan_count, multi_head_loan_total_amount,\n"
+            "    device_is_virtual, device_change_count_30d, ip_is_proxy, data_source\n"
+            ") VALUES (\n"
+            f"    '{row[0]}', {row[1]}, {row[2]}, {row[3]},\n"
+            f"    {row[4]}, {row[5]:.2f},\n"
+            f"    {row[6]}, {row[7]}, {row[8]}, '{row[9]}'\n"
+            ");"
+        )
+    return "\n\n".join(lines)
+
+def load_sample_external_features_to_mysql():
+    print("警告：示例数据需要与新表结构匹配，当前跳过此步骤")
+
 def load_scoring_rules_to_mysql():
-    """加载评分规则到MySQL"""
     conn = None
     cursor = None
     try:
@@ -237,31 +292,38 @@ def load_scoring_rules_to_mysql():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        version = rules.get("version", "v1.0")
+        
+        cursor.execute("DELETE FROM scoring_rules WHERE version = %s", (version,))
+        
+        fw = rules.get("feature_weights") or {}
+        sc = rules.get("scorecard") or {}
+        arb = rules.get("application_rule_bonus")
+        fscores = rules.get("feature_scores")
+        fderiv = rules.get("feature_derivation")
+
         sql = """
             INSERT INTO scoring_rules (
-                version, rule_content, intercept, 
-                threshold_auto_approve, threshold_manual_review,
+                version, rule_content, feature_weights, scorecard,
+                application_rule_bonus, feature_scores, feature_derivation,
+                intercept, threshold_auto_approve, threshold_manual_review,
                 is_active, trained_at, training_data_count, accuracy
-            ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s)
-            ON DUPLICATE KEY UPDATE
-                rule_content = VALUES(rule_content),
-                intercept = VALUES(intercept),
-                threshold_auto_approve = VALUES(threshold_auto_approve),
-                threshold_manual_review = VALUES(threshold_manual_review),
-                is_active = VALUES(is_active),
-                trained_at = VALUES(trained_at),
-                training_data_count = VALUES(training_data_count),
-                accuracy = VALUES(accuracy)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s)
         """
         cursor.execute(sql, (
-            rules.get("version", "v1.0"),
+            version,
             json.dumps(rules, ensure_ascii=False),
+            json.dumps(fw, ensure_ascii=False),
+            json.dumps(sc, ensure_ascii=False),
+            json.dumps(arb, ensure_ascii=False) if arb is not None else None,
+            json.dumps(fscores, ensure_ascii=False) if fscores is not None else None,
+            json.dumps(fderiv, ensure_ascii=False) if fderiv is not None else None,
             rules.get("intercept", 0),
-            rules.get("thresholds", {}).get("auto_approve", 80),
-            rules.get("thresholds", {}).get("manual_review", 60),
+            rules.get("thresholds", {}).get("auto_approve", 720),
+            rules.get("thresholds", {}).get("manual_review", 580),
             1,
             rules.get("training_data", {}).get("total_count", 0),
-            rules.get("model_metrics", {}).get("accuracy", 0)
+            rules.get("model_metrics", {}).get("accuracy", 0),
         ))
         
         conn.commit()
@@ -281,11 +343,11 @@ def load_scoring_rules_to_mysql():
             conn.close()
 
 if __name__ == "__main__":
-    print("=" * 50)
+    print("=" * 60)
     print("步骤1: 创建数据库（如果不存在）")
     create_database_if_not_exists()
     
-    print("\n步骤2: 创建表（如果不存在）")
+    print("\n步骤2: 创建表（删除旧表并创建新表）")
     create_tables_if_not_exists()
     
     print("\n步骤3: 写入黑名单数据")
@@ -297,5 +359,5 @@ if __name__ == "__main__":
     print("\n步骤5: 写入评分规则数据")
     load_scoring_rules_to_mysql()
     
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 60)
     print("所有数据写入完成！")

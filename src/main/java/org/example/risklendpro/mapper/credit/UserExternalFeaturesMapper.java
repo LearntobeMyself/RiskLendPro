@@ -16,4 +16,10 @@ public interface UserExternalFeaturesMapper {
      */
     @Select("SELECT * FROM user_external_features WHERE id_card = #{idCard}")
     UserExternalFeatures selectByIdCard(@Param("idCard") String idCard);
+
+    /**
+     * 根据用户ID(sk_id_curr)查询用户外部特征
+     */
+    @Select("SELECT * FROM user_external_features WHERE sk_id_curr = #{skIdCurr}")
+    UserExternalFeatures selectBySkIdCurr(@Param("skIdCurr") Long skIdCurr);
 }

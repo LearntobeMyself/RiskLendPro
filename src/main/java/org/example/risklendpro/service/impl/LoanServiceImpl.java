@@ -81,12 +81,12 @@ public class LoanServiceImpl implements LoanService {
         checkOverdue(userId);
 
         // 3. 重新进行风控评估（每次借款前都需要重新评估）
-        int newScore = creditScoreEngine.calculateScore(buildRiskRequest(latestAssessment));
+        double newScore = creditScoreEngine.calculateScore(buildRiskRequest(latestAssessment));
         String newDecision = creditScoreEngine.getDecision(newScore);
 
         // 4. 如果风控评估未通过，拒绝借款
         if (!"APPROVE".equals(newDecision)) {
-            throw new RuntimeException("您的风控评估未通过（评分：" + newScore + "），无法借款");
+            throw new RuntimeException("您的风控评估未通过（评分：" + String.format("%.2f", newScore) + "），无法借款");
         }
 
         // 5. 计算新的授信额度

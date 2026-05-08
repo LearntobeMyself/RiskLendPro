@@ -161,23 +161,30 @@ CREATE TABLE user_external_features (
 
 ### 3.4 评分规则表（存储于MySQL）
 
+与仓库 [`risk-assessment/load_to_mysql.py`](risk-assessment/load_to_mysql.py) 中 DDL 一致：`load_to_mysql` 会先 **`DROP TABLE IF EXISTS scoring_rules`** 再建表（仅影响本表）。除全量 `rule_content` 外，将 Python 产出的 JSON **拆列** 存储，便于查询；Java 优先用解析列拼装规则树，缺列时再读 `rule_content`。
+
 ```sql
 CREATE TABLE scoring_rules (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-    version VARCHAR(20) NOT NULL COMMENT '规则版本号，如 v2.3.0',
-    rule_content JSON NOT NULL COMMENT '特征权重JSON（Python训练产出）',
-    intercept DECIMAL(8,4) NOT NULL COMMENT '模型截距',
-    threshold_auto_approve DECIMAL(5,2) NOT NULL COMMENT '自动通过阈值（默认80）',
-    threshold_manual_review DECIMAL(5,2) NOT NULL COMMENT '人工审核下限阈值（默认60）',
-    is_active TINYINT(1) DEFAULT 0 COMMENT '是否当前激活版本（0=否 1=是）',
-    trained_at DATETIME COMMENT '训练时间',
-    training_data_count INT COMMENT '训练数据量',
-    accuracy DECIMAL(5,4) COMMENT '模型准确率（AUC）',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    version VARCHAR(20) NOT NULL COMMENT '规则版本号',
+    rule_content JSON NOT NULL COMMENT '完整规则JSON备份',
+    feature_weights JSON NOT NULL COMMENT 'LR特征权重 rules.feature_weights',
+    scorecard JSON NOT NULL COMMENT '评分卡 rules.scorecard',
+    application_rule_bonus JSON NULL COMMENT '申请表策略加成',
+    feature_scores JSON NULL COMMENT '旧版逐项规则 feature_scores',
+    feature_derivation JSON NULL COMMENT '特征推导说明 feature_derivation',
+    intercept DECIMAL(16,8) NOT NULL COMMENT 'LR截距',
+    threshold_auto_approve DECIMAL(10,2) NOT NULL COMMENT '自动通过阈值（PDO量表如350–950）',
+    threshold_manual_review DECIMAL(10,2) NOT NULL COMMENT '人工审核阈值',
+    is_active TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否激活',
+    trained_at DATETIME NULL COMMENT '训练时间',
+    training_data_count INT NULL COMMENT '训练数据量',
+    accuracy DECIMAL(10,6) NULL COMMENT '模型准确率等指标',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_version (version) COMMENT '版本号唯一索引',
-    KEY idx_is_active (is_active) COMMENT '激活状态索引，用于快速查询当前生效规则'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评分规则配置表——Python训练产出，存储于MySQL';
+    UNIQUE KEY uk_version (version),
+    KEY idx_is_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评分规则——解析列+全量JSON';
 ```
 
 ***
@@ -825,23 +832,29 @@ def create_tables_if_not_exists():
         """
         cursor.execute(create_features_table)
         
-        # 创建评分规则表
+        cursor.execute("DROP TABLE IF EXISTS scoring_rules")
         create_rules_table = """
-            CREATE TABLE IF NOT EXISTS scoring_rules (
-                id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-                version VARCHAR(20) NOT NULL COMMENT '规则版本号',
-                rule_content JSON NOT NULL COMMENT '特征权重JSON',
-                intercept DECIMAL(8,4) NOT NULL COMMENT '模型截距',
-                threshold_auto_approve DECIMAL(5,2) NOT NULL COMMENT '自动通过阈值',
-                threshold_manual_review DECIMAL(5,2) NOT NULL COMMENT '人工审核阈值',
-                is_active TINYINT(1) DEFAULT 0 COMMENT '是否激活',
-                trained_at DATETIME COMMENT '训练时间',
-                training_data_count INT COMMENT '训练数据量',
-                accuracy DECIMAL(5,4) COMMENT '模型准确率',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            CREATE TABLE scoring_rules (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                version VARCHAR(20) NOT NULL,
+                rule_content JSON NOT NULL,
+                feature_weights JSON NOT NULL,
+                scorecard JSON NOT NULL,
+                application_rule_bonus JSON NULL,
+                feature_scores JSON NULL,
+                feature_derivation JSON NULL,
+                intercept DECIMAL(16,8) NOT NULL,
+                threshold_auto_approve DECIMAL(10,2) NOT NULL,
+                threshold_manual_review DECIMAL(10,2) NOT NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 0,
+                trained_at DATETIME NULL,
+                training_data_count INT NULL,
+                accuracy DECIMAL(10,6) NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
                 UNIQUE KEY uk_version (version),
                 KEY idx_is_active (is_active)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评分规则配置表';
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """
         cursor.execute(create_rules_table)
         
@@ -953,47 +966,8 @@ def load_user_features_to_mysql():
         conn.close()
 
 def load_scoring_rules_to_mysql():
-    """加载评分规则到MySQL"""
-    try:
-        with open("output/scoring_rules.json", "r", encoding="utf-8") as f:
-            rules = json.load(f)
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("UPDATE scoring_rules SET is_active = 0 WHERE is_active = 1")
-        
-        sql = """
-            INSERT INTO scoring_rules (
-                version, rule_content, intercept, 
-                threshold_auto_approve, threshold_manual_review,
-                is_active, trained_at, training_data_count, accuracy
-            ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s)
-        """
-        cursor.execute(sql, (
-            rules.get("version", "v1.0"),
-            json.dumps(rules, ensure_ascii=False),
-            rules.get("intercept", 0),
-            rules.get("thresholds", {}).get("auto_approve", 80),
-            rules.get("thresholds", {}).get("manual_review", 60),
-            1,
-            rules.get("training_data_count", 0),
-            rules.get("accuracy", 0)
-        ))
-        
-        conn.commit()
-        print("成功写入评分规则数据")
-        
-    except FileNotFoundError:
-        print("警告：未找到评分规则文件 output/scoring_rules.json")
-    except Exception as e:
-        print(f"写入评分规则失败: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        if conn and conn.is_connected():
-            cursor.close()
-            conn.close()
+    """加载评分规则：写入 rule_content + feature_weights/scorecard 等解析列（实现见仓库 load_to_mysql.py）。"""
+    ...
 
 if __name__ == "__main__":
     print("=" * 50)

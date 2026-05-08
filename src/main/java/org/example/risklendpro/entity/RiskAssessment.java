@@ -11,7 +11,6 @@ import java.util.Date;
 @Data
 @TableName("risk_assessment")
 public class RiskAssessment {
-    //TODO：风险评估有点问题，JWT身份认证，过期时间
     @TableId(type = IdType.INPUT)
     @TableField("apply_id")
     private String applyId;

@@ -5,7 +5,7 @@ package org.example.risklendpro.enums;
  */
 public enum SysDecisionEnum {
     APPROVE("APPROVE", "建议通过"),
-    REVIEW("REVIEW", "建议人工复核"),
+    MANUAL_REVIEW("MANUAL_REVIEW", "建议人工复核"),
     REJECT("REJECT", "建议拒绝");
     
     private final String value;

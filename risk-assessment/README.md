@@ -1,197 +1,133 @@
-# Python 风控评分系统
+# 风控评分系统 - Risk Assessment System
 
-基于工业级设计的风控评分系统，采用离线与在线分离架构。
+互联网个人贷款风控评分系统 - 离线数据处理版本，用于生成风控规则和评分卡。
 
 ## 项目结构
 
 ```
 risk-assessment/
-├── generate_mock_data.py      # 生成模拟外部API数据（模拟）
-├── clean_blacklist.py         # 清洗黑名单数据
-├── clean_user_features.py     # 清洗用户特征数据
-├── load_to_mysql.py           # 自动建库建表并写入数据
-├── train_scoring_model.py     # 模型训练（分析CSV文件）
-├── app/
-│   ├── api/
-│   │   ├── models.py          # Pydantic数据模型
-│   │   └── routes.py          # FastAPI路由
-│   ├── core/
-│   │   ├── credit_scorecard.py # 信用评分卡
-│   │   ├── fraud_engine.py    # 反欺诈引擎（模拟）
-│   │   ├── fusion.py          # 数据融合
-│   │   ├── identity_engine.py # 身份引擎（模拟）
-│   │   ├── limit_engine.py    # 额度引擎
-│   │   └── pipeline.py        # 评分管道
-│   ├── services/
-│   │   └── crawler.py         # 征信数据爬取服务（模拟）
-│   └── utils/
-│       └── __init__.py        # 工具函数
-├── data/
-│   ├── raw/                   # 原始数据（模拟外部API）
-│   │   ├── raw_blacklist.csv  # 原始黑名单（模拟）
-│   │   └── raw_user_features.csv  # 原始用户特征（模拟）
-│   ├── cleaned/               # 清洗后数据
-│   │   ├── cleaned_blacklist.csv
-│   │   └── cleaned_user_features.csv
-│   └── training_data.csv      # 历史训练数据（可选）
-├── output/
-│   └── scoring_rules.json     # 评分规则文件
-├── main.py                    # 应用入口
-└── requirements.txt           # 依赖项
+├── data/                   # 数据目录
+│   ├── raw/                # 原始数据
+│   │   ├── blacklist.csv           # 黑名单原始数据
+│   │   └── user_features.csv       # 用户特征原始数据
+│   ├── cleaned/            # 清洗后数据
+│   │   ├── cleaned_blacklist.csv   # 清洗后的黑名单
+│   │   └── cleaned_user_features.csv # 清洗后的用户特征
+│   └── training_data.csv   # 模型训练数据
+├── output/                 # 输出目录
+│   └── scoring_rules.json  # 训练好的评分规则
+├── .env                    # 环境变量配置
+├── clean_blacklist.py      # 黑名单数据清洗脚本
+├── clean_user_features.py  # 用户特征数据清洗脚本
+├── Dockerfile              # Docker 配置（可选）
+├── get_data.py             # 数据获取脚本
+├── load_to_mysql.py        # 数据入库脚本
+├── requirements.txt        # Python 依赖
+└── train_scoring_model.py  # 评分模型训练脚本
 ```
 
-## 配置说明
+## 快速开始
 
-创建 `.env` 文件：
+### 环境要求
 
-```env
-DB_HOST=47.109.109.231
-DB_PORT=3306
-DB_USER=admin
-DB_PASSWORD=admin
-DB_NAME=credit_data_db
-```
+- Python 3.9+
+- MySQL 8.0+（可选，用于数据存储）
 
-## 使用流程
-
-### 1. 生成模拟数据
-
-```bash
-python generate_mock_data.py
-```
-
-生成原始数据文件到 `data/raw/` 目录。
-
-### 2. 清洗数据
-
-```bash
-python clean_blacklist.py
-python clean_user_features.py
-```
-
-清洗后的数据保存到 `data/cleaned/` 目录。
-
-### 3. 写入数据库
-
-```bash
-python load_to_mysql.py
-```
-
-自动创建数据库和表，并将清洗后的数据写入MySQL。
-
-### 4. 训练模型
-
-```bash
-python train_scoring_model.py
-```
-
-分析CSV训练数据，训练逻辑回归模型，产出评分规则。
-
-### 5. 启动API服务
-
-```bash
-python main.py
-```
-
-## API接口
-
-### POST /predict
-
-授信评估接口
-
-### GET /health
-
-健康检查
-
-## 数据库表结构
-
-| 表名                       | 说明         |
-| ------------------------ | ---------- |
-| `blacklist`              | 黑名单表（一票否决） |
-| `user_external_features` | 用户外部特征表    |
-| `scoring_rules`          | 评分规则配置表    |
-
-## 依赖安装
+### 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 启动运行步骤
+### 配置环境变量（可选）
 
-### 1. 创建并激活环境
+复制 `.env` 文件并修改数据库连接配置（如果需要入库）：
 
-```
-# 删除旧环境（如果存在）
-conda remove -n risk-assessment --all -y
-
-# 创建新环境
-conda create -n risk-assessment 
-python=3.9 -y
-conda activate risk-assessment
-
-# 安装依赖
-cd 
-d:\javacode\RiskLendPro\risk-assessment
-pip install -r requirements.txt
+```env
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=your_username
+DB_PASSWORD=your_password
+DB_NAME=credit_data_db
 ```
 
-### 2. 执行数据处理流程
+## 数据处理流程
 
-```
-# 步骤1: 生成模拟数据（自动创建data文件
-夹）
-python generate_mock_data.py
-# 输出: 原始黑名单数据生成完毕... 原始用
-户特征数据生成完毕...
+### 1. 数据获取（可选）
 
-# 步骤2: 清洗数据
-python clean_blacklist.py
-# 输出: 原始数据行数: xxx → 去重后行数: 
-xxx → 清洗后黑名单数据: xxx 条
+从远程数据源获取示例数据：
 
-python clean_user_features.py
-# 输出: 原始数据行数: xxx → 去重后行数: 
-xxx → 清洗后用户特征数据: xxx 条
-
-# 步骤3: 写入数据库（自动创建数据库和表）
-python load_to_mysql.py
-# 输出: 数据库检查/创建完成 → 所有表检查/
-创建完成 → 写入数据成功
-
-# 步骤4: 训练模型
-python train_scoring_model.py
-# 输出: 模型训练完成 → 测试准确率: xxx 
-→ 评分规则已保存
-
-# 步骤5: 启动API服务
-python main.py
-# 输出: INFO:     Started server 
-process [xxxx] → Uvicorn running on 
-http://127.0.0.1:8000
+```bash
+python get_data.py
 ```
 
-### 3. 验证运行成功
+### 2. 数据清洗
 
-检查服务是否启动：
+```bash
+# 清洗黑名单数据（保留200条有地区编码的记录）
+python clean_blacklist.py
 
-- 打开浏览器访问： <http://localhost:8000/health>
-- 返回 {"status": "healthy"} 表示服务正常
-  检查数据库数据：
-
-```
-# 使用MySQL客户端连接
-mysql -h 47.109.109.231 -u admin -p
-# 密码: admin
-
-# 查询数据
-USE credit_data_db;
-SELECT COUNT(*) FROM 
-blacklist;      # 查看黑名单数量
-SELECT COUNT(*) FROM 
-user_external_features;  # 查看用户特
-征数量
-SELECT * FROM 
-scoring_rules;  
+# 清洗用户特征数据
+python clean_user_features.py
 ```
 
+### 3. 训练评分模型
+
+```bash
+python train_scoring_model.py
+```
+
+输出文件：`output/scoring_rules.json`
+
+### 4. 数据入库（可选）
+
+将清洗后的数据和评分规则写入 MySQL：
+
+```bash
+python load_to_mysql.py
+```
+
+## 核心脚本说明
+
+| 脚本 | 功能 |
+|------|------|
+| `clean_blacklist.py` | 清洗黑名单数据，提取姓名、地区编码、出生年份等信息 |
+| `clean_user_features.py` | 清洗用户特征数据，生成用于评分的特征 |
+| `train_scoring_model.py` | 训练逻辑回归模型，生成评分卡规则 |
+| `load_to_mysql.py` | 将数据和规则入库到 MySQL |
+| `get_data.py` | 从远程数据源获取示例数据 |
+
+## 数据说明
+
+### 黑名单数据字段
+- `name`: 被执行人姓名
+- `area_code`: 地区编码
+- `birth_year`: 出生年份
+- `case_no`: 案号
+- `court_name`: 执行法院
+- `duty_status`: 履行情况
+- `risk_level`: 风险等级 (HIGH/MEDIUM/LOW)
+
+### 用户特征数据字段
+- `SK_ID_CURR`: 用户唯一标识
+- `age`: 年龄
+- `employment_years`: 工作年限
+- `AMT_INCOME_TOTAL`: 收入总额
+- `ext_source_2/3`: 第三方评分
+- `has_car`: 是否有车
+- `occupation_type`: 职业类型
+- `education`: 学历
+- `has_default_history`: 历史违约记录
+
+## 评分规则输出
+
+评分规则存储在 `output/scoring_rules.json`，包含：
+- `feature_weights`: 逻辑回归特征权重
+- `scorecard`: 评分卡规则
+- `thresholds`: 阈值配置（自动通过/人工审核）
+- `intercept`: 逻辑回归截距项
+- `model_metrics`: 模型评估指标（准确率、AUC等）
+
+## License
+
+MIT License

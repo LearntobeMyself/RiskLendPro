@@ -6,17 +6,17 @@ import lombok.Data;
 @Data
 @Schema(description = "风控评估申请请求")
 public class RiskAssessmentRequest {
-    @Schema(description = "身份证号（唯一标识）", example = "110101199001011234")
+    @Schema(description = "身份证号（唯一标识）", example = "110101198503151001")
     private String idCard;
-    @Schema(description = "用户姓名", example = "张三")
+    @Schema(description = "用户姓名", example = "陈优质")
     private String name;
-    @Schema(description = "手机号码", example = "13800138001")
+    @Schema(description = "手机号码", example = "13800148001")
     private String phone;
-    @Schema(description = "接收结果的邮箱", example = "zhangsan@example.com")
+    @Schema(description = "接收结果的邮箱", example = "chen_a@example.com")
     private String email;
     @Schema(description = "0-女, 1-男", example = "1")
     private Integer gender;
-    @Schema(description = "出生日期 YYYY-MM-DD", example = "1990-01-01")
+    @Schema(description = "出生日期 YYYY-MM-DD", example = "1985-03-15")
     private String birthday;
     @Schema(description = "学历", example = "本科")
     private String education;
@@ -30,6 +30,6 @@ public class RiskAssessmentRequest {
     private Boolean hasHouse;
     @Schema(description = "是否有车", example = "true")
     private Boolean hasCar;
-    @Schema(description = "紧急联系人电话", example = "13800138000")
+    @Schema(description = "紧急联系人电话", example = "13800148000")
     private String contactPhone;
 }

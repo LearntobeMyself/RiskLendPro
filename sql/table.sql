@@ -137,17 +137,6 @@ CREATE TABLE `limit_adjust_log` (
                                     INDEX `idx_operator_id` (`operator_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='额度调整记录表';
 
-CREATE TABLE `mock_data` (
-                             `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
-                             `id_card` VARCHAR(18) NOT NULL UNIQUE COMMENT '身份证号',
-                             `is_blacklist` TINYINT(1) DEFAULT FALSE COMMENT '是否命中黑名单',
-                             `overdue_count` INT DEFAULT 0 COMMENT '历史逾期次数',
-                             `loan_count` INT DEFAULT 0 COMMENT '多头借贷平台数',
-                             `recent_query_count` INT DEFAULT 0 COMMENT '近期征信查询次数',
-                             `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                             `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-                             INDEX `idx_id_card` (`id_card`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模拟数据配置表';
 
 CREATE TABLE `vintage_data` (
                                 `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',

@@ -1,7 +1,9 @@
 package org.example.risklendpro.service.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.example.risklendpro.entity.credit.Blacklist;
 import org.example.risklendpro.entity.credit.ScoringRules;
 import org.example.risklendpro.entity.credit.UserExternalFeatures;
@@ -15,6 +17,8 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -32,54 +36,735 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private static class ScoringConfig {
+    private static final class Pair<T, U> {
+        private final T left;
+        private final U right;
+
+        Pair(T left, U right) {
+            this.left = left;
+            this.right = right;
+        }
+
+        T getLeft() { return left; }
+        U getRight() { return right; }
+    }
+
+    /** 与 Python rule JSON + scoring_rules 表列对齐 */
+    private static final class FullRuleConfig {
+        JsonNode ruleRoot;
+        ScoringRules rulesEntity;
         Map<String, Object> featureScores;
-        int autoApproveThreshold = 75;
-        int manualReviewThreshold = 50;
+        /** v5 规则缺省：350–950 PDO 量表下的占位阈值（以 DB/JSON 为准） */
+        double autoApproveThreshold = 720;
+        double manualReviewThreshold = 580;
     }
 
     @Override
     public boolean isInBlacklist(String idCard) {
-        Blacklist blacklist = blacklistMapper.selectByIdCard(idCard);
-        return blacklist != null;
+        String areaCode = extractAreaCodeFromIdCard(idCard);
+        Integer birthYear = extractBirthYearFromIdCard(idCard);
+        List<Blacklist> allBlacklist = blacklistMapper.selectAll();
+        for (Blacklist record : allBlacklist) {
+            if (areaCode != null && areaCode.equals(record.getAreaCode())) {
+                if (birthYear != null && birthYear.equals(record.getBirthYear())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    private ScoringConfig loadScoringConfig() {
-        ScoringConfig config = new ScoringConfig();
+    @Override
+    public BlacklistMatchResult checkBlacklist(String name, String idCard) {
+        if (name == null || name.trim().isEmpty()) {
+            return new BlacklistMatchResult(MatchLevel.NONE, null);
+        }
+
+        String areaCode = extractAreaCodeFromIdCard(idCard);
+        Integer birthYear = extractBirthYearFromIdCard(idCard);
+
+        List<Blacklist> allBlacklist = blacklistMapper.selectAll();
+
+        for (Blacklist record : allBlacklist) {
+            String blacklistName = record.getName();
+            if (blacklistName == null) {
+                continue;
+            }
+
+            if (!matchWildcardName(name, blacklistName)) {
+                continue;
+            }
+
+            String recordAreaCode = record.getAreaCode();
+            Integer recordBirthYear = record.getBirthYear();
+
+            boolean areaMatch = (recordAreaCode != null && !recordAreaCode.isEmpty()) && 
+                               (areaCode != null && areaCode.equals(recordAreaCode));
+            boolean birthYearMatch = (recordBirthYear != null) && (birthYear != null) && 
+                                    recordBirthYear.equals(birthYear);
+
+            if (areaMatch && birthYearMatch) {
+                return new BlacklistMatchResult(MatchLevel.FULL, record);
+            }
+
+            if (areaMatch) {
+                return new BlacklistMatchResult(MatchLevel.NAME_AREA, record);
+            }
+
+            return new BlacklistMatchResult(MatchLevel.NAME_ONLY, record);
+        }
+
+        return new BlacklistMatchResult(MatchLevel.NONE, null);
+    }
+
+    private boolean matchWildcardName(String realName, String patternName) {
+        String regex = patternName.replace("*", ".*");
+        return realName.matches(regex);
+    }
+
+    private String extractAreaCodeFromIdCard(String idCard) {
+        if (idCard == null || idCard.length() < 6) {
+            return "";
+        }
+        return idCard.substring(0, 6);
+    }
+
+    private Integer extractBirthYearFromIdCard(String idCard) {
+        if (idCard == null || idCard.length() < 10) {
+            return null;
+        }
+        try {
+            String yearStr = idCard.substring(6, 10);
+            return Integer.parseInt(yearStr);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private FullRuleConfig loadFullRuleConfig() {
+        FullRuleConfig cfg = new FullRuleConfig();
         ScoringRules rules = scoringRulesMapper.selectActiveRule();
-
-        if (rules != null && rules.getRuleContent() != null) {
-            try {
-                Map<String, Object> ruleMap = objectMapper.readValue(rules.getRuleContent(),
-                    new TypeReference<Map<String, Object>>() {});
-
-                Object featureScoresObj = ruleMap.get("feature_scores");
-                if (featureScoresObj instanceof Map) {
-                    config.featureScores = (Map<String, Object>) featureScoresObj;
+        cfg.rulesEntity = rules;
+        if (rules == null) {
+            return cfg;
+        }
+        if ((rules.getFeatureWeights() == null || rules.getFeatureWeights().isBlank())
+                && rules.getRuleContent() == null) {
+            return cfg;
+        }
+        try {
+            JsonNode root = buildRuleRootFromScoringColumns(rules);
+            if (root == null && rules.getRuleContent() != null) {
+                root = objectMapper.readTree(rules.getRuleContent());
+            }
+            cfg.ruleRoot = root;
+            JsonNode fs = cfg.ruleRoot != null ? cfg.ruleRoot.get("feature_scores") : null;
+            if (fs != null && fs.isObject()) {
+                cfg.featureScores = objectMapper.convertValue(fs, new TypeReference<Map<String, Object>>() {});
+            }
+            JsonNode th = cfg.ruleRoot != null ? cfg.ruleRoot.get("thresholds") : null;
+            if (th != null && th.isObject()) {
+                if (th.has("auto_approve")) {
+                    cfg.autoApproveThreshold = th.get("auto_approve").asDouble();
                 }
-
-                Object thresholdsObj = ruleMap.get("thresholds");
-                if (thresholdsObj instanceof Map) {
-                    Map<String, Object> thresholds = (Map<String, Object>) thresholdsObj;
-                    Object autoApproveObj = thresholds.get("auto_approve");
-                    if (autoApproveObj instanceof Number) {
-                        config.autoApproveThreshold = ((Number) autoApproveObj).intValue();
-                    }
-                    Object manualReviewObj = thresholds.get("manual_review");
-                    if (manualReviewObj instanceof Number) {
-                        config.manualReviewThreshold = ((Number) manualReviewObj).intValue();
-                    }
+                if (th.has("manual_review")) {
+                    cfg.manualReviewThreshold = th.get("manual_review").asDouble();
                 }
-            } catch (Exception e) {
-                config.featureScores = null;
+            }
+            if (rules.getThresholdAutoApprove() != null) {
+                cfg.autoApproveThreshold = rules.getThresholdAutoApprove().doubleValue();
+            }
+            if (rules.getThresholdManualReview() != null) {
+                cfg.manualReviewThreshold = rules.getThresholdManualReview().doubleValue();
+            }
+        } catch (Exception e) {
+            cfg.ruleRoot = null;
+            cfg.featureScores = null;
+        }
+        return cfg;
+    }
+
+    /**
+     * 使用 scoring_rules 表中解析列拼装与 rule_content 等价的 JSON 树（优先于解析整包 rule_content）。
+     */
+    private JsonNode buildRuleRootFromScoringColumns(ScoringRules rules) throws Exception {
+        if (rules.getFeatureWeights() == null || rules.getFeatureWeights().isBlank()) {
+            return null;
+        }
+        if (rules.getScorecard() == null || rules.getScorecard().isBlank()) {
+            return null;
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        if (rules.getVersion() != null) {
+            root.put("version", rules.getVersion());
+        }
+        if (rules.getIntercept() != null) {
+            root.put("intercept", rules.getIntercept().doubleValue());
+        }
+        root.set("feature_weights", objectMapper.readTree(rules.getFeatureWeights()));
+        root.set("scorecard", objectMapper.readTree(rules.getScorecard()));
+        ObjectNode th = objectMapper.createObjectNode();
+        if (rules.getThresholdAutoApprove() != null) {
+            th.put("auto_approve", rules.getThresholdAutoApprove().doubleValue());
+        }
+        if (rules.getThresholdManualReview() != null) {
+            th.put("manual_review", rules.getThresholdManualReview().doubleValue());
+        }
+        root.set("thresholds", th);
+        if (rules.getApplicationRuleBonus() != null && !rules.getApplicationRuleBonus().isBlank()) {
+            root.set("application_rule_bonus", objectMapper.readTree(rules.getApplicationRuleBonus()));
+        }
+        if (rules.getFeatureScores() != null && !rules.getFeatureScores().isBlank()) {
+            root.set("feature_scores", objectMapper.readTree(rules.getFeatureScores()));
+        }
+        if (rules.getFeatureDerivation() != null && !rules.getFeatureDerivation().isBlank()) {
+            root.set("feature_derivation", objectMapper.readTree(rules.getFeatureDerivation()));
+        }
+        return root;
+    }
+
+    private boolean hasFeatureWeights(FullRuleConfig cfg) {
+        if (cfg.ruleRoot == null) {
+            return false;
+        }
+        JsonNode fw = cfg.ruleRoot.get("feature_weights");
+        return fw != null && fw.isObject() && fw.size() > 0;
+    }
+
+    private double readIntercept(FullRuleConfig cfg) {
+        if (cfg.rulesEntity != null && cfg.rulesEntity.getIntercept() != null) {
+            return cfg.rulesEntity.getIntercept().doubleValue();
+        }
+        if (cfg.ruleRoot != null && cfg.ruleRoot.has("intercept")) {
+            return cfg.ruleRoot.get("intercept").asDouble();
+        }
+        return 0;
+    }
+
+    /**
+     * 与 train_scoring_model.calculate_scorecard_score 一致。
+     * scale=inverse_prob_0_100：round(100*(1-p)) 再 clamp（旧版）。
+     * 否则 odds_pdo：PDO+log-odds，再 clamp 到 min_score/max_score（默认 350–950）。
+     */
+    private double scorecardFromProb(double probDefault, JsonNode scorecardNode) {
+        final double eps = 1e-9;
+        double p = probDefault;
+        if (p <= 0.0) {
+            p = eps;
+        }
+        if (p >= 1.0) {
+            p = 1.0 - eps;
+        }
+
+        boolean inverse0100 = scorecardNode != null && scorecardNode.isObject()
+                && scorecardNode.has("scale")
+                && "inverse_prob_0_100".equals(scorecardNode.get("scale").asText());
+        if (inverse0100) {
+            int minS = scorecardNode.has("min_score") ? scorecardNode.get("min_score").asInt() : 0;
+            int maxS = scorecardNode.has("max_score") ? scorecardNode.get("max_score").asInt() : 100;
+            double score = Math.round(100.0 * (1.0 - p));
+            return Math.max(minS, Math.min(maxS, score));
+        }
+
+        double pdo = 80;
+        double targetScore = 650;
+        double targetOdds = 1;
+        int minS = 350;
+        int maxS = 950;
+        if (scorecardNode != null && scorecardNode.isObject()) {
+            if (scorecardNode.has("pdo")) {
+                pdo = scorecardNode.get("pdo").asDouble();
+            }
+            if (scorecardNode.has("target_score")) {
+                targetScore = scorecardNode.get("target_score").asDouble();
+            }
+            if (scorecardNode.has("target_odds")) {
+                targetOdds = scorecardNode.get("target_odds").asDouble();
+            }
+            if (scorecardNode.has("min_score")) {
+                minS = scorecardNode.get("min_score").asInt();
+            }
+            if (scorecardNode.has("max_score")) {
+                maxS = scorecardNode.get("max_score").asInt();
+            }
+        }
+        double odds = p / (1.0 - p);
+        double factor = -pdo / Math.log(2);
+        double offset = targetScore - factor * Math.log(targetOdds);
+        double score = offset + factor * Math.log(odds);
+        score = Math.max(minS, Math.min(maxS, score));
+        return Math.round(score * 100.0) / 100.0;
+    }
+
+    private static double sigmoid(double x) {
+        if (x >= 30) {
+            return 1.0;
+        }
+        if (x <= -30) {
+            return 0.0;
+        }
+        return 1.0 / (1.0 + Math.exp(-x));
+    }
+
+    /** pandas pd.cut(..., right=True) 与 train_scoring_model.bin_features 一致 */
+    private static String ageBinLabel(int age) {
+        if (age <= 25) {
+            return "age_0_25";
+        }
+        if (age <= 35) {
+            return "age_26_35";
+        }
+        if (age <= 50) {
+            return "age_36_50";
+        }
+        return "age_51_plus";
+    }
+
+    private static String incomeBinLabel(double income) {
+        if (income <= 5000) {
+            return "income_below_5000";
+        }
+        if (income <= 15000) {
+            return "income_5000_15000";
+        }
+        return "income_15000_plus";
+    }
+
+    private static String multiHeadBinLabel(int c) {
+        if (c <= 3) {
+            return "multi_head_0_3";
+        }
+        if (c <= 6) {
+            return "multi_head_4_6";
+        }
+        return "multi_head_7_plus";
+    }
+
+    private static String creditQueryBinLabel(int c) {
+        if (c <= 3) {
+            return "credit_query_0_3";
+        }
+        if (c <= 8) {
+            return "credit_query_4_8";
+        }
+        return "credit_query_9_plus";
+    }
+
+    private static String overdueBinLabel(int c) {
+        if (c <= 0) {
+            return "overdue_12m_0";
+        }
+        if (c <= 2) {
+            return "overdue_12m_1_2";
+        }
+        return "overdue_12m_3_plus";
+    }
+
+    private static String dtiBinLabel(int dti) {
+        if (dti <= 15) {
+            return "dti_low";
+        }
+        if (dti <= 30) {
+            return "dti_medium";
+        }
+        return "dti_high";
+    }
+
+    private int mapIncomeToValue(String income) {
+        if ("3000以下".equals(income)) {
+            return 2000;
+        }
+        if ("3000-8000".equals(income)) {
+            return 5500;
+        }
+        if ("8000-15000".equals(income)) {
+            return 11500;
+        }
+        if ("15000以上".equals(income)) {
+            return 20000;
+        }
+        return 5500;
+    }
+
+    private static void putAgeBinDummies(Map<String, Double> m, int age) {
+        String bin = ageBinLabel(age);
+        m.put("age_bin_age_26_35", "age_26_35".equals(bin) ? 1.0 : 0.0);
+        m.put("age_bin_age_36_50", "age_36_50".equals(bin) ? 1.0 : 0.0);
+        m.put("age_bin_age_51_plus", "age_51_plus".equals(bin) ? 1.0 : 0.0);
+    }
+
+    private static void putIncomeBinDummies(Map<String, Double> m, double income) {
+        String bin = incomeBinLabel(income);
+        m.put("income_bin_income_5000_15000", "income_5000_15000".equals(bin) ? 1.0 : 0.0);
+        m.put("income_bin_income_15000_plus", "income_15000_plus".equals(bin) ? 1.0 : 0.0);
+    }
+
+    private static void putMultiHeadBinDummies(Map<String, Double> m, int c) {
+        String bin = multiHeadBinLabel(c);
+        m.put("multi_head_bin_multi_head_4_6", "multi_head_4_6".equals(bin) ? 1.0 : 0.0);
+        m.put("multi_head_bin_multi_head_7_plus", "multi_head_7_plus".equals(bin) ? 1.0 : 0.0);
+    }
+
+    private static void putCreditQueryBinDummies(Map<String, Double> m, int c) {
+        String bin = creditQueryBinLabel(c);
+        m.put("credit_query_bin_credit_query_4_8", "credit_query_4_8".equals(bin) ? 1.0 : 0.0);
+        m.put("credit_query_bin_credit_query_9_plus", "credit_query_9_plus".equals(bin) ? 1.0 : 0.0);
+    }
+
+    private static void putOverdueBinDummies(Map<String, Double> m, int c) {
+        String bin = overdueBinLabel(c);
+        m.put("overdue_bin_overdue_12m_1_2", "overdue_12m_1_2".equals(bin) ? 1.0 : 0.0);
+        m.put("overdue_bin_overdue_12m_3_plus", "overdue_12m_3_plus".equals(bin) ? 1.0 : 0.0);
+    }
+
+    private static void putDtiBinDummies(Map<String, Double> m, int dti) {
+        String bin = dtiBinLabel(dti);
+        m.put("dti_bin_dti_medium", "dti_medium".equals(bin) ? 1.0 : 0.0);
+        m.put("dti_bin_dti_high", "dti_high".equals(bin) ? 1.0 : 0.0);
+    }
+
+    /**
+     * 与 train_scoring_model 中 edu_tier 三档对齐：系数来自 LC grade 分档训练，
+     * 此处将中文申请表枚举映射到同一 low/mid/high（见 scoring_rules.feature_derivation）。
+     */
+    private static String mapEducationToTier(String education) {
+        if (education == null || education.isEmpty()) {
+            return "low";
+        }
+        if ("博士".equals(education) || "硕士".equals(education)) {
+            return "high";
+        }
+        if ("本科".equals(education)) {
+            return "mid";
+        }
+        return "low";
+    }
+
+    private static void putEduTierDummies(Map<String, Double> m, String education) {
+        String tier = mapEducationToTier(education);
+        m.put("edu_tier_mid", "mid".equals(tier) ? 1.0 : 0.0);
+        m.put("edu_tier_high", "high".equals(tier) ? 1.0 : 0.0);
+    }
+
+    /** 与 LC emp_length 代理一致：公务员 / 企事业单位视为稳定就业 */
+    private static double jobStableFromJobType(String jobType) {
+        if (jobType == null) {
+            return 0.0;
+        }
+        if ("公务员".equals(jobType) || "企事业单位".equals(jobType)) {
+            return 1.0;
+        }
+        return 0.0;
+    }
+
+    private Map<String, Double> buildLogisticFeatureMap(RiskAssessmentRequest request, UserExternalFeatures ext) {
+        int birthYear = Integer.parseInt(request.getBirthday().substring(0, 4));
+        int age = java.time.LocalDate.now().getYear() - birthYear;
+        double income = mapIncomeToValue(request.getMonthlyIncome());
+        int multiHead = ext != null && ext.getActiveLoansCount() != null ? ext.getActiveLoansCount() : 0;
+        int creditQuery = ext != null && ext.getCreditBureauMon() != null ? ext.getCreditBureauMon() : 0;
+        int overdue = ext != null && ext.getTarget() != null ? ext.getTarget() : 0;
+        int dti = 20;
+        int deviceVirtual = 0;
+        int ipProxy = 0;
+
+        Map<String, Double> m = new LinkedHashMap<>();
+        m.put("age", (double) age);
+        m.put("income", income);
+        m.put("multi_head_loan_count", (double) multiHead);
+        m.put("credit_query_count_3m", (double) creditQuery);
+        m.put("overdue_count_12m", (double) overdue);
+        m.put("dti", (double) dti);
+        m.put("device_is_virtual", (double) deviceVirtual);
+        m.put("ip_is_proxy", (double) ipProxy);
+        putAgeBinDummies(m, age);
+        putIncomeBinDummies(m, income);
+        putMultiHeadBinDummies(m, multiHead);
+        putCreditQueryBinDummies(m, creditQuery);
+        putOverdueBinDummies(m, overdue);
+        putDtiBinDummies(m, dti);
+
+        putEduTierDummies(m, request.getEducation());
+        m.put("house_owner", Boolean.TRUE.equals(request.getHasHouse()) ? 1.0 : 0.0);
+        m.put("job_stable", jobStableFromJobType(request.getJobType()));
+        m.put("has_car_stated", Boolean.TRUE.equals(request.getHasCar()) ? 1.0 : 0.0);
+        m.put("marriage_married", "已婚".equals(request.getMarriage()) ? 1.0 : 0.0);
+        return m;
+    }
+
+    private String describeLogisticFeature(String key, double value) {
+        if ("intercept".equals(key)) {
+            return "基础评分";
+        }
+        if ("age".equals(key)) {
+            return "年龄";
+        }
+        if ("income".equals(key)) {
+            return "月收入";
+        }
+        if ("multi_head_loan_count".equals(key)) {
+            return "多头借贷平台数";
+        }
+        if ("credit_query_count_3m".equals(key)) {
+            return "近3月征信查询次数";
+        }
+        if ("overdue_count_12m".equals(key)) {
+            return "近12月逾期次数";
+        }
+        if ("dti".equals(key)) {
+            return "负债收入比";
+        }
+        if ("device_is_virtual".equals(key)) {
+            return value > 0.5 ? "使用虚拟设备，风险较高" : "设备正常";
+        }
+        if ("ip_is_proxy".equals(key)) {
+            return value > 0.5 ? "使用代理IP，风险较高" : "IP正常";
+        }
+        if (key.startsWith("age_bin_")) {
+            if (!key.contains("age_0_25") && value > 0.5) {
+                if (key.contains("age_26_35")) return "年龄处于黄金期(26-35岁)";
+                if (key.contains("age_36_50")) return "年龄处于稳定期(36-50岁)";
+                if (key.contains("age_51_plus")) return "年龄较大(51岁以上)";
+            }
+            return null;
+        }
+        if (key.startsWith("income_bin_")) {
+            if (value > 0.5) {
+                if (key.contains("income_below_5000")) return "收入较低(5000以下)";
+                if (key.contains("income_5000_15000")) return "收入中等(5000-15000)";
+                if (key.contains("income_15000_plus")) return "收入较高(15000以上)";
+            }
+            return null;
+        }
+        if (key.startsWith("multi_head_bin_")) {
+            if (value > 0.5) {
+                if (key.contains("multi_head_4_6")) return "多头借贷4-6家，风险偏高";
+                if (key.contains("multi_head_7_plus")) return "多头借贷7家以上，风险较高";
+            }
+            return null;
+        }
+        if (key.startsWith("credit_query_bin_")) {
+            if (value > 0.5) {
+                if (key.contains("credit_query_4_8")) return "近3月征信查询4-8次，较为频繁";
+                if (key.contains("credit_query_9_plus")) return "近3月征信查询9次以上，异常频繁";
+            }
+            return null;
+        }
+        if (key.startsWith("overdue_bin_")) {
+            if (value > 0.5) {
+                if (key.contains("overdue_12m_1_2")) return "近12月有1-2次逾期记录";
+                if (key.contains("overdue_12m_3_plus")) return "近12月逾期3次以上，风险较高";
+            }
+            return null;
+        }
+        if (key.startsWith("dti_bin_")) {
+            if (value > 0.5) {
+                if (key.contains("dti_medium")) return "负债收入比适中";
+                if (key.contains("dti_high")) return "负债收入比较高，风险偏高";
+            }
+            return null;
+        }
+        if ("edu_tier_mid".equals(key)) {
+            return value > 0.5 ? "本科学历" : null;
+        }
+        if ("edu_tier_high".equals(key)) {
+            return value > 0.5 ? "硕士及以上学历" : null;
+        }
+        if ("house_owner".equals(key)) {
+            return value > 0.5 ? "有房产" : null;
+        }
+        if ("job_stable".equals(key)) {
+            return value > 0.5 ? "稳定职业(公务员/企事业单位)" : null;
+        }
+        if ("has_car_stated".equals(key)) {
+            return value > 0.5 ? "有车产" : null;
+        }
+        if ("marriage_married".equals(key)) {
+            return value > 0.5 ? "已婚" : null;
+        }
+        if (key.startsWith("rule_bonus_")) {
+            return null;
+        }
+        return key;
+    }
+
+    private Pair<Double, List<ScoreContribution>> calculateLogisticScorecard(
+            RiskAssessmentRequest request, FullRuleConfig cfg) {
+        UserExternalFeatures ext = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(request.getIdCard()));
+        Map<String, Double> values = buildLogisticFeatureMap(request, ext);
+        double intercept = readIntercept(cfg);
+        JsonNode fw = cfg.ruleRoot.get("feature_weights");
+
+        List<ScoreContribution> contributions = new ArrayList<>();
+        contributions.add(new ScoreContribution(
+                "intercept", "1.0", intercept, intercept, "基础评分"));
+
+        double linear = intercept;
+        Iterator<Map.Entry<String, JsonNode>> it = fw.fields();
+        while (it.hasNext()) {
+            Map.Entry<String, JsonNode> e = it.next();
+            String key = e.getKey();
+            double w = e.getValue().asDouble();
+            double v = values.getOrDefault(key, 0.0);
+            double contrib = w * v;
+            linear += contrib;
+            
+            String description = describeLogisticFeature(key, v);
+            if (description == null) {
+                continue;
+            }
+            
+            String valStr = (v == (long) v) ? String.valueOf((long) v) : String.format("%.6g", v);
+            contributions.add(new ScoreContribution(key, valStr, w, contrib, description));
+        }
+
+        double prob = sigmoid(linear);
+        JsonNode scNode = cfg.ruleRoot.get("scorecard");
+        double lrScore = scorecardFromProb(prob, scNode);
+        double total = applyApplicationRuleBonus(request, cfg.ruleRoot, scNode, lrScore, contributions);
+        return new Pair<>(total, contributions);
+    }
+
+    private static Integer tryComputeAgeFromBirthday(String birthday) {
+        if (birthday == null || birthday.length() < 4) {
+            return null;
+        }
+        try {
+            int birthYear = Integer.parseInt(birthday.substring(0, 4));
+            return java.time.LocalDate.now().getYear() - birthYear;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    /**
+     * LR 映射分之上叠加 application_rule_bonus（婚姻/车/年龄）；加成受 cap_absolute_sum 限制后再夹紧到 scorecard 区间。
+     */
+    private double applyApplicationRuleBonus(
+            RiskAssessmentRequest request,
+            JsonNode ruleRoot,
+            JsonNode scorecardNode,
+            double lrScore,
+            List<ScoreContribution> contributions) {
+        if (ruleRoot == null || !ruleRoot.has("application_rule_bonus")) {
+            return lrScore;
+        }
+        JsonNode arb = ruleRoot.get("application_rule_bonus");
+        if (!arb.has("enabled") || !arb.get("enabled").asBoolean()) {
+            return lrScore;
+        }
+
+        double bonusSum = 0.0;
+        int cap = arb.has("cap_absolute_sum") ? arb.get("cap_absolute_sum").asInt(55) : 55;
+
+        if (arb.has("married_equals_bonus") && arb.get("married_equals_bonus").isObject()) {
+            JsonNode m = arb.get("married_equals_bonus");
+            String match = m.path("match").asText("已婚");
+            double b = m.path("bonus").asDouble(0.0);
+            if (match.equals(request.getMarriage())) {
+                bonusSum += b;
+                contributions.add(new ScoreContribution(
+                        "rule_bonus_marriage",
+                        request.getMarriage(),
+                        b,
+                        b,
+                        "申请表规则加成：婚姻匹配「" + match + "」（弥补 LR 侧婚姻权重常为 0）"));
             }
         }
 
-        return config;
+        if (arb.has("has_car_bonus") && Boolean.TRUE.equals(request.getHasCar())) {
+            double b = arb.get("has_car_bonus").asDouble(0.0);
+            bonusSum += b;
+            contributions.add(new ScoreContribution(
+                    "rule_bonus_car",
+                    "true",
+                    b,
+                    b,
+                    "申请表规则加成：有车（弥补 LR 侧车字段在 LC 常为常数）"));
+        }
+
+        if (arb.has("age_rules") && arb.get("age_rules").isArray()) {
+            Integer age = tryComputeAgeFromBirthday(request.getBirthday());
+            if (age != null) {
+                for (JsonNode rule : arb.get("age_rules")) {
+                    if (!ageMatchesAgeRule(age, rule)) {
+                        continue;
+                    }
+                    double b = rule.path("bonus").asDouble(0.0);
+                    String reason = rule.path("reason").asText("年龄规则");
+                    bonusSum += b;
+                    contributions.add(new ScoreContribution(
+                            "rule_bonus_age",
+                            String.valueOf(age),
+                            b,
+                            b,
+                            "申请表规则加成：" + reason + "（低龄违约率偏高、随年龄缓和）"));
+                    break;
+                }
+            }
+        }
+
+        bonusSum = Math.max(-cap, Math.min(cap, bonusSum));
+
+        int minS = 350;
+        int maxS = 950;
+        if (scorecardNode != null && scorecardNode.isObject()) {
+            if (scorecardNode.has("min_score")) {
+                minS = scorecardNode.get("min_score").asInt();
+            }
+            if (scorecardNode.has("max_score")) {
+                maxS = scorecardNode.get("max_score").asInt();
+            }
+        }
+        double combined = lrScore + bonusSum;
+        combined = Math.max(minS, Math.min(maxS, combined));
+        contributions.add(new ScoreContribution(
+                "rule_bonus_total",
+                String.format("%.2f", bonusSum),
+                1.0,
+                bonusSum,
+                "规则加成合计（已 cap），LR 基础分=" + String.format("%.2f", lrScore)));
+        return combined;
+    }
+
+    private static boolean ageMatchesAgeRule(int age, JsonNode rule) {
+        if (rule.has("lte") && age > rule.get("lte").asInt()) {
+            return false;
+        }
+        if (rule.has("gte") && age < rule.get("gte").asInt()) {
+            return false;
+        }
+        return true;
+    }
+
+    private Pair<Double, List<ScoreContribution>> calculateScoreWithDetails(RiskAssessmentRequest request) {
+        FullRuleConfig cfg = loadFullRuleConfig();
+        if (hasFeatureWeights(cfg)) {
+            return calculateLogisticScorecard(request, cfg);
+        }
+        return calculateLegacyScoreWithDetails(request, cfg);
+    }
+
+    @Override
+    public double calculateScore(RiskAssessmentRequest request) {
+        return calculateScoreWithDetails(request).getLeft();
+    }
+
+    @Override
+    public String getDecision(double score) {
+        FullRuleConfig cfg = loadFullRuleConfig();
+        if (score >= cfg.autoApproveThreshold) {
+            return "APPROVE";
+        }
+        if (score >= cfg.manualReviewThreshold) {
+            return "MANUAL_REVIEW";
+        }
+        return "REJECT";
     }
 
     private int getScoreFromGroups(int value, List<Map<String, Object>> groups) {
         for (Map<String, Object> group : groups) {
+            @SuppressWarnings("unchecked")
             List<Number> range = (List<Number>) group.get("range");
             double min = range.get(0).doubleValue();
             double max = range.get(1).doubleValue();
@@ -97,31 +782,14 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return 0;
     }
 
-    @Override
-    public int calculateScore(RiskAssessmentRequest request) {
-        return calculateScoreWithDetails(request).getLeft();
-    }
-
-    private static class Pair<T, U> {
-        private final T left;
-        private final U right;
-
-        public Pair(T left, U right) {
-            this.left = left;
-            this.right = right;
-        }
-
-        public T getLeft() { return left; }
-        public U getRight() { return right; }
-    }
-
-    private Pair<Integer, List<ScoreContribution>> calculateScoreWithDetails(RiskAssessmentRequest request) {
+    /** 无 feature_weights 时的旧版规则（基础分 100 + 分项 + clamp） */
+    private Pair<Double, List<ScoreContribution>> calculateLegacyScoreWithDetails(
+            RiskAssessmentRequest request, FullRuleConfig cfg) {
         int score = 100;
         List<ScoreContribution> contributions = new ArrayList<>();
         contributions.add(new ScoreContribution("基础分", "基础分", 100.0, 100.0, "信用评估基础分"));
 
-        ScoringConfig config = loadScoringConfig();
-        Map<String, Object> featureScores = config.featureScores;
+        Map<String, Object> featureScores = cfg.featureScores;
 
         int birthYear = Integer.parseInt(request.getBirthday().substring(0, 4));
         int age = java.time.LocalDate.now().getYear() - birthYear;
@@ -129,121 +797,136 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         int ageScore = calculateAgeScore(age, featureScores);
         score += ageScore;
         contributions.add(new ScoreContribution("年龄", String.valueOf(age), ageScore, ageScore,
-            getAgeReason(age, featureScores)));
+                getAgeReason(age, featureScores)));
 
         int incomeScore = calculateIncomeScore(request.getMonthlyIncome(), featureScores);
         score += incomeScore;
         contributions.add(new ScoreContribution("月收入", request.getMonthlyIncome(), incomeScore, incomeScore,
-            getIncomeReason(request.getMonthlyIncome(), featureScores)));
+                getIncomeReason(request.getMonthlyIncome(), featureScores)));
 
         int jobScore = calculateJobScore(request.getJobType(), featureScores);
         score += jobScore;
         contributions.add(new ScoreContribution("工作类型", request.getJobType(), jobScore, jobScore,
-            getJobReason(request.getJobType(), featureScores)));
+                getJobReason(request.getJobType(), featureScores)));
 
         int houseScore = calculateHouseScore(request.getHasHouse(), featureScores);
         score += houseScore;
-        contributions.add(new ScoreContribution("房产", Boolean.TRUE.equals(request.getHasHouse()) ? "有" : "无", 
-            houseScore, houseScore, Boolean.TRUE.equals(request.getHasHouse()) ? "有房产，资产稳定" : "无房产"));
+        contributions.add(new ScoreContribution("房产", Boolean.TRUE.equals(request.getHasHouse()) ? "有" : "无",
+                houseScore, houseScore, Boolean.TRUE.equals(request.getHasHouse()) ? "有房产，资产稳定" : "无房产"));
 
         int carScore = calculateCarScore(request.getHasCar(), featureScores);
         score += carScore;
-        contributions.add(new ScoreContribution("车产", Boolean.TRUE.equals(request.getHasCar()) ? "有" : "无", 
-            carScore, carScore, Boolean.TRUE.equals(request.getHasCar()) ? "有车产，资产状况良好" : "无车产"));
+        contributions.add(new ScoreContribution("车产", Boolean.TRUE.equals(request.getHasCar()) ? "有" : "无",
+                carScore, carScore, Boolean.TRUE.equals(request.getHasCar()) ? "有车产，资产状况良好" : "无车产"));
 
         int educationScore = calculateEducationScore(request.getEducation(), featureScores);
         score += educationScore;
         contributions.add(new ScoreContribution("学历", request.getEducation(), educationScore, educationScore,
-            getEducationReason(request.getEducation(), featureScores)));
+                getEducationReason(request.getEducation(), featureScores)));
 
         int marriageScore = calculateMarriageScore(request.getMarriage(), featureScores);
         score += marriageScore;
         contributions.add(new ScoreContribution("婚姻状况", request.getMarriage(), marriageScore, marriageScore,
-            "已婚".equals(request.getMarriage()) ? "已婚，生活更稳定" : "未婚"));
+                "已婚".equals(request.getMarriage()) ? "已婚，生活更稳定" : "未婚"));
 
-        UserExternalFeatures externalFeatures = userExternalFeaturesMapper.selectByIdCard(request.getIdCard());
+        UserExternalFeatures externalFeatures = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(request.getIdCard()));
         if (externalFeatures != null) {
-            int multiHeadScore = calculateMultiHeadScore(externalFeatures.getMultiHeadLoanCount(), featureScores);
+            Integer activeLoans = externalFeatures.getActiveLoansCount();
+            int multiHeadScore = calculateMultiHeadScore(activeLoans, featureScores);
             score += multiHeadScore;
-            contributions.add(new ScoreContribution("多头借贷平台数", 
-                String.valueOf(externalFeatures.getMultiHeadLoanCount()), 
-                multiHeadScore, multiHeadScore,
-                getMultiHeadReason(externalFeatures.getMultiHeadLoanCount(), featureScores)));
+            contributions.add(new ScoreContribution("活跃贷款数",
+                    String.valueOf(activeLoans),
+                    multiHeadScore, multiHeadScore,
+                    getMultiHeadReason(activeLoans, featureScores)));
 
-            int queryScore = calculateQueryScore(externalFeatures.getCreditQueryCount3m(), featureScores);
+            Integer creditBureauMon = externalFeatures.getCreditBureauMon();
+            int queryScore = calculateQueryScore(creditBureauMon, featureScores);
             score += queryScore;
-            contributions.add(new ScoreContribution("近3月征信查询", 
-                String.valueOf(externalFeatures.getCreditQueryCount3m()), 
-                queryScore, queryScore,
-                getQueryReason(externalFeatures.getCreditQueryCount3m(), featureScores)));
+            contributions.add(new ScoreContribution("近1月征信查询",
+                    String.valueOf(creditBureauMon),
+                    queryScore, queryScore,
+                    getQueryReason(creditBureauMon, featureScores)));
 
-            int overdueScore = calculateOverdueScore(externalFeatures.getOverdueCount12m(), featureScores);
+            Integer target = externalFeatures.getTarget();
+            int overdueScore = calculateOverdueScore(target, featureScores);
             score += overdueScore;
-            contributions.add(new ScoreContribution("近12月逾期", 
-                String.valueOf(externalFeatures.getOverdueCount12m()), 
-                overdueScore, overdueScore,
-                getOverdueReason(externalFeatures.getOverdueCount12m(), featureScores)));
+            contributions.add(new ScoreContribution("历史标签",
+                    String.valueOf(target),
+                    overdueScore, overdueScore,
+                    getOverdueReason(target, featureScores)));
 
-            int dtiScore = calculateDtiScore(externalFeatures.getDti(), featureScores);
-            score += dtiScore;
-            contributions.add(new ScoreContribution("负债收入比", 
-                String.valueOf(externalFeatures.getDti()), 
-                dtiScore, dtiScore,
-                getDtiReason(externalFeatures.getDti(), featureScores)));
-
-            int extCreditScore = calculateExternalCreditScore(externalFeatures.getCreditScore());
-            score += extCreditScore;
-            contributions.add(new ScoreContribution("外部信用分", 
-                String.valueOf(externalFeatures.getCreditScore()), 
-                extCreditScore, extCreditScore,
-                getExternalCreditReason(externalFeatures.getCreditScore())));
-
-            if (externalFeatures.getDeviceIsVirtual() != null && externalFeatures.getDeviceIsVirtual() == 1) {
-                score -= 20;
-                contributions.add(new ScoreContribution("虚拟设备", "是", -20.0, -20.0, "检测到虚拟设备，风险较高"));
-            }
-
-            if (externalFeatures.getIpIsProxy() != null && externalFeatures.getIpIsProxy() == 1) {
-                score -= 10;
-                contributions.add(new ScoreContribution("代理IP", "是", -10.0, -10.0, "检测到代理IP，风险中等"));
+            int prevRefused = externalFeatures.getPrevRefusedCount() != null ? externalFeatures.getPrevRefusedCount() : 0;
+            if (prevRefused > 0) {
+                score -= prevRefused * 5;
+                contributions.add(new ScoreContribution("历史被拒次数",
+                        String.valueOf(prevRefused),
+                        (double)(-prevRefused * 5), (double)(-prevRefused * 5),
+                        "历史被拒" + prevRefused + "次"));
             }
         }
 
         score = Math.max(10, Math.min(90, score));
-        return new Pair<>(score, contributions);
+        return new Pair<>((double) score, contributions);
     }
 
     private int calculateAgeScore(int age, Map<String, Object> featureScores) {
         if (featureScores == null) {
-            if (age < 22) return -10;
-            if (age < 25) return -10;
-            if (age < 30) return -5;
-            if (age < 40) return 8;
-            if (age < 50) return 5;
+            if (age < 22) {
+                return -10;
+            }
+            if (age < 25) {
+                return -10;
+            }
+            if (age < 30) {
+                return -5;
+            }
+            if (age < 40) {
+                return 8;
+            }
+            if (age < 50) {
+                return 5;
+            }
             return -3;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> ageConfig = (Map<String, Object>) featureScores.get("age");
-        if (ageConfig == null) return 0;
+        if (ageConfig == null) {
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) ageConfig.get("groups");
         return getScoreFromGroups(age, groups);
     }
 
     private String getAgeReason(int age, Map<String, Object> featureScores) {
         if (featureScores == null) {
-            if (age < 25) return "年龄较小";
-            if (age < 30) return "青年时期";
-            if (age < 40) return "黄金年龄段";
-            if (age < 50) return "稳定年龄段";
+            if (age < 25) {
+                return "年龄较小";
+            }
+            if (age < 30) {
+                return "青年时期";
+            }
+            if (age < 40) {
+                return "黄金年龄段";
+            }
+            if (age < 50) {
+                return "稳定年龄段";
+            }
             return "年龄较大";
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> ageConfig = (Map<String, Object>) featureScores.get("age");
-        if (ageConfig == null) return "";
+        if (ageConfig == null) {
+            return "";
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) ageConfig.get("groups");
         for (Map<String, Object> group : groups) {
+            @SuppressWarnings("unchecked")
             List<Number> range = (List<Number>) group.get("range");
             double min = range.get(0).doubleValue();
             double max = range.get(1).doubleValue();
@@ -256,16 +939,28 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     private int calculateIncomeScore(String income, Map<String, Object> featureScores) {
         if (featureScores == null) {
-            if ("3000以下".equals(income)) return -15;
-            if ("3000-8000".equals(income)) return -5;
-            if ("8000-15000".equals(income)) return 5;
-            if ("15000以上".equals(income)) return 15;
+            if ("3000以下".equals(income)) {
+                return -15;
+            }
+            if ("3000-8000".equals(income)) {
+                return -5;
+            }
+            if ("8000-15000".equals(income)) {
+                return 5;
+            }
+            if ("15000以上".equals(income)) {
+                return 15;
+            }
             return 0;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> incomeConfig = (Map<String, Object>) featureScores.get("income");
-        if (incomeConfig == null) return 0;
+        if (incomeConfig == null) {
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) incomeConfig.get("groups");
         int incomeValue = mapIncomeToValue(income);
         return getScoreFromGroups(incomeValue, groups);
@@ -273,19 +968,32 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     private String getIncomeReason(String income, Map<String, Object> featureScores) {
         if (featureScores == null) {
-            if ("3000以下".equals(income)) return "收入较低";
-            if ("3000-8000".equals(income)) return "收入一般";
-            if ("8000-15000".equals(income)) return "收入中等";
-            if ("15000以上".equals(income)) return "收入较高";
+            if ("3000以下".equals(income)) {
+                return "收入较低";
+            }
+            if ("3000-8000".equals(income)) {
+                return "收入一般";
+            }
+            if ("8000-15000".equals(income)) {
+                return "收入中等";
+            }
+            if ("15000以上".equals(income)) {
+                return "收入较高";
+            }
             return "";
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> incomeConfig = (Map<String, Object>) featureScores.get("income");
-        if (incomeConfig == null) return "";
+        if (incomeConfig == null) {
+            return "";
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) incomeConfig.get("groups");
         int incomeValue = mapIncomeToValue(income);
         for (Map<String, Object> group : groups) {
+            @SuppressWarnings("unchecked")
             List<Number> range = (List<Number>) group.get("range");
             double min = range.get(0).doubleValue();
             double max = range.get(1).doubleValue();
@@ -296,33 +1004,41 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return "";
     }
 
-    private int mapIncomeToValue(String income) {
-        if ("3000以下".equals(income)) return 2000;
-        if ("3000-8000".equals(income)) return 5500;
-        if ("8000-15000".equals(income)) return 11500;
-        if ("15000以上".equals(income)) return 20000;
-        return 5500;
-    }
-
     private int calculateJobScore(String jobType, Map<String, Object> featureScores) {
         if (featureScores == null) {
-            if ("公务员".equals(jobType)) return 15;
-            if ("企事业单位".equals(jobType)) return 10;
-            if ("私营企业".equals(jobType)) return 0;
+            if ("公务员".equals(jobType)) {
+                return 15;
+            }
+            if ("企事业单位".equals(jobType)) {
+                return 10;
+            }
+            if ("私营企业".equals(jobType)) {
+                return 0;
+            }
             return -5;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> jobConfig = (Map<String, Object>) featureScores.get("job_type");
-        if (jobConfig == null) return 0;
+        if (jobConfig == null) {
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> scores = (Map<String, Object>) jobConfig.get("scores");
         return getScoreFromDict(jobType, scores);
     }
 
     private String getJobReason(String jobType, Map<String, Object> featureScores) {
-        if ("公务员".equals(jobType)) return "最稳定工作";
-        if ("企事业单位".equals(jobType)) return "稳定工作";
-        if ("私营企业".equals(jobType)) return "一般工作";
+        if ("公务员".equals(jobType)) {
+            return "最稳定工作";
+        }
+        if ("企事业单位".equals(jobType)) {
+            return "稳定工作";
+        }
+        if ("私营企业".equals(jobType)) {
+            return "一般工作";
+        }
         return "工作不稳定";
     }
 
@@ -331,8 +1047,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             return Boolean.TRUE.equals(hasHouse) ? 10 : 0;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> houseConfig = (Map<String, Object>) featureScores.get("has_house");
-        if (houseConfig == null) return 0;
+        if (houseConfig == null) {
+            return 0;
+        }
 
         if (Boolean.TRUE.equals(hasHouse)) {
             return ((Number) houseConfig.get("has")).intValue();
@@ -345,8 +1064,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             return Boolean.TRUE.equals(hasCar) ? 5 : 0;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> carConfig = (Map<String, Object>) featureScores.get("has_car");
-        if (carConfig == null) return 0;
+        if (carConfig == null) {
+            return 0;
+        }
 
         if (Boolean.TRUE.equals(hasCar)) {
             return ((Number) carConfig.get("has")).intValue();
@@ -356,23 +1078,39 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     private int calculateEducationScore(String education, Map<String, Object> featureScores) {
         if (featureScores == null) {
-            if ("博士".equals(education)) return 15;
-            if ("硕士".equals(education)) return 10;
-            if ("本科".equals(education)) return 5;
+            if ("博士".equals(education)) {
+                return 15;
+            }
+            if ("硕士".equals(education)) {
+                return 10;
+            }
+            if ("本科".equals(education)) {
+                return 5;
+            }
             return -5;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> eduConfig = (Map<String, Object>) featureScores.get("education");
-        if (eduConfig == null) return 0;
+        if (eduConfig == null) {
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> scores = (Map<String, Object>) eduConfig.get("scores");
         return getScoreFromDict(education, scores);
     }
 
     private String getEducationReason(String education, Map<String, Object> featureScores) {
-        if ("博士".equals(education)) return "高学历";
-        if ("硕士".equals(education)) return "较高学历";
-        if ("本科".equals(education)) return "本科学历";
+        if ("博士".equals(education)) {
+            return "高学历";
+        }
+        if ("硕士".equals(education)) {
+            return "较高学历";
+        }
+        if ("本科".equals(education)) {
+            return "本科学历";
+        }
         return "学历较低";
     }
 
@@ -381,8 +1119,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             return "已婚".equals(marriage) ? 5 : 0;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> marriageConfig = (Map<String, Object>) featureScores.get("marriage");
-        if (marriageConfig == null) return 0;
+        if (marriageConfig == null) {
+            return 0;
+        }
 
         if ("已婚".equals(marriage)) {
             return ((Number) marriageConfig.get("married")).intValue();
@@ -391,37 +1132,62 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private int calculateMultiHeadScore(Integer count, Map<String, Object> featureScores) {
-        if (count == null) return 0;
-
-        if (featureScores == null) {
-            if (count >= 10) return -30;
-            if (count >= 6) return -20;
-            if (count >= 3) return -10;
+        if (count == null) {
             return 0;
         }
 
-        Map<String, Object> config = (Map<String, Object>) featureScores.get("multi_head_loan_count");
-        if (config == null) return 0;
+        if (featureScores == null) {
+            if (count >= 10) {
+                return -30;
+            }
+            if (count >= 6) {
+                return -20;
+            }
+            if (count >= 3) {
+                return -10;
+            }
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
+        Map<String, Object> config = (Map<String, Object>) featureScores.get("multi_head_loan_count");
+        if (config == null) {
+            return 0;
+        }
+
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         return getScoreFromGroups(count, groups);
     }
 
     private String getMultiHeadReason(Integer count, Map<String, Object> featureScores) {
-        if (count == null) return "";
+        if (count == null) {
+            return "";
+        }
 
         if (featureScores == null) {
-            if (count >= 10) return "极高多头";
-            if (count >= 6) return "高多头";
-            if (count >= 3) return "中等多头";
+            if (count >= 10) {
+                return "极高多头";
+            }
+            if (count >= 6) {
+                return "高多头";
+            }
+            if (count >= 3) {
+                return "中等多头";
+            }
             return "正常";
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> config = (Map<String, Object>) featureScores.get("multi_head_loan_count");
-        if (config == null) return "";
+        if (config == null) {
+            return "";
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         for (Map<String, Object> group : groups) {
+            @SuppressWarnings("unchecked")
             List<Number> range = (List<Number>) group.get("range");
             double min = range.get(0).doubleValue();
             double max = range.get(1).doubleValue();
@@ -433,37 +1199,62 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private int calculateQueryScore(Integer count, Map<String, Object> featureScores) {
-        if (count == null) return 0;
-
-        if (featureScores == null) {
-            if (count >= 10) return -15;
-            if (count >= 6) return -10;
-            if (count >= 3) return -5;
+        if (count == null) {
             return 0;
         }
 
-        Map<String, Object> config = (Map<String, Object>) featureScores.get("credit_query_count_3m");
-        if (config == null) return 0;
+        if (featureScores == null) {
+            if (count >= 10) {
+                return -15;
+            }
+            if (count >= 6) {
+                return -10;
+            }
+            if (count >= 3) {
+                return -5;
+            }
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
+        Map<String, Object> config = (Map<String, Object>) featureScores.get("credit_query_count_3m");
+        if (config == null) {
+            return 0;
+        }
+
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         return getScoreFromGroups(count, groups);
     }
 
     private String getQueryReason(Integer count, Map<String, Object> featureScores) {
-        if (count == null) return "";
+        if (count == null) {
+            return "";
+        }
 
         if (featureScores == null) {
-            if (count >= 10) return "异常频繁";
-            if (count >= 6) return "查询频繁";
-            if (count >= 3) return "查询较多";
+            if (count >= 10) {
+                return "异常频繁";
+            }
+            if (count >= 6) {
+                return "查询频繁";
+            }
+            if (count >= 3) {
+                return "查询较多";
+            }
             return "正常";
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> config = (Map<String, Object>) featureScores.get("credit_query_count_3m");
-        if (config == null) return "";
+        if (config == null) {
+            return "";
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         for (Map<String, Object> group : groups) {
+            @SuppressWarnings("unchecked")
             List<Number> range = (List<Number>) group.get("range");
             double min = range.get(0).doubleValue();
             double max = range.get(1).doubleValue();
@@ -475,37 +1266,62 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private int calculateOverdueScore(Integer count, Map<String, Object> featureScores) {
-        if (count == null) return 0;
-
-        if (featureScores == null) {
-            if (count >= 3) return -40;
-            if (count >= 2) return -25;
-            if (count >= 1) return -15;
+        if (count == null) {
             return 0;
         }
 
-        Map<String, Object> config = (Map<String, Object>) featureScores.get("overdue_count_12m");
-        if (config == null) return 0;
+        if (featureScores == null) {
+            if (count >= 3) {
+                return -40;
+            }
+            if (count >= 2) {
+                return -25;
+            }
+            if (count >= 1) {
+                return -15;
+            }
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
+        Map<String, Object> config = (Map<String, Object>) featureScores.get("overdue_count_12m");
+        if (config == null) {
+            return 0;
+        }
+
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         return getScoreFromGroups(count, groups);
     }
 
     private String getOverdueReason(Integer count, Map<String, Object> featureScores) {
-        if (count == null) return "";
+        if (count == null) {
+            return "";
+        }
 
         if (featureScores == null) {
-            if (count >= 3) return "严重逾期";
-            if (count >= 2) return "多次逾期";
-            if (count >= 1) return "有逾期记录";
+            if (count >= 3) {
+                return "严重逾期";
+            }
+            if (count >= 2) {
+                return "多次逾期";
+            }
+            if (count >= 1) {
+                return "有逾期记录";
+            }
             return "无逾期";
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> config = (Map<String, Object>) featureScores.get("overdue_count_12m");
-        if (config == null) return "";
+        if (config == null) {
+            return "";
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         for (Map<String, Object> group : groups) {
+            @SuppressWarnings("unchecked")
             List<Number> range = (List<Number>) group.get("range");
             double min = range.get(0).doubleValue();
             double max = range.get(1).doubleValue();
@@ -517,35 +1333,56 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private int calculateDtiScore(Integer dti, Map<String, Object> featureScores) {
-        if (dti == null) return 0;
+        if (dti == null) {
+            return 0;
+        }
 
         if (featureScores == null) {
-            if (dti >= 30) return -15;
-            if (dti >= 15) return 0;
+            if (dti >= 30) {
+                return -15;
+            }
+            if (dti >= 15) {
+                return 0;
+            }
             return 5;
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> config = (Map<String, Object>) featureScores.get("dti");
-        if (config == null) return 0;
+        if (config == null) {
+            return 0;
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         return getScoreFromGroups(dti, groups);
     }
 
     private String getDtiReason(Integer dti, Map<String, Object> featureScores) {
-        if (dti == null) return "";
+        if (dti == null) {
+            return "";
+        }
 
         if (featureScores == null) {
-            if (dti >= 30) return "负债较高";
-            if (dti >= 15) return "负债正常";
+            if (dti >= 30) {
+                return "负债较高";
+            }
+            if (dti >= 15) {
+                return "负债正常";
+            }
             return "负债低";
         }
 
+        @SuppressWarnings("unchecked")
         Map<String, Object> config = (Map<String, Object>) featureScores.get("dti");
-        if (config == null) return "";
+        if (config == null) {
+            return "";
+        }
 
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> groups = (List<Map<String, Object>>) config.get("groups");
         for (Map<String, Object> group : groups) {
+            @SuppressWarnings("unchecked")
             List<Number> range = (List<Number>) group.get("range");
             double min = range.get(0).doubleValue();
             double max = range.get(1).doubleValue();
@@ -557,47 +1394,51 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private int calculateExternalCreditScore(Integer score) {
-        if (score == null) return 0;
-        if (score >= 800) return 10;
-        if (score >= 700) return 5;
-        if (score < 600) return -10;
+        if (score == null) {
+            return 0;
+        }
+        if (score >= 800) {
+            return 10;
+        }
+        if (score >= 700) {
+            return 5;
+        }
+        if (score < 600) {
+            return -10;
+        }
         return 0;
     }
 
     private String getExternalCreditReason(Integer score) {
-        if (score == null) return "";
-        if (score >= 800) return "外部信用非常优秀";
-        if (score >= 700) return "外部信用良好";
-        if (score < 600) return "外部信用较差";
+        if (score == null) {
+            return "";
+        }
+        if (score >= 800) {
+            return "外部信用非常优秀";
+        }
+        if (score >= 700) {
+            return "外部信用良好";
+        }
+        if (score < 600) {
+            return "外部信用较差";
+        }
         return "外部信用一般";
     }
 
     @Override
-    public String getDecision(int score) {
-        ScoringConfig config = loadScoringConfig();
-        if (score >= config.autoApproveThreshold) {
-            return "APPROVE";
-        } else if (score >= config.manualReviewThreshold) {
-            return "REVIEW";
-        } else {
-            return "REJECT";
-        }
-    }
-
-    @Override
-    public double calculateCreditLimit(int score, String monthlyIncome) {
+    public double calculateCreditLimit(double score, String monthlyIncome) {
         return calculateCreditLimitWithFeatures(score, monthlyIncome, null);
     }
 
     @Override
-    public double calculateCreditLimitWithFeatures(int score, String monthlyIncome, String idCard) {
+    public double calculateCreditLimitWithFeatures(double score, String monthlyIncome, String idCard) {
         int incomeValue = mapIncomeToValue(monthlyIncome);
-        double limit = 0;
+        double limit;
 
-        ScoringConfig config = loadScoringConfig();
-        if (score >= config.autoApproveThreshold) {
+        FullRuleConfig cfg = loadFullRuleConfig();
+        if (score >= cfg.autoApproveThreshold) {
             limit = incomeValue * 12;
-        } else if (score >= config.manualReviewThreshold) {
+        } else if (score >= cfg.manualReviewThreshold) {
             limit = incomeValue * 10;
         } else {
             limit = incomeValue * 8;
@@ -607,11 +1448,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             limit = adjustLimitByExternalFeatures(limit, idCard, incomeValue);
         }
 
-        if (score >= config.autoApproveThreshold && limit > 500000) {
+        if (score >= cfg.autoApproveThreshold && limit > 500000) {
             limit = 500000;
-        } else if (score >= config.manualReviewThreshold && score < config.autoApproveThreshold && limit > 300000) {
+        } else if (score >= cfg.manualReviewThreshold && score < cfg.autoApproveThreshold && limit > 300000) {
             limit = 300000;
-        } else if (score < config.manualReviewThreshold && limit > 200000) {
+        } else if (score < cfg.manualReviewThreshold && limit > 200000) {
             limit = 200000;
         }
 
@@ -619,7 +1460,7 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private double adjustLimitByExternalFeatures(double baseLimit, String idCard, int incomeValue) {
-        UserExternalFeatures features = userExternalFeaturesMapper.selectByIdCard(idCard);
+        UserExternalFeatures features = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(idCard));
         if (features == null) {
             return baseLimit;
         }
@@ -627,34 +1468,21 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         double adjustedLimit = baseLimit;
         double penaltyRate = 0.0;
 
-        if (features.getMultiHeadLoanCount() != null && features.getMultiHeadLoanCount() > 3) {
-            int excess = features.getMultiHeadLoanCount() - 3;
+        if (features.getActiveLoansCount() != null && features.getActiveLoansCount() > 3) {
+            int excess = features.getActiveLoansCount() - 3;
             penaltyRate += excess * 0.10;
         }
 
-        if (features.getOverdueCount12m() != null && features.getOverdueCount12m() > 0) {
-            penaltyRate += features.getOverdueCount12m() * 0.15;
+        if (features.getTarget() != null && features.getTarget() > 0) {
+            penaltyRate += features.getTarget() * 0.15;
         }
 
-        if (features.getCreditQueryCount3m() != null && features.getCreditQueryCount3m() > 5) {
+        if (features.getCreditBureauMon() != null && features.getCreditBureauMon() > 5) {
             penaltyRate += 0.05;
         }
 
-        if (features.getDeviceIsVirtual() != null && features.getDeviceIsVirtual() == 1) {
-            penaltyRate += 0.50;
-        }
-
-        if (features.getIpIsProxy() != null && features.getIpIsProxy() == 1) {
-            penaltyRate += 0.20;
-        }
-
-        if (features.getMultiHeadLoanTotalAmount() != null
-                && features.getMultiHeadLoanTotalAmount().compareTo(BigDecimal.ZERO) > 0) {
-            int annualIncome = incomeValue * 12;
-            double amountRatio = features.getMultiHeadLoanTotalAmount().doubleValue() / annualIncome;
-            if (amountRatio > 0.5) {
-                penaltyRate += 0.10;
-            }
+        if (features.getPrevRefusedCount() != null && features.getPrevRefusedCount() > 0) {
+            penaltyRate += features.getPrevRefusedCount() * 0.10;
         }
 
         penaltyRate = Math.min(penaltyRate, 0.80);
@@ -665,8 +1493,8 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     @Override
     public ScoreDetailReport getScoreDetailReport(RiskAssessmentRequest request) {
-        Pair<Integer, List<ScoreContribution>> result = calculateScoreWithDetails(request);
-        int score = result.getLeft();
+        Pair<Double, List<ScoreContribution>> result = calculateScoreWithDetails(request);
+        double score = result.getLeft();
         List<ScoreContribution> contributions = result.getRight();
 
         String decision = getDecision(score);
@@ -677,17 +1505,10 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private ExternalFeatures getExternalFeatures(String idCard) {
-        UserExternalFeatures features = userExternalFeaturesMapper.selectByIdCard(idCard);
+        UserExternalFeatures features = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(idCard));
         ExternalFeatures result = new ExternalFeatures();
 
         if (features != null) {
-            result.setCreditScore(features.getCreditScore());
-            result.setOverdueCount12m(features.getOverdueCount12m());
-            result.setCreditQueryCount3m(features.getCreditQueryCount3m());
-            result.setMultiHeadLoanCount(features.getMultiHeadLoanCount());
-            result.setMultiHeadLoanTotalAmount(features.getMultiHeadLoanTotalAmount());
-            result.setDeviceIsVirtual(features.getDeviceIsVirtual());
-            result.setIpIsProxy(features.getIpIsProxy());
             result.setDataSource(features.getDataSource());
             if (features.getUpdatedAt() != null) {
                 result.setUpdatedAt(features.getUpdatedAt().toString());
@@ -698,9 +1519,15 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private BlacklistCheck getBlacklistCheck(String idCard) {
-        Blacklist blacklist = blacklistMapper.selectByIdCard(idCard);
-        if (blacklist != null) {
-            return new BlacklistCheck(true, blacklist.getSource(), blacklist.getReason());
+        String areaCode = extractAreaCodeFromIdCard(idCard);
+        Integer birthYear = extractBirthYearFromIdCard(idCard);
+        List<Blacklist> allBlacklist = blacklistMapper.selectAll();
+        for (Blacklist record : allBlacklist) {
+            if (areaCode != null && areaCode.equals(record.getAreaCode())) {
+                if (birthYear != null && birthYear.equals(record.getBirthYear())) {
+                    return new BlacklistCheck(true, "credit_data_db", "命中黑名单");
+                }
+            }
         }
         return new BlacklistCheck(false, null, null);
     }
