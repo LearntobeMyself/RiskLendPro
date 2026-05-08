@@ -6,62 +6,6 @@ spring:
     pathmatch:
       matching-strategy: ant_path_matcher
 
-  # 多数据源配置
-  datasource:
-    # 主数据源 - RiskLendPro（业务数据）
-    primary:
-      jdbc-url: jdbc:mysql://47.109.109.231:3306/RiskLendPro?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
-      username: admin
-      password: admin
-      driver-class-name: com.mysql.cj.jdbc.Driver
-      hikari:
-        connection-timeout: 30000
-        maximum-pool-size: 10
-    # 从数据源 - credit_data_db（Python同步的风控数据）
-    credit:
-      jdbc-url: jdbc:mysql://47.109.109.231:3306/credit_data_db?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
-      username: admin
-      password: admin
-      driver-class-name: com.mysql.cj.jdbc.Driver
-      hikari:
-        connection-timeout: 30000
-        maximum-pool-size: 5
-
-  # 邮件服务器配置
-  mail:
-    host: smtp.qq.com
-    port: 465
-    username: 3272548868@qq.com
-    password: zivjkqqmyqffchcf
-    default-encoding: UTF-8
-    properties:
-      mail:
-        smtp:
-          socketFactory:
-            class: javax.net.ssl.SSLSocketFactory
-          auth: true
-          ssl:
-            enable: true
-          timeout: 5000
-          connectiontimeout: 5000
-          writetimeout: 5000
-        debug: true
-
-  # Redis配置
-  data:
-    redis:
-      host: 47.109.109.231
-      port: 6379
-      password: 123456
-      database: 0
-      timeout: 10000
-      lettuce:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
-          max-wait: -1
-
   # 安全配置
   security:
     user:
@@ -94,3 +38,4 @@ logging:
   level:
     root: info
     org.example.risklendpro: debug
+
