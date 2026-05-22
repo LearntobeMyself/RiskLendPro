@@ -17,9 +17,14 @@ public class UserExternalFeatures {
     private Long id;
     
     /**
-     * 用户关联ID（用于Java查询映射）
+     * Home Credit 申请 ID（SK_ID_CURR）
      */
     private Long skIdCurr;
+
+    /**
+     * 演示用身份证号（与主库 user.id_card 一致，Java 优先按此关联外部特征）
+     */
+    private String idCard;
     
     /**
      * 出生日期天数（负数，验真：核对年龄）

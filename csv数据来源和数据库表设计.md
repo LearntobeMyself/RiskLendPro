@@ -1,138 +1,186 @@
-# 评分规则csv
+# RiskLendPro 数据来源与数据库表设计
 
-李老师提供CSV数据说明
+本文档描述风控系统使用的三类数据：**Home Credit 训练宽表**、**模拟第三方征信窄表**、**失信被执行人黑名单**。全链路（Python 训练 + MySQL + Java 推理）已统一为 **Home Credit（HC）**，不再使用 Lending Club 训练。
 
-## 一、数据来源
+---
 
-本数据集来自 **Lending Club**（美国最大的P2P借贷平台），是风控领域非常经典的公开数据集。
+## 一、总览
 
-## 二、文件清单
+| 数据 | 文件/表 | 用途 |
+|------|---------|------|
+| HC 训练宽表 | `risk-assessment/data/raw/home_credit_train_min.parquet` | A 卡 LR 训练、特征工程参考 |
+| 模拟第三方征信 | `credit_data_db.user_external_features` | Java 推理时第三方特征 + 验真对照 |
+| 黑名单 | `credit_data_db.blacklist` | 贷前拦截 / 人工复核 |
 
-| 文件                                      | 类型    | 说明                 |
-| :-------------------------------------- | :---- | :----------------- |
-| `loan.csv`                              | CSV   | 主数据集，包含贷款申请和还款记录   |
-| `LCDataDictionary.xlsx`                 | Excel | 数据字典，详细解释每个字段含义    |
-| `grouped_table.json`                    | JSON  | 分组统计信息（违约 vs 正常还款） |
-| `Receiver_Operating_Characteristic.png` | PNG   | ROC曲线，模型评估指标可视化    |
+```text
+home_credit_train_min.parquet
+        ├─► train_scoring_model.py  →  output/scoring_rules.json
+        └─► clean_user_features.py →  cleaned_user_features.csv → load_to_mysql.py
+```
 
-## 三、关键字段说明
+---
 
-### 3.1 基本信息
+## 二、Home Credit 训练宽表（`home_credit_train_min.parquet`）
 
-| 字段        | 说明   | 示例值                               |
-| :-------- | :--- | :-------------------------------- |
-| `term`    | 贷款期限 | 36 months / 60 months             |
-| `grade`   | 贷款等级 | A, B, C, D, E                     |
-| `purpose` | 贷款用途 | credit\_card, debt\_consolidation |
+### 2.1 来源与规模
 
-### 3.2 财务信息
+| 项 | 说明 |
+|----|------|
+| 竞赛 | [Kaggle Home Credit Default Risk（2018）](https://www.kaggle.com/competitions/home-credit-default-risk) |
+| 托管 | [HuggingFace jamirc/home_credit_default_risk](https://huggingface.co/datasets/jamirc/home_credit_default_risk) |
+| 本地文件 | `risk-assessment/data/raw/home_credit_train_min.parquet`（社区精简版，约 108MB） |
+| 粒度 | 一行 = 一笔贷款申请（`SK_ID_CURR`） |
+| 列数 | 约 **318 列**（申请原始 + bureau/prev/inst/cc/pos 聚合 + 竞赛衍生，非官方 122 列） |
 
-| 字段           | 说明      |
-| :----------- | :------ |
-| `annual_inc` | 年收入     |
-| `dti`        | 债务收入比   |
-| `revol_bal`  | 循环信用余额  |
-| `revol_util` | 循环信用利用率 |
+### 2.2 宽表列分组（目录）
 
-### 3.3 征信信息
+| 分组 | 列名前缀/代表列 | 业务含义 | 本项目 |
+|------|----------------|----------|--------|
+| 主键与标签 | `SK_ID_CURR`, `TARGET` | 申请 ID；是否还款困难（0/1） | `TARGET` 仅作训练标签 |
+| 申请原始 | `DAYS_BIRTH`, `DAYS_EMPLOYED`, `AMT_INCOME_TOTAL`, `AMT_CREDIT`, `NAME_EDUCATION_TYPE`, `OCCUPATION_TYPE`, `FLAG_OWN_CAR`, `AMT_REQ_CREDIT_BUREAU_*`, `EXT_SOURCE_1/2/3` 等 | 进件申请表与竞赛方汇总征信查询/外部分 | 见下文「8 维 LR」「验真列」 |
+| 外部机构信贷 | `bureau_*`, `active_loans_count`, `active_debt_sum` | 其他金融机构历史（`bureau.csv` 聚合） | `active_loans_count` 入 LR；其余本期文档化不入模 |
+| 信用卡 | `cc_*` | 信用卡账单聚合 | 本期不入 LR |
+| 分期还款 | `inst_*` | 旧贷还款行为聚合 | 本期不入 LR（非本笔贷后 B 卡） |
+| POS 现金贷 | `pos_*` | POS 合同 DPD 聚合 | 本期不入 LR |
+| 本机构历史申请 | `prev_*`, `prev_refused` | 历史申请/被拒 | `prev_refused` 入验真/规则 |
+| 简单衍生 | `CREDIT_INCOME_RATIO`, `AGE_YEARS`, `EXT_SOURCE_MEAN` 等 | 比率与统计 | 本期不入 LR |
+| 深度衍生 | `EXT_2_pow2`, `final_score`, `application_risk_score`, `risk_score_composite` 等 | 竞赛特征工程 / 疑似综合分 | **禁止入模**（泄漏或与 8 维契约不一致） |
 
-| 字段               | 说明                                                          |
-| :--------------- | :---------------------------------------------------------- |
-| `inq_last_6mths` | 近6个月征信查询次数                                                  |
-| `open_acc`       | 未结清账户数                                                      |
-| `total_acc`      | 总账户数                                                        |
-| `delinq_2yrs`    | 近两年逾期次数（申请时点可得，常见字段名亦可能是数据字典中的等价列）                          |
-| `grade`          | 贷款等级 A–G（用于训练侧 **edu\_tier** 三档，对应推理侧学历枚举）                  |
-| `home_ownership` | 住房权属 OWN / MORTGAGE / RENT 等（用于 **house\_owner**，对齐推理侧是否有房） |
-| `emp_length`     | 工作年限描述（用于 **job\_stable**，对齐推理侧单位性质：公务员/企事业单位）              |
+### 2.3 逻辑回归入模：8 维（训练键 = Java 键）
 
-### 3.4 标签字段
+| 逻辑角色 | 训练/推理键名 | Parquet 源列 | 说明 |
+|----------|---------------|-------------|------|
+| 申请 | `days_birth` | `DAYS_BIRTH` | 出生距申请日天数（常为负） |
+| 申请 | `days_employed` | `DAYS_EMPLOYED` | 入职距申请日天数 |
+| 申请 | `amt_income_total` | `AMT_INCOME_TOTAL` | 年收入；推理用**申请表月收入×12** |
+| 第三方 | `ext_source_2` | `EXT_SOURCE_2` | 外部权威综合分 A |
+| 第三方 | `ext_source_3` | `EXT_SOURCE_3` | 外部权威综合分 B |
+| 第三方 | `amt_req_credit_bureau_mon` | `AMT_REQ_CREDIT_BUREAU_MON` | 近 1 月征信查询次数 |
+| 第三方 | `amt_req_credit_bureau_week` | `AMT_REQ_CREDIT_BUREAU_WEEK` | 近 1 周征信查询次数 |
+| 第三方 | `active_loans_count` | `active_loans_count` | 活跃贷款数（bureau 聚合） |
 
-| 字段            | 说明   | 违约标识                          |
-| :------------ | :--- | :---------------------------- |
-| `loan_status` | 贷款状态 | Charged Off=违约, Fully Paid=正常 |
+- 标签：`TARGET` → 训练内部 `defaulted`（**不得**作为特征）。
+- 预处理：第三方连续列缺失均值填充；`StandardScaler` 后 LR；权重写入 `scoring_rules.json` 的 `feature_weights`、`feature_scaler`。
 
-## 四、字段映射建议
+### 2.4 第三方模拟征信：训练中使用的 5 列
 
-用于训练风控模型时的字段映射：
+以下列**必须**来自 `user_external_features`，且与训练权重一一对应（不得 Java 硬编码未训练字段参与 LR）：
 
-| 模型字段                    | 数据源字段               | 转换方式                                                                                                          |
-| :---------------------- | :------------------ | :------------------------------------------------------------------------------------------------------------ |
-| `income`                | `annual_inc`        | 除以12得到月收入                                                                                                     |
-| `credit_query_count_3m` | `inq_last_6mths`    | 乘以0.5估算                                                                                                       |
-| `multi_head_loan_count` | `open_acc`          | 直接使用                                                                                                          |
-| `overdue_count_12m`     | `delinq_2yrs`（或等价列） | 缺失填 0，`clip` 到合理上限；**禁止**用 `loan_status` 反推逾期，否则与标签 `defaulted` 泄漏等价，推理评分会饱和在极端区间                             |
-| `edu_tier`（模型内部）        | `grade`             | **high**：A、B；**mid**：C；**low**：D–G 或缺失。推理时中文学历映射见 `output/scoring_rules.json` 内 `feature_derivation.edu_tier` |
-| `house_owner`（0/1）      | `home_ownership`    | OWN 或 MORTGAGE→1，否则→0。推理时对应申请表 **hasHouse**                                                                   |
-| `job_stable`（0/1）       | `emp_length`        | 含「10+」或解析年限≥5→1，否则→0。推理时 **jobType** 为公务员、企事业单位→1                                                             |
-| `has_car_stated`（0/1）   | （LC 通常无）            | 训练侧恒为 0；有车系数依赖模拟数据或后续含车字段的 CSV。推理时对应 **hasCar**                                                               |
-| `marriage_married`（0/1） | （LC 通常无）            | 训练矩阵一般不包含该列；模拟训练可有。推理时 **已婚**→1                                                                               |
-| `defaulted`             | `loan_status`       | Charged Off→1, Fully Paid→0（仅作标签 Y）                                                                           |
+| 训练键名 | Parquet 源列 | 库表列 |
+|----------|-------------|--------|
+| `ext_source_2` | `EXT_SOURCE_2` | `ext_source_2` |
+| `ext_source_3` | `EXT_SOURCE_3` | `ext_source_3` |
+| `amt_req_credit_bureau_mon` | `AMT_REQ_CREDIT_BUREAU_MON` | `credit_bureau_mon` |
+| `amt_req_credit_bureau_week` | `AMT_REQ_CREDIT_BUREAU_WEEK` | `credit_bureau_week` |
+| `active_loans_count` | `active_loans_count` | `active_loans_count` |
 
-## 五、使用建议
+### 2.5 验真 / 规则层（进库、不进 LR）
 
-1. **数据准备**：将 `loan.csv` 复制到 `risk-assessment/data/training_data.csv`
-2. **模型训练**：运行 `python train_scoring_model.py` 进行训练
-3. **结果分析**：查看 `output/scoring_rules.json` 获取特征权重
+| Parquet 源列 | 库表列 | 用途 |
+|-------------|--------|------|
+| `SK_ID_CURR` | `sk_id_curr` | Home Credit 申请 ID |
+| （清洗生成） | `id_card` | 与主库 `user.id_card` 一致；Java **优先** `selectByIdCard` 关联 |
+| `AMT_INCOME_TOTAL` | `amt_income_total` | 收入验真：对比用户自填月收入区间 |
+| `DAYS_BIRTH` | `days_birth` | 年龄验真对照 |
+| `DAYS_EMPLOYED` | `days_employed` | 工龄验真对照 |
+| `DAYS_LAST_PHONE_CHANGE` | `days_last_phone_change` | 手机稳定性 |
+| `FLAG_OWN_CAR` | `flag_own_car` | 资产验真 |
+| `NAME_EDUCATION_TYPE` | `education_type` | 学历验真 |
+| `OCCUPATION_TYPE` | `occupation_type` | 职业展示/策略 |
+| `prev_refused` | `prev_refused_count` | 历史被拒（宽表列名为 `prev_refused`） |
+| `TARGET` | `target` | 回测标签，不入 LR |
 
-## 六、统计信息
+### 2.6 明确排除（勿用于 LR）
 
-从 `grouped_table.json` 可以看出：
+`final_score`、`application_risk_score`、`risk_score_composite`、`net_score` 及大量 `EXT_*` 多项式、`inst_*` / `cc_*` / `pos_*` 等竞赛衍生列。
 
-- **正常还款（Fully Paid）**：约36,000条
-- **违约（Charged Off）**：约6,400条
-- **样本比例**：约85%正常 vs 15%违约
+---
 
-# 黑名单数据来源csv
+## 三、模拟第三方征信表（`user_external_features`）
 
-### **1. 官方浙江温州市——失信被执行人数据（2497条）**
+**数据库**：`credit_data_db`（与主业务库分离）
 
-数据量：2497条
+| 列名 | 类型 | 对应 HC / 用途 |
+|------|------|----------------|
+| `id` | BIGINT | 主键 |
+| `sk_id_curr` | BIGINT | `SK_ID_CURR` |
+| `id_card` | VARCHAR(20) | 清洗 CSV 的 `id_card`；Java `selectByIdCard` 关联 |
+| `days_birth` | INT | 验真 |
+| `days_employed` | INT | 验真 |
+| `amt_income_total` | DECIMAL | 验真（后台收入） |
+| `credit_bureau_week` | INT | LR 第三方 |
+| `credit_bureau_mon` | INT | LR 第三方 |
+| `days_last_phone_change` | INT | 规则/展示 |
+| `active_loans_count` | INT | LR 第三方 |
+| `ext_source_2` | DECIMAL | LR 第三方 |
+| `ext_source_3` | DECIMAL | LR 第三方 |
+| `flag_own_car` | TINYINT | 验真 |
+| `occupation_type` | VARCHAR | 展示 |
+| `education_type` | VARCHAR | 验真 |
+| `target` | TINYINT | 回测 |
+| `prev_refused_count` | INT | 规则/拦截 |
+| `data_source` | VARCHAR | 如 `Home Credit` |
+| `updated_at` | DATETIME | 更新时间 |
 
-**下载链接**：
+实体类：[`UserExternalFeatures.java`](src/main/java/org/example/risklendpro/entity/credit/UserExternalFeatures.java)
 
-- [CSV格式](https://data.wenzhou.gov.cn/jdop_front/detail/data.do?iid=13341\&searchString=)
-- XLS、XML、JSON、RDF格式也可以在同一页面下载
+---
 
-包含字段：被执行人姓名/名称、案号、执行法院、立案时间、执行标的金额、法定代表人、组织机构代码等
+## 四、黑名单数据
 
-### 清洗后数据结构表为
+### 4.1 来源
 
-1. **name** (被执行人姓名/名称)：匹配的第一维度。
-2. **area\_code** (由 执行法院 转化)：匹配的第二维度（地域）。例如“北京市通州区”对应 110112。
-3. **birth\_year** (从 出生日期 提取)：匹配的第三维度（年龄）。提取 1977。
-4. **case\_no** (案号)：用于人工审批时，管理员核对具体案件。
-5. **court\_name** (执行法院)：辅助展示。
-6. **duty\_status** (被执行人的履行情况)：判定风险严重程度。如“全部未履行”是最高风险。
-7. **behavior\_details** (失信被执行人行为情况)：具体原因，如“有履行能力而拒不履行”。
+**浙江温州市失信被执行人公开数据**（约 2497 条）
 
-<br />
+- [CSV 下载](https://data.wenzhou.gov.cn/jdop_front/detail/data.do?iid=13341)
 
-# 用户行为特征数据来源csv
+### 4.2 清洗后字段（`blacklist` 表）
 
-**数据来源：** 本项目使用的数据源自 Kaggle 上的 [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk) 竞赛数据集。
+| 字段 | 说明 |
+|------|------|
+| `name` | 被执行人姓名（匹配维度 1） |
+| `area_code` | 地区编码（维度 2） |
+| `birth_year` | 出生年份（维度 3） |
+| `case_no` | 案号 |
+| `court_name` | 执行法院 |
+| `duty_status` | 履行情况 |
+| `behavior_details` | 失信行为描述 |
+| `risk_level` | HIGH / MEDIUM / LOW |
 
-**数据集说明：** 具体使用的文件为 `home_credit_train_ready.csv`，由 [jamirc](https://huggingface.co/datasets/jamirc/home_credit_default_risk) 在 Hugging Face 平台托管。该数据包含了 Home Credit 提供的客户申请信息，目标是预测客户是否具有违约风险。数据经过了预处理，包含了用于构建预测模型的静态特征和历史信贷记录衍生特征。
+---
 
-<br />
+## 五、评分规则输出（`scoring_rules.json` / `scoring_rules` 表）
 
-### 清洗后的数据结构为
+训练脚本输出 JSON，入库后供 Java 读取。逐项公式、8 维特征系数、PDO 参数与决策阈值的**可读解释**见 [`risk-assessment/HomeCredit评分卡使用说明.md` 第 10 章](risk-assessment/HomeCredit评分卡使用说明.md#10-评分规则解读scoring_rulesjson)。
 
-| **类别**    | **字段名 (HC 原始名)**               | **业务意义**   | **用途**              |
-| :-------- | :----------------------------- | :--------- | :------------------ |
-| **主键**    | SK\_ID\_CURR                   | 用户关联 ID    | 用于 Java 查询映射        |
-| **基础事实**  | DAYS\_BIRTH                    | 出生日期       | **验真**：看用户填的年龄对不对   |
-| <br />    | DAYS\_EMPLOYED                 | 入职天数       | **验真**：看用户填的工作年限对不对 |
-| <br />    | AMT\_INCOME\_TOTAL             | **后台记录收入** | **验真**：看用户填的收入是否造假  |
-| **多头/行为** | AMT\_REQ\_CREDIT\_BUREAU\_WEEK | 近1周征信查询    | **评分**：评估多头风险       |
-| <br />    | AMT\_REQ\_CREDIT\_BUREAU\_MON  | 近1月征信查询    | **评分**：评估多头风险       |
-| <br />    | DAYS\_LAST\_PHONE\_CHANGE      | 手机换号天数     | **评分**：评估稳定性        |
-| <br />    | active\_loans\_count           | 活跃贷款数      | **评分/验真**：负债水平      |
-| **外部权威**  | EXT\_SOURCE\_2                 | 第三方评分 A    | **评分**：权重极高，代表权威评价  |
-| <br />    | EXT\_SOURCE\_3                 | 第三方评分 B    | **评分**：补充权威评价       |
-| **资产/现状** | FLAG\_OWN\_CAR                 | 是否有车       | **验真**：核实资产         |
-| <br />    | OCCUPATION\_TYPE               | 职业类型       | **评分**：职业风险分级       |
-| <br />    | NAME\_EDUCATION\_TYPE          | 学历         | **验真**：核实背景         |
-| **历史表现**  | TARGET                         | 历史标签 (0/1) | **回测**：验证你的模型准不准    |
-| <br />    | prev\_refused\_count           | 历史被拒次数     | **拦截**：有过往严重风险则拒绝   |
+| 节点 | 说明 |
+|------|------|
+| `model_type` | `hc_lr_standardized` |
+| `feature_weights` | 8 维 LR 系数（须含 `ext_source_2` 等） |
+| `feature_scaler` | 每特征 mean/scale |
+| `intercept` | 截距 |
+| `scorecard` | PDO 评分卡参数 |
+| `thresholds.auto_approve` / `thresholds.manual_review` | 自动通过 / 人工复核阈值（PDO 分；当前 v6.0-hc 为 776 / 642） |
+| `training_data.third_party_features` | 第三方 5 列名单 |
 
+---
+
+## 附录 A：Lending Club（已废弃）
+
+> 以下仅作历史对照。当前 `train_scoring_model.py` 默认 `use_hc=True`，**不得**再用 LC 训练而 HC 推理。
+
+| 文件 | 说明 |
+|------|------|
+| `loan.csv` | 原 P2P 贷款记录 |
+| `LCDataDictionary.xlsx` | LC 数据字典 |
+
+原 LC 字段如 `annual_inc`、`inq_last_6mths`、`loan_status` 等已废弃，见 git 历史版本文档。
+
+---
+
+## 附录 B：本地辅助文件
+
+| 文件 | 说明 |
+|------|------|
+| `risk-assessment/data/cleaned/cleaned_user_features.csv` | 清洗后入库样本（默认每地区 250 条） |
+| `risk-assessment/HomeCredit评分卡使用说明.md` | 操作步骤与联调说明 |

@@ -14,7 +14,7 @@ public interface UserExternalFeaturesMapper {
     /**
      * 根据身份证号查询用户外部特征
      */
-    @Select("SELECT * FROM user_external_features WHERE id_card = #{idCard}")
+    @Select("SELECT * FROM user_external_features WHERE id_card = #{idCard} LIMIT 1")
     UserExternalFeatures selectByIdCard(@Param("idCard") String idCard);
 
     /**

@@ -4,10 +4,31 @@ import re
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.preprocessing import StandardScaler
 import json
 import os
 
 os.makedirs("output", exist_ok=True)
+
+# 与 Java CreditScoreEngineImpl.buildHcLogisticFeatureMap 键名 100% 一致
+HC_FEATURE_COLS = [
+    "days_birth",
+    "days_employed",
+    "amt_income_total",
+    "ext_source_2",
+    "ext_source_3",
+    "amt_req_credit_bureau_mon",
+    "amt_req_credit_bureau_week",
+    "active_loans_count",
+]
+
+THIRD_PARTY_FEATURE_COLS = [
+    "ext_source_2",
+    "ext_source_3",
+    "amt_req_credit_bureau_mon",
+    "amt_req_credit_bureau_week",
+    "active_loans_count",
+]
 
 
 def edu_tier_from_lc_grade(series):
@@ -386,7 +407,212 @@ def process_lending_club_data(df):
     
     return df
 
-def train_scoring_model(csv_path="data/training_data.csv"):
+
+def process_hc_raw(df):
+    """Home Credit 原始宽表 → 统一特征名（与 user_external_features / Java 一致）。"""
+    out = pd.DataFrame()
+    out["days_birth"] = pd.to_numeric(df["DAYS_BIRTH"], errors="coerce")
+    out["days_employed"] = pd.to_numeric(df["DAYS_EMPLOYED"], errors="coerce")
+    out["amt_income_total"] = pd.to_numeric(df["AMT_INCOME_TOTAL"], errors="coerce")
+    out["ext_source_2"] = pd.to_numeric(df["EXT_SOURCE_2"], errors="coerce")
+    out["ext_source_3"] = pd.to_numeric(df["EXT_SOURCE_3"], errors="coerce")
+    out["amt_req_credit_bureau_mon"] = pd.to_numeric(
+        df["AMT_REQ_CREDIT_BUREAU_MON"], errors="coerce"
+    )
+    out["amt_req_credit_bureau_week"] = pd.to_numeric(
+        df["AMT_REQ_CREDIT_BUREAU_WEEK"], errors="coerce"
+    )
+    if "active_loans_count" in df.columns:
+        out["active_loans_count"] = pd.to_numeric(df["active_loans_count"], errors="coerce")
+    else:
+        out["active_loans_count"] = 0
+    out["defaulted"] = pd.to_numeric(df["TARGET"], errors="coerce").fillna(0).astype(int)
+    return out
+
+
+def process_hc_cleaned(df):
+    """clean_user_features.py 输出 → 统一特征名。"""
+    out = pd.DataFrame()
+    out["days_birth"] = -pd.to_numeric(df["age"], errors="coerce").fillna(30) * 365
+    out["days_employed"] = -pd.to_numeric(df["employment_years"], errors="coerce").fillna(0) * 365
+    out["amt_income_total"] = pd.to_numeric(df["AMT_INCOME_TOTAL"], errors="coerce")
+    out["ext_source_2"] = pd.to_numeric(df["ext_source_2"], errors="coerce")
+    out["ext_source_3"] = pd.to_numeric(df["ext_source_3"], errors="coerce")
+    out["amt_req_credit_bureau_mon"] = pd.to_numeric(df["credit_query_month"], errors="coerce")
+    out["amt_req_credit_bureau_week"] = pd.to_numeric(df["credit_query_week"], errors="coerce")
+    out["active_loans_count"] = pd.to_numeric(df["active_loans_count"], errors="coerce")
+    out["defaulted"] = pd.to_numeric(df["has_default_history"], errors="coerce").fillna(0).astype(int)
+    return out
+
+
+def load_hc_training_data():
+    """优先 parquet 全量；其次 HC 原始 CSV；缺失时合成样本。"""
+    parquet_path = "data/raw/home_credit_train_min.parquet"
+    if os.path.isfile(parquet_path):
+        try:
+            raw = pd.read_parquet(parquet_path)
+            if "DAYS_BIRTH" in raw.columns and "TARGET" in raw.columns:
+                df = process_hc_raw(raw)
+                print(f"HC 训练数据: {parquet_path} ({len(df)} 行)")
+                return df
+        except Exception as e:
+            print(f"读取 parquet 失败: {e}，尝试 CSV…")
+
+    candidates = [
+        ("data/raw/home_credit_train_ready.csv", "raw"),
+        ("data/cleaned/cleaned_user_features.csv", "cleaned"),
+    ]
+    for path, kind in candidates:
+        if not os.path.isfile(path):
+            continue
+        for enc in ("utf-8-sig", "gbk", "gb18030"):
+            try:
+                raw = pd.read_csv(path, encoding=enc, low_memory=False)
+                if kind == "raw" and "DAYS_BIRTH" in raw.columns and "TARGET" in raw.columns:
+                    df = process_hc_raw(raw)
+                    print(f"HC 训练数据: {path} ({len(df)} 行)")
+                    return df
+                if kind == "cleaned" and "ext_source_2" in raw.columns:
+                    df = process_hc_cleaned(raw)
+                    print(f"HC 训练数据(清洗): {path} ({len(df)} 行)")
+                    return df
+            except Exception:
+                continue
+
+    print("未找到 HC 数据，使用合成 HC 特征训练（字段与线上一致）")
+    n = 8000
+    rng = np.random.default_rng(42)
+    age = rng.integers(22, 60, size=n)
+    df = pd.DataFrame(
+        {
+            "days_birth": -age * 365,
+            "days_employed": -rng.uniform(0, 20, size=n) * 365,
+            "amt_income_total": rng.integers(80000, 600000, size=n),
+            "ext_source_2": rng.beta(2, 5, size=n),
+            "ext_source_3": rng.beta(2, 5, size=n),
+            "amt_req_credit_bureau_mon": rng.poisson(2, size=n),
+            "amt_req_credit_bureau_week": rng.poisson(1, size=n),
+            "active_loans_count": rng.poisson(1.5, size=n),
+        }
+    )
+    risk = (
+        (df["ext_source_2"] < 0.2)
+        | (df["amt_req_credit_bureau_mon"] > 5)
+        | (df["active_loans_count"] > 4)
+        | (df["amt_income_total"] < 120000)
+    )
+    df["defaulted"] = (risk.astype(int) + rng.random(n) < 0.35).astype(int)
+    return df
+
+
+def train_hc_scoring_model(df):
+    """Home Credit 全链路 LR：申请表代理 + 第三方征信特征联合训练。"""
+    for col in HC_FEATURE_COLS:
+        if col not in df.columns:
+            df[col] = 0
+    for col in THIRD_PARTY_FEATURE_COLS:
+        df[col] = df[col].fillna(df[col].mean() if df[col].notna().any() else 0)
+
+    X_raw = df[HC_FEATURE_COLS].astype(float)
+    y = df["defaulted"].astype(int)
+
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_raw, y, test_size=0.2, random_state=42, stratify=y
+        )
+    except ValueError:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_raw, y, test_size=0.2, random_state=42
+        )
+
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_test_s = scaler.transform(X_test)
+
+    model = LogisticRegression(
+        class_weight="balanced", random_state=42, max_iter=500, C=0.5, solver="lbfgs"
+    )
+    model.fit(X_train_s, y_train)
+
+    y_pred_proba = model.predict_proba(X_test_s)[:, 1]
+    accuracy = accuracy_score(y_test, model.predict(X_test_s))
+    auc = roc_auc_score(y_test, y_pred_proba)
+
+    feature_weights = {k: float(v) for k, v in zip(HC_FEATURE_COLS, model.coef_[0])}
+    feature_scaler = {}
+    for i, col in enumerate(HC_FEATURE_COLS):
+        feature_scaler[col] = {
+            "mean": float(scaler.mean_[i]),
+            "scale": float(scaler.scale_[i]) if scaler.scale_[i] != 0 else 1.0,
+        }
+
+    print("\n=== HC 模型权重（含第三方 ext_source_2/3）===")
+    for k, w in sorted(feature_weights.items(), key=lambda x: abs(x[1]), reverse=True):
+        tag = " [第三方]" if k in THIRD_PARTY_FEATURE_COLS else " [申请/收入]"
+        print(f"  {k}: {w:.4f}{tag}")
+
+    scorecard_cfg = calibrate_odds_pdo_scorecard(y_pred_proba, min_s=350, max_s=950, span_frac=0.82)
+    _, clipped_lr = scores_odds_pdo_batch(y_pred_proba, scorecard_cfg)
+    auto_ap = float(np.quantile(clipped_lr, 0.82))
+    man_rev = float(np.quantile(clipped_lr, 0.48))
+
+    feature_derivation = {
+        "days_birth": "训练/推理：申请表生日 → 负天数（与 HC DAYS_BIRTH 一致）",
+        "days_employed": "训练/推理：user_external_features.days_employed（入职天数，负值）",
+        "amt_income_total": "训练/推理：年总收入；申请表月收入×12 或第三方后台收入",
+        "ext_source_2": "仅来自第三方征信 user_external_features.ext_source_2",
+        "ext_source_3": "仅来自第三方征信 user_external_features.ext_source_3",
+        "amt_req_credit_bureau_mon": "第三方：近1月征信查询次数",
+        "amt_req_credit_bureau_week": "第三方：近1周征信查询次数",
+        "active_loans_count": "第三方：活跃贷款数",
+    }
+
+    rules = {
+        "version": "v6.0-hc",
+        "model_type": "hc_lr_standardized",
+        "description": "Home Credit 全链路：申请表+第三方征信标准化后 LR",
+        "feature_derivation": feature_derivation,
+        "feature_weights": feature_weights,
+        "feature_scaler": feature_scaler,
+        "intercept": float(model.intercept_[0]),
+        "thresholds": {
+            "auto_approve": round(auto_ap),
+            "manual_review": round(man_rev),
+        },
+        "scorecard": scorecard_cfg,
+        "application_rule_bonus": {"enabled": False},
+        "training_data": {
+            "total_count": len(df),
+            "default_rate": float(y.mean()),
+            "data_source": "Home Credit (HC)",
+            "third_party_features": THIRD_PARTY_FEATURE_COLS,
+        },
+        "model_metrics": {
+            "accuracy": float(accuracy),
+            "auc": float(auc),
+        },
+    }
+
+    with open("output/scoring_rules.json", "w", encoding="utf-8") as f:
+        json.dump(rules, f, ensure_ascii=False, indent=2)
+
+    print(f"\n训练完成 AUC={auc:.4f}，规则已写入 output/scoring_rules.json")
+    return rules
+
+
+def train_scoring_model(csv_path="data/training_data.csv", use_hc=True):
+    """默认使用 Home Credit 全链路训练（与 user_external_features 一致）。"""
+    if use_hc:
+        df = load_hc_training_data()
+        rules = train_hc_scoring_model(df)
+        try:
+            from load_to_mysql import load_scoring_rules_to_mysql
+
+            load_scoring_rules_to_mysql()
+        except ImportError:
+            print("提示：运行 python load_to_mysql.py 写入评分规则与外部特征")
+        return rules
+
     try:
         df = pd.read_csv(csv_path, encoding="utf-8-sig", low_memory=False)
         print(f"成功加载训练数据: {len(df)} 行")

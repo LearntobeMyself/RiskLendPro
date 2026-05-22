@@ -153,7 +153,16 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             return cfg;
         }
         try {
-            JsonNode root = buildRuleRootFromScoringColumns(rules);
+            JsonNode root = null;
+            if (rules.getRuleContent() != null && !rules.getRuleContent().isBlank()) {
+                JsonNode full = objectMapper.readTree(rules.getRuleContent());
+                if (full.has("model_type") && full.get("model_type").asText().startsWith("hc_")) {
+                    root = full;
+                }
+            }
+            if (root == null) {
+                root = buildRuleRootFromScoringColumns(rules);
+            }
             if (root == null && rules.getRuleContent() != null) {
                 root = objectMapper.readTree(rules.getRuleContent());
             }
@@ -457,16 +466,118 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return 0.0;
     }
 
-    private Map<String, Double> buildLogisticFeatureMap(RiskAssessmentRequest request, UserExternalFeatures ext) {
+    private boolean isHcStandardizedModel(FullRuleConfig cfg) {
+        if (cfg.ruleRoot == null || !cfg.ruleRoot.has("model_type")) {
+            return false;
+        }
+        return cfg.ruleRoot.get("model_type").asText().startsWith("hc_");
+    }
+
+    @Override
+    public boolean hasExternalFeaturesForScoring(String idCard) {
+        return hasUsableThirdPartyProfile(resolveExternalFeatures(idCard));
+    }
+
+    /**
+     * HC 评分要求第三方表有有效行：ext_source 或征信查询/活跃贷款等非全空。
+     */
+    private boolean hasUsableThirdPartyProfile(UserExternalFeatures ext) {
+        if (ext == null) {
+            return false;
+        }
+        if (ext.getExtSource2() != null && ext.getExtSource2().doubleValue() > 1e-6) {
+            return true;
+        }
+        if (ext.getExtSource3() != null && ext.getExtSource3().doubleValue() > 1e-6) {
+            return true;
+        }
+        if (ext.getCreditBureauMon() != null && ext.getCreditBureauMon() > 0) {
+            return true;
+        }
+        if (ext.getCreditBureauWeek() != null && ext.getCreditBureauWeek() > 0) {
+            return true;
+        }
+        if (ext.getActiveLoansCount() != null && ext.getActiveLoansCount() > 0) {
+            return true;
+        }
+        if (ext.getDaysEmployed() != null && ext.getDaysEmployed() != 0) {
+            return true;
+        }
+        return false;
+    }
+
+    /** 按身份证号关联外部特征；兼容 sk_id_curr 纯数字联调 */
+    private UserExternalFeatures resolveExternalFeatures(String idCard) {
+        if (idCard == null || idCard.isBlank()) {
+            return null;
+        }
+        String trimmed = idCard.trim();
+        UserExternalFeatures byCard = userExternalFeaturesMapper.selectByIdCard(trimmed);
+        if (byCard != null) {
+            return byCard;
+        }
+        try {
+            return userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(trimmed));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    /** 申请表 + 第三方征信原始特征（未标准化），键名与 train_scoring_model.HC_FEATURE_COLS 一致 */
+    private Map<String, Double> buildHcRawFeatureMap(RiskAssessmentRequest request, UserExternalFeatures ext) {
+        int birthYear = Integer.parseInt(request.getBirthday().substring(0, 4));
+        int age = java.time.LocalDate.now().getYear() - birthYear;
+        // 申请侧特征进入 LR；外部表 days_* / amt_income 仅用于验真（见 RiskAssessmentServiceImpl）
+        double daysBirth = -age * 365.0;
+        double daysEmployed = 0.0;
+        double amtIncome = mapIncomeToValue(request.getMonthlyIncome()) * 12.0;
+
+        Map<String, Double> m = new LinkedHashMap<>();
+        m.put("days_birth", daysBirth);
+        m.put("days_employed", daysEmployed);
+        m.put("amt_income_total", amtIncome);
+        m.put("ext_source_2", ext != null && ext.getExtSource2() != null ? ext.getExtSource2().doubleValue() : 0.0);
+        m.put("ext_source_3", ext != null && ext.getExtSource3() != null ? ext.getExtSource3().doubleValue() : 0.0);
+        m.put("amt_req_credit_bureau_mon",
+                ext != null && ext.getCreditBureauMon() != null ? ext.getCreditBureauMon().doubleValue() : 0.0);
+        m.put("amt_req_credit_bureau_week",
+                ext != null && ext.getCreditBureauWeek() != null ? ext.getCreditBureauWeek().doubleValue() : 0.0);
+        m.put("active_loans_count",
+                ext != null && ext.getActiveLoansCount() != null ? ext.getActiveLoansCount().doubleValue() : 0.0);
+        return m;
+    }
+
+    private double scaleHcFeature(String key, double raw, JsonNode scalerRoot) {
+        if (scalerRoot == null || !scalerRoot.has(key)) {
+            return raw;
+        }
+        JsonNode s = scalerRoot.get(key);
+        double mean = s.path("mean").asDouble(0.0);
+        double scale = s.path("scale").asDouble(1.0);
+        if (Math.abs(scale) < 1e-9) {
+            scale = 1.0;
+        }
+        return (raw - mean) / scale;
+    }
+
+    private Map<String, Double> buildHcScaledFeatureMap(
+            Map<String, Double> raw, JsonNode scalerRoot) {
+        Map<String, Double> scaled = new LinkedHashMap<>();
+        for (Map.Entry<String, Double> e : raw.entrySet()) {
+            scaled.put(e.getKey(), scaleHcFeature(e.getKey(), e.getValue(), scalerRoot));
+        }
+        return scaled;
+    }
+
+    /** 旧版 LC 分箱特征（仅当规则非 HC 时使用） */
+    private Map<String, Double> buildLegacyLcFeatureMap(RiskAssessmentRequest request, UserExternalFeatures ext) {
         int birthYear = Integer.parseInt(request.getBirthday().substring(0, 4));
         int age = java.time.LocalDate.now().getYear() - birthYear;
         double income = mapIncomeToValue(request.getMonthlyIncome());
         int multiHead = ext != null && ext.getActiveLoansCount() != null ? ext.getActiveLoansCount() : 0;
         int creditQuery = ext != null && ext.getCreditBureauMon() != null ? ext.getCreditBureauMon() : 0;
-        int overdue = ext != null && ext.getTarget() != null ? ext.getTarget() : 0;
+        int overdue = 0;
         int dti = 20;
-        int deviceVirtual = 0;
-        int ipProxy = 0;
 
         Map<String, Double> m = new LinkedHashMap<>();
         m.put("age", (double) age);
@@ -475,21 +586,30 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         m.put("credit_query_count_3m", (double) creditQuery);
         m.put("overdue_count_12m", (double) overdue);
         m.put("dti", (double) dti);
-        m.put("device_is_virtual", (double) deviceVirtual);
-        m.put("ip_is_proxy", (double) ipProxy);
+        m.put("device_is_virtual", 0.0);
+        m.put("ip_is_proxy", 0.0);
         putAgeBinDummies(m, age);
         putIncomeBinDummies(m, income);
         putMultiHeadBinDummies(m, multiHead);
         putCreditQueryBinDummies(m, creditQuery);
         putOverdueBinDummies(m, overdue);
         putDtiBinDummies(m, dti);
-
         putEduTierDummies(m, request.getEducation());
         m.put("house_owner", Boolean.TRUE.equals(request.getHasHouse()) ? 1.0 : 0.0);
         m.put("job_stable", jobStableFromJobType(request.getJobType()));
         m.put("has_car_stated", Boolean.TRUE.equals(request.getHasCar()) ? 1.0 : 0.0);
         m.put("marriage_married", "已婚".equals(request.getMarriage()) ? 1.0 : 0.0);
         return m;
+    }
+
+    private Map<String, Double> buildLogisticFeatureMap(
+            RiskAssessmentRequest request, UserExternalFeatures ext, FullRuleConfig cfg) {
+        if (isHcStandardizedModel(cfg)) {
+            return buildHcScaledFeatureMap(
+                    buildHcRawFeatureMap(request, ext),
+                    cfg.ruleRoot.get("feature_scaler"));
+        }
+        return buildLegacyLcFeatureMap(request, ext);
     }
 
     private String describeLogisticFeature(String key, double value) {
@@ -582,6 +702,30 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         if ("marriage_married".equals(key)) {
             return value > 0.5 ? "已婚" : null;
         }
+        if ("days_birth".equals(key)) {
+            return "出生天数(第三方/申请对齐)";
+        }
+        if ("days_employed".equals(key)) {
+            return "入职天数(第三方)";
+        }
+        if ("amt_income_total".equals(key)) {
+            return "年总收入";
+        }
+        if ("ext_source_2".equals(key)) {
+            return "第三方权威评分A";
+        }
+        if ("ext_source_3".equals(key)) {
+            return "第三方权威评分B";
+        }
+        if ("amt_req_credit_bureau_mon".equals(key)) {
+            return "近1月征信查询(第三方)";
+        }
+        if ("amt_req_credit_bureau_week".equals(key)) {
+            return "近1周征信查询(第三方)";
+        }
+        if ("active_loans_count".equals(key)) {
+            return "活跃贷款数(第三方)";
+        }
         if (key.startsWith("rule_bonus_")) {
             return null;
         }
@@ -590,8 +734,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     private Pair<Double, List<ScoreContribution>> calculateLogisticScorecard(
             RiskAssessmentRequest request, FullRuleConfig cfg) {
-        UserExternalFeatures ext = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(request.getIdCard()));
-        Map<String, Double> values = buildLogisticFeatureMap(request, ext);
+        UserExternalFeatures ext = resolveExternalFeatures(request.getIdCard());
+        Map<String, Double> rawValues = isHcStandardizedModel(cfg)
+                ? buildHcRawFeatureMap(request, ext)
+                : null;
+        Map<String, Double> values = buildLogisticFeatureMap(request, ext, cfg);
         double intercept = readIntercept(cfg);
         JsonNode fw = cfg.ruleRoot.get("feature_weights");
 
@@ -608,13 +755,18 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             double v = values.getOrDefault(key, 0.0);
             double contrib = w * v;
             linear += contrib;
-            
+
             String description = describeLogisticFeature(key, v);
             if (description == null) {
                 continue;
             }
-            
-            String valStr = (v == (long) v) ? String.valueOf((long) v) : String.format("%.6g", v);
+
+            double displayVal = rawValues != null && rawValues.containsKey(key)
+                    ? rawValues.get(key)
+                    : v;
+            String valStr = (displayVal == (long) displayVal)
+                    ? String.valueOf((long) displayVal)
+                    : String.format("%.6g", displayVal);
             contributions.add(new ScoreContribution(key, valStr, w, contrib, description));
         }
 
@@ -740,6 +892,10 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     private Pair<Double, List<ScoreContribution>> calculateScoreWithDetails(RiskAssessmentRequest request) {
         FullRuleConfig cfg = loadFullRuleConfig();
         if (hasFeatureWeights(cfg)) {
+            if (isHcStandardizedModel(cfg) && !hasExternalFeaturesForScoring(request.getIdCard())) {
+                throw new IllegalStateException(
+                        "THIRD_PARTY_MISSING: 未找到第三方征信快照，请确认 id_card 已写入 credit_data_db.user_external_features");
+            }
             return calculateLogisticScorecard(request, cfg);
         }
         return calculateLegacyScoreWithDetails(request, cfg);
@@ -829,7 +985,7 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         contributions.add(new ScoreContribution("婚姻状况", request.getMarriage(), marriageScore, marriageScore,
                 "已婚".equals(request.getMarriage()) ? "已婚，生活更稳定" : "未婚"));
 
-        UserExternalFeatures externalFeatures = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(request.getIdCard()));
+        UserExternalFeatures externalFeatures = resolveExternalFeatures(request.getIdCard());
         if (externalFeatures != null) {
             Integer activeLoans = externalFeatures.getActiveLoansCount();
             int multiHeadScore = calculateMultiHeadScore(activeLoans, featureScores);
@@ -1459,36 +1615,21 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return Math.max(0, limit);
     }
 
+    /**
+     * 额度策略层：多头/第三方评分/查询次数已纳入 HC LR，此处仅保留规则类惩罚，避免双重计数。
+     */
     private double adjustLimitByExternalFeatures(double baseLimit, String idCard, int incomeValue) {
-        UserExternalFeatures features = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(idCard));
+        UserExternalFeatures features = resolveExternalFeatures(idCard);
         if (features == null) {
             return baseLimit;
         }
 
-        double adjustedLimit = baseLimit;
         double penaltyRate = 0.0;
-
-        if (features.getActiveLoansCount() != null && features.getActiveLoansCount() > 3) {
-            int excess = features.getActiveLoansCount() - 3;
-            penaltyRate += excess * 0.10;
-        }
-
-        if (features.getTarget() != null && features.getTarget() > 0) {
-            penaltyRate += features.getTarget() * 0.15;
-        }
-
-        if (features.getCreditBureauMon() != null && features.getCreditBureauMon() > 5) {
-            penaltyRate += 0.05;
-        }
-
         if (features.getPrevRefusedCount() != null && features.getPrevRefusedCount() > 0) {
             penaltyRate += features.getPrevRefusedCount() * 0.10;
         }
-
-        penaltyRate = Math.min(penaltyRate, 0.80);
-        adjustedLimit = baseLimit * (1 - penaltyRate);
-
-        return adjustedLimit;
+        penaltyRate = Math.min(penaltyRate, 0.50);
+        return baseLimit * (1 - penaltyRate);
     }
 
     @Override
@@ -1505,13 +1646,25 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private ExternalFeatures getExternalFeatures(String idCard) {
-        UserExternalFeatures features = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(idCard));
+        UserExternalFeatures features = resolveExternalFeatures(idCard);
         ExternalFeatures result = new ExternalFeatures();
 
         if (features != null) {
             result.setDataSource(features.getDataSource());
             if (features.getUpdatedAt() != null) {
                 result.setUpdatedAt(features.getUpdatedAt().toString());
+            }
+            if (features.getCreditBureauMon() != null) {
+                result.setCreditQueryCount3m(features.getCreditBureauMon());
+            }
+            if (features.getActiveLoansCount() != null) {
+                result.setMultiHeadLoanCount(features.getActiveLoansCount());
+            }
+            if (features.getExtSource2() != null) {
+                result.setCreditScore(features.getExtSource2().multiply(BigDecimal.valueOf(1000)).intValue());
+            }
+            if (features.getTarget() != null) {
+                result.setOverdueCount12m(features.getTarget());
             }
         }
 

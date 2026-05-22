@@ -67,7 +67,8 @@ def create_tables_if_not_exists():
         create_features_table = """
             CREATE TABLE user_external_features (
                 id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-                sk_id_curr BIGINT NOT NULL COMMENT '用户关联ID（用于Java查询映射）',
+                sk_id_curr BIGINT NOT NULL COMMENT 'Home Credit 申请ID（SK_ID_CURR）',
+                id_card VARCHAR(20) NULL COMMENT '演示用身份证号（与主库 user.id_card 一致，Java 按此关联）',
                 days_birth INT DEFAULT 0 COMMENT '出生日期天数（负数，验真：核对年龄）',
                 days_employed INT DEFAULT 0 COMMENT '入职天数（负数，验真：核对工作年限）',
                 amt_income_total DECIMAL(15,2) DEFAULT 0 COMMENT '后台记录收入（验真：核实收入）',
@@ -85,6 +86,7 @@ def create_tables_if_not_exists():
                 data_source VARCHAR(50) COMMENT '数据来源',
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '最后更新时间',
                 UNIQUE KEY uk_sk_id_curr (sk_id_curr),
+                KEY idx_id_card (id_card),
                 KEY idx_days_birth (days_birth),
                 KEY idx_target (target),
                 KEY idx_prev_refused (prev_refused_count)
@@ -206,21 +208,26 @@ def load_user_features_to_mysql():
         
         sql = """
             INSERT INTO user_external_features (
-                sk_id_curr, days_birth, days_employed, amt_income_total,
+                sk_id_curr, id_card, days_birth, days_employed, amt_income_total,
                 credit_bureau_week, credit_bureau_mon, days_last_phone_change,
                 active_loans_count, ext_source_2, ext_source_3,
                 flag_own_car, occupation_type, education_type,
                 target, prev_refused_count, data_source, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         for i in range(0, total_rows, BATCH_SIZE):
             batch = df.iloc[i:i+BATCH_SIZE]
             for _, row in batch.iterrows():
+                days_birth = int(row["days_birth"]) if "days_birth" in row else -int(row["age"]) * 365
+                days_employed = int(row["days_employed"]) if "days_employed" in row else -int(row["employment_years"] * 365)
+                sk_id = int(row["sk_id_curr"]) if "sk_id_curr" in row and pd.notna(row["sk_id_curr"]) else 0
+                id_card_val = str(row["id_card"]) if "id_card" in row and pd.notna(row["id_card"]) else None
                 cursor.execute(sql, (
-                    int(row["id_card"]),
-                    int(row["age"]),
-                    int(row["employment_years"] * 10),
+                    sk_id,
+                    id_card_val,
+                    days_birth,
+                    days_employed,
                     float(row["AMT_INCOME_TOTAL"]),
                     int(row["credit_query_week"]),
                     int(row["credit_query_month"]),

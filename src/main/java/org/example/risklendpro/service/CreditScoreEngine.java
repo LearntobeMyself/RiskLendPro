@@ -33,6 +33,11 @@ public interface CreditScoreEngine {
 
     ScoreDetailReport getScoreDetailReport(RiskAssessmentRequest request);
 
+    /**
+     * 是否已关联可用于 HC 评分卡的第三方征信快照（user_external_features 按 id_card）
+     */
+    boolean hasExternalFeaturesForScoring(String idCard);
+
     class ScoreDetailReport {
         private double totalScore;
         private String decision;

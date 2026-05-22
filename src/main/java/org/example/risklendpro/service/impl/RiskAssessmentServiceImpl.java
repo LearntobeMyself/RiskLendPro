@@ -20,6 +20,8 @@ import org.example.risklendpro.service.CreditScoreEngine;
 import org.example.risklendpro.service.RiskAssessmentService;
 import org.example.risklendpro.utils.EmailUtil;
 import org.example.risklendpro.utils.RedisCacheUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,12 +32,15 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 @Service
 public class RiskAssessmentServiceImpl implements RiskAssessmentService {
+
+    private static final Logger log = LoggerFactory.getLogger(RiskAssessmentServiceImpl.class);
 
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
@@ -120,26 +125,20 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             return response;
         }
         
+        boolean forceManualReviewByRule = false;
+
         if (blacklistResult.isNeedManualReview()) {
-            riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            forceManualReviewByRule = true;
             riskAssessment.setAuditRemark("BLACKLIST_MATCH_LEVEL_2: 姓名+地域命中黑名单");
-            riskAssessmentMapper.insert(riskAssessment);
-            
-            user.setAssessmentStatus(StatusEnum.MANUAL_REVIEW.getValue());
-            userMapper.updateById(user);
-            
-            RiskAssessmentResponse response = new RiskAssessmentResponse();
-            response.setApplyId(applyId);
-            response.setSubmitTime(new Date());
-            response.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
-            return response;
-        }
-        
-        if (blacklistResult.getMatchLevel() == CreditScoreEngine.MatchLevel.NAME_ONLY) {
-            riskTags.add("BLACKLIST_NAME_ONLY");
+            riskTags.add("姓名+地域命中黑名单");
         }
 
-        UserExternalFeatures externalFeatures = userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(request.getIdCard()));
+        if (blacklistResult.getMatchLevel() == CreditScoreEngine.MatchLevel.NAME_ONLY) {
+            riskTags.add("仅姓名命中黑名单");
+            appendAuditRemark(riskAssessment, "BLACKLIST_NAME_ONLY: 仅姓名命中黑名单");
+        }
+
+        UserExternalFeatures externalFeatures = resolveExternalFeatures(request.getIdCard());
         DataVerificationResult verificationResult = verifyUserData(request, externalFeatures);
         
         if (verificationResult.isReject()) {
@@ -159,22 +158,14 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         }
         
         if (verificationResult.isNeedManualReview()) {
-            riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            forceManualReviewByRule = true;
             riskAssessment.setAuditRemark("INCOME_OUTLIER: " + verificationResult.getReason());
-            riskAssessmentMapper.insert(riskAssessment);
-            
-            user.setAssessmentStatus(StatusEnum.MANUAL_REVIEW.getValue());
-            userMapper.updateById(user);
-            
-            RiskAssessmentResponse response = new RiskAssessmentResponse();
-            response.setApplyId(applyId);
-            response.setSubmitTime(new Date());
-            response.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
-            return response;
+            riskTags.add("收入异常(需人工复核)");
         }
-        
-        if (verificationResult.getReason() != null) {
-            riskTags.add("INCOME_TOLERANCE: " + verificationResult.getReason());
+
+        if (verificationResult.getReason() != null && !verificationResult.isNeedManualReview()) {
+            riskTags.add("收入偏差(已自动通过)");
+            appendAuditRemark(riskAssessment, "INCOME_TOLERANCE: " + verificationResult.getReason());
         }
 
         RiskAssessment existingAssessment = riskAssessmentMapper.selectOne(
@@ -200,10 +191,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
         riskAssessmentMapper.insert(riskAssessment);
 
-        user.setAssessmentStatus(StatusEnum.WAITING.getValue());
-        userMapper.updateById(user);
-
-        executeRiskAssessment(riskAssessment, request);
+        executeRiskAssessment(riskAssessment, request, forceManualReviewByRule, riskTags);
 
         RiskAssessmentResponse response = new RiskAssessmentResponse();
         response.setApplyId(applyId);
@@ -295,7 +283,22 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
     @Transactional
     public void executeRiskAssessment(RiskAssessment riskAssessment, RiskAssessmentRequest request) {
+        executeRiskAssessment(riskAssessment, request, false, new ArrayList<>());
+    }
+
+    @Transactional
+    public void executeRiskAssessment(
+            RiskAssessment riskAssessment,
+            RiskAssessmentRequest request,
+            boolean forceManualReviewByRule,
+            List<String> riskTags) {
         try {
+            UserExternalFeatures externalRow = resolveExternalFeatures(request.getIdCard());
+            if (!creditScoreEngine.hasExternalFeaturesForScoring(request.getIdCard())) {
+                handleMissingThirdPartyFeatures(riskAssessment, request, forceManualReviewByRule, riskTags, externalRow);
+                return;
+            }
+
             CreditScoreEngine.ScoreDetailReport detailReport = creditScoreEngine.getScoreDetailReport(request);
             double score = detailReport.getTotalScore();
             String decision = detailReport.getDecision();
@@ -307,70 +310,155 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             riskAssessment.setSysDecision(decision);
             riskAssessment.setApprovalTime(new Date());
 
-            Map<String, Object> report = buildRiskReport(request, detailReport, creditLimit);
-            String cacheKey = RedisCacheUtil.getRiskReportKey(riskAssessment.getApplyId());
-            redisCacheUtil.set(cacheKey, report);
+            String scoreTag = getScoreTag((int) Math.round(score));
+            if (forceManualReviewByRule || "MANUAL_REVIEW".equals(decision)) {
+                appendAuditRemark(riskAssessment, scoreTag);
+            }
 
-            switch (decision) {
-                case "APPROVE":
-                    riskAssessment.setStatus(StatusEnum.FINAL_PASS.getValue());
-                    riskAssessment.setIsFinal(true);
-                    if (creditLimit > 0) {
-                        riskAssessment.setCreditLimit(BigDecimal.valueOf(creditLimit));
-                        Calendar calendar = Calendar.getInstance();
-                        calendar.add(Calendar.YEAR, 1);
-                        riskAssessment.setExpireDate(calendar.getTime());
-                    }
-                    sendNotification(riskAssessment, "评估通过", String.valueOf((int) creditLimit));
-                    break;
-                case "MANUAL_REVIEW":
-                    riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
-                    riskAssessment.setIsFinal(false);
-                    String scoreTag = getScoreTag((int) Math.round(score));
-                    if (riskAssessment.getAuditRemark() == null || riskAssessment.getAuditRemark().isEmpty()) {
-                        riskAssessment.setAuditRemark(scoreTag);
-                    } else {
-                        riskAssessment.setAuditRemark(riskAssessment.getAuditRemark() + ", " + scoreTag);
-                    }
-                    break;
-                case "REJECT":
-                    riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
-                    riskAssessment.setIsFinal(true);
-                    riskAssessment.setCreditLimit(BigDecimal.ZERO);
-                    if (riskAssessment.getAuditRemark() == null || riskAssessment.getAuditRemark().isEmpty()) {
-                        riskAssessment.setAuditRemark("SCORE_LOW: 信用分过低");
-                    }
-                    sendNotification(riskAssessment, "评估拒绝", "0");
-                    break;
+            Map<String, Object> report = buildRiskReport(
+                    request, detailReport, creditLimit, riskTags, riskAssessment.getAuditRemark(), externalRow);
+            report.put("modelVersion", "v6.0-hc");
+            report.put("thirdPartyLinked", true);
+            report.put("scored", true);
+            warnIfScoreDetailsEmpty(riskAssessment.getApplyId(), report);
+            cacheRiskReport(riskAssessment.getApplyId(), report);
+
+            if (forceManualReviewByRule) {
+                riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+                riskAssessment.setIsFinal(false);
+            } else {
+                switch (decision) {
+                    case "APPROVE":
+                        riskAssessment.setStatus(StatusEnum.FINAL_PASS.getValue());
+                        riskAssessment.setIsFinal(true);
+                        if (creditLimit > 0) {
+                            riskAssessment.setCreditLimit(BigDecimal.valueOf(creditLimit));
+                            Calendar calendar = Calendar.getInstance();
+                            calendar.add(Calendar.YEAR, 1);
+                            riskAssessment.setExpireDate(calendar.getTime());
+                        }
+                        sendNotification(riskAssessment, "评估通过", String.valueOf((int) creditLimit));
+                        break;
+                    case "MANUAL_REVIEW":
+                        riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+                        riskAssessment.setIsFinal(false);
+                        break;
+                    case "REJECT":
+                        riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+                        riskAssessment.setIsFinal(true);
+                        riskAssessment.setCreditLimit(BigDecimal.ZERO);
+                        if (riskAssessment.getAuditRemark() == null || riskAssessment.getAuditRemark().isEmpty()) {
+                            riskAssessment.setAuditRemark("SCORE_LOW: 信用分过低");
+                        }
+                        sendNotification(riskAssessment, "评估拒绝", "0");
+                        break;
+                    default:
+                        break;
+                }
             }
 
             riskAssessmentMapper.updateById(riskAssessment);
+            syncUserAssessmentStatus(riskAssessment);
 
+        } catch (IllegalStateException e) {
+            if (e.getMessage() != null && e.getMessage().contains("THIRD_PARTY_MISSING")) {
+                UserExternalFeatures externalRow = resolveExternalFeatures(request.getIdCard());
+                handleMissingThirdPartyFeatures(riskAssessment, request, forceManualReviewByRule, riskTags, externalRow);
+            } else {
+                failRiskAssessment(riskAssessment, e.getMessage());
+            }
         } catch (Exception e) {
-            riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
-            riskAssessment.setIsFinal(true);
-            riskAssessment.setAuditRemark("风控评估异常: " + e.getMessage());
-            riskAssessmentMapper.updateById(riskAssessment);
+            failRiskAssessment(riskAssessment, "风控评估异常: " + e.getMessage());
+        }
+    }
+
+    private void handleMissingThirdPartyFeatures(
+            RiskAssessment riskAssessment,
+            RiskAssessmentRequest request,
+            boolean forceManualReviewByRule,
+            List<String> riskTags,
+            UserExternalFeatures externalRow) {
+        if (riskTags != null) {
+            riskTags.add("第三方征信未关联");
+        }
+        appendAuditRemark(riskAssessment,
+                "THIRD_PARTY_MISSING: 未找到或未入库第三方特征，请对 id_card 执行 load_to_mysql.py 后重试");
+
+        riskAssessment.setStatus(StatusEnum.MANUAL_REVIEW.getValue());
+        riskAssessment.setIsFinal(false);
+        riskAssessment.setSysDecision("MANUAL_REVIEW");
+        riskAssessment.setApprovalTime(new Date());
+
+        Map<String, Object> report = buildRiskReportWithoutScore(
+                request, riskTags, riskAssessment.getAuditRemark(), externalRow);
+        report.put("modelVersion", "v6.0-hc");
+        report.put("thirdPartyLinked", false);
+        report.put("externalFeaturesMissing", true);
+        report.put("scored", false);
+
+        cacheRiskReport(riskAssessment.getApplyId(), report);
+
+        riskAssessmentMapper.updateById(riskAssessment);
+        syncUserAssessmentStatus(riskAssessment);
+    }
+
+    private void failRiskAssessment(RiskAssessment riskAssessment, String message) {
+        riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+        riskAssessment.setIsFinal(true);
+        riskAssessment.setAuditRemark(message);
+        riskAssessmentMapper.updateById(riskAssessment);
+        syncUserAssessmentStatus(riskAssessment);
+    }
+
+    private void syncUserAssessmentStatus(RiskAssessment riskAssessment) {
+        User user = userMapper.selectById(riskAssessment.getUserId());
+        if (user == null) {
+            return;
+        }
+        String status = riskAssessment.getStatus();
+        if (StatusEnum.FINAL_PASS.getValue().equals(status)) {
+            user.setAssessmentStatus(StatusEnum.FINAL_PASS.getValue());
+        } else if (StatusEnum.MANUAL_REVIEW.getValue().equals(status)) {
+            user.setAssessmentStatus(StatusEnum.MANUAL_REVIEW.getValue());
+        } else if (StatusEnum.SYSTEM_REJECT.getValue().equals(status)) {
+            user.setAssessmentStatus(StatusEnum.SYSTEM_REJECT.getValue());
+        } else {
+            user.setAssessmentStatus(StatusEnum.WAITING.getValue());
+        }
+        userMapper.updateById(user);
+    }
+
+    /** 风控报告写入 Redis，TTL 见 {@link RedisCacheUtil#CACHE_EXPIRE_DAYS}（1 天）。 */
+    private void cacheRiskReport(String applyId, Map<String, Object> report) {
+        redisCacheUtil.set(RedisCacheUtil.getRiskReportKey(applyId), report);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void warnIfScoreDetailsEmpty(String applyId, Map<String, Object> report) {
+        Object details = report.get("scoreDetails");
+        if (!(details instanceof List) || ((List<?>) details).isEmpty()) {
+            log.warn("LR scoring finished but Redis report has empty scoreDetails, applyId={}", applyId);
+        }
+    }
+
+    private void appendAuditRemark(RiskAssessment riskAssessment, String remark) {
+        if (remark == null || remark.isEmpty()) {
+            return;
+        }
+        if (riskAssessment.getAuditRemark() == null || riskAssessment.getAuditRemark().isEmpty()) {
+            riskAssessment.setAuditRemark(remark);
+        } else if (!riskAssessment.getAuditRemark().contains(remark)) {
+            riskAssessment.setAuditRemark(riskAssessment.getAuditRemark() + ", " + remark);
         }
     }
 
     private Map<String, Object> buildRiskReport(RiskAssessmentRequest request,
                                                 CreditScoreEngine.ScoreDetailReport detailReport,
-                                                double creditLimit) {
-        Map<String, Object> report = new HashMap<>();
-
-        Map<String, Object> userDetails = new HashMap<>();
-        userDetails.put("name", maskName(request.getName()));
-        userDetails.put("idCard", maskIdCard(request.getIdCard()));
-        userDetails.put("education", request.getEducation());
-        userDetails.put("marriage", request.getMarriage());
-        userDetails.put("jobType", request.getJobType());
-        userDetails.put("monthlyIncome", request.getMonthlyIncome());
-        userDetails.put("hasHouse", request.getHasHouse());
-        userDetails.put("hasCar", request.getHasCar());
-        userDetails.put("age", calculateAge(request.getBirthday()));
-
-        report.put("userDetails", userDetails);
+                                                double creditLimit,
+                                                List<String> riskTags,
+                                                String auditRemark,
+                                                UserExternalFeatures externalRow) {
+        Map<String, Object> report = buildRiskReportBase(request, riskTags, auditRemark, externalRow);
 
         report.put("totalScore", detailReport.getTotalScore());
         report.put("systemDecision", detailReport.getDecision());
@@ -391,18 +479,9 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             scoreDetails.add(detailMap);
         }
         report.put("scoreDetails", scoreDetails);
-
-        Map<String, Object> externalFeatures = new HashMap<>();
-        externalFeatures.put("creditScore", detailReport.getExternalFeatures().getCreditScore());
-        externalFeatures.put("overdueCount12m", detailReport.getExternalFeatures().getOverdueCount12m());
-        externalFeatures.put("creditQueryCount3m", detailReport.getExternalFeatures().getCreditQueryCount3m());
-        externalFeatures.put("multiHeadLoanCount", detailReport.getExternalFeatures().getMultiHeadLoanCount());
-        externalFeatures.put("multiHeadLoanTotalAmount", detailReport.getExternalFeatures().getMultiHeadLoanTotalAmount());
-        externalFeatures.put("deviceIsVirtual", detailReport.getExternalFeatures().getDeviceIsVirtual());
-        externalFeatures.put("ipIsProxy", detailReport.getExternalFeatures().getIpIsProxy());
-        externalFeatures.put("dataSource", detailReport.getExternalFeatures().getDataSource());
-        externalFeatures.put("updatedAt", detailReport.getExternalFeatures().getUpdatedAt());
-        report.put("externalFeatures", externalFeatures);
+        if (scoreDetails.isEmpty()) {
+            log.warn("buildRiskReport: scoreDetails empty for idCard={}", request.getIdCard());
+        }
 
         Map<String, Object> blacklistCheck = new HashMap<>();
         blacklistCheck.put("hit", detailReport.getBlacklistCheck().isHit());
@@ -411,6 +490,85 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         report.put("blacklistCheck", blacklistCheck);
 
         return report;
+    }
+
+    private Map<String, Object> buildRiskReportWithoutScore(
+            RiskAssessmentRequest request,
+            List<String> riskTags,
+            String auditRemark,
+            UserExternalFeatures externalRow) {
+        Map<String, Object> report = buildRiskReportBase(request, riskTags, auditRemark, externalRow);
+        report.put("totalScore", null);
+        report.put("systemDecision", "MANUAL_REVIEW");
+        report.put("suggestedAmount", 0);
+        report.put("scoreDetails", new ArrayList<>());
+        report.put("scored", false);
+        CreditScoreEngine.BlacklistMatchResult blacklistResult =
+                creditScoreEngine.checkBlacklist(request.getName(), request.getIdCard());
+        Map<String, Object> blacklistCheck = new HashMap<>();
+        blacklistCheck.put("hit", blacklistResult.getMatchLevel() != CreditScoreEngine.MatchLevel.NONE);
+        blacklistCheck.put("source", "credit_data_db");
+        blacklistCheck.put("reason", blacklistResult.getMatchLevel().getDescription());
+        report.put("blacklistCheck", blacklistCheck);
+        return report;
+    }
+
+    private Map<String, Object> buildRiskReportBase(
+            RiskAssessmentRequest request,
+            List<String> riskTags,
+            String auditRemark,
+            UserExternalFeatures externalRow) {
+        Map<String, Object> report = new HashMap<>();
+
+        Map<String, Object> userDetails = new HashMap<>();
+        userDetails.put("name", maskName(request.getName()));
+        userDetails.put("idCard", maskIdCard(request.getIdCard()));
+        userDetails.put("education", request.getEducation());
+        userDetails.put("marriage", request.getMarriage());
+        userDetails.put("jobType", request.getJobType());
+        userDetails.put("monthlyIncome", request.getMonthlyIncome());
+        userDetails.put("hasHouse", request.getHasHouse());
+        userDetails.put("hasCar", request.getHasCar());
+        userDetails.put("age", calculateAge(request.getBirthday()));
+        report.put("userDetails", userDetails);
+
+        report.put("externalFeatures", buildExternalFeaturesMap(externalRow));
+        if (riskTags != null && !riskTags.isEmpty()) {
+            report.put("riskTags", new ArrayList<>(riskTags));
+        }
+        if (auditRemark != null && !auditRemark.isEmpty()) {
+            report.put("auditRemark", auditRemark);
+        }
+        return report;
+    }
+
+    /** 与接口文档 6.2 externalFeatures 字段对齐（来自 user_external_features） */
+    private Map<String, Object> buildExternalFeaturesMap(UserExternalFeatures ext) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        if (ext == null) {
+            m.put("linked", false);
+            return m;
+        }
+        m.put("linked", true);
+        m.put("daysBirth", ext.getDaysBirth());
+        m.put("daysEmployed", ext.getDaysEmployed());
+        m.put("amtIncomeTotal", ext.getAmtIncomeTotal());
+        m.put("creditBureauWeek", ext.getCreditBureauWeek());
+        m.put("creditBureauMon", ext.getCreditBureauMon());
+        m.put("daysLastPhoneChange", ext.getDaysLastPhoneChange());
+        m.put("activeLoansCount", ext.getActiveLoansCount());
+        m.put("extSource2", ext.getExtSource2());
+        m.put("extSource3", ext.getExtSource3());
+        m.put("flagOwnCar", ext.getFlagOwnCar());
+        m.put("occupationType", ext.getOccupationType());
+        m.put("educationType", ext.getEducationType());
+        m.put("target", ext.getTarget());
+        m.put("prevRefusedCount", ext.getPrevRefusedCount());
+        m.put("dataSource", ext.getDataSource());
+        if (ext.getUpdatedAt() != null) {
+            m.put("updatedAt", ext.getUpdatedAt().toString());
+        }
+        return m;
     }
 
     private String maskName(String name) {
@@ -458,6 +616,22 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             case "FINAL_REJECT" -> "已拒绝";
             default -> "未知状态";
         };
+    }
+
+    private UserExternalFeatures resolveExternalFeatures(String idCard) {
+        if (idCard == null || idCard.isBlank()) {
+            return null;
+        }
+        String trimmed = idCard.trim();
+        UserExternalFeatures byCard = userExternalFeaturesMapper.selectByIdCard(trimmed);
+        if (byCard != null) {
+            return byCard;
+        }
+        try {
+            return userExternalFeaturesMapper.selectBySkIdCurr(Long.parseLong(trimmed));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private DataVerificationResult verifyUserData(RiskAssessmentRequest request, UserExternalFeatures externalFeatures) {

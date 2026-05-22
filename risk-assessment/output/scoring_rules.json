@@ -1,376 +1,98 @@
 {
-  "version": "v5.0",
-  "description": "PDO+log-odds 映射至 350–950（校验集标定）；策略 bonus 同量表",
+  "version": "v6.0-hc",
+  "model_type": "hc_lr_standardized",
+  "description": "Home Credit 全链路：申请表+第三方征信标准化后 LR",
   "feature_derivation": {
-    "edu_tier": "训练(LC): grade A,B→high; C→mid; D/E/F/G/缺失→low。推理(Java): 博士/硕士→high，本科→mid，高中及以下→low。共享 edu_tier_mid / edu_tier_high 系数。",
-    "house_owner": "训练(LC): home_ownership∈{OWN,MORTGAGE}→1，否则→0。推理(Java): hasHouse==true→1。",
-    "job_stable": "训练(LC): emp_length 含 10+ 或解析年限≥5→1，否则→0。推理(Java): jobType∈{公务员,企事业单位}→1，否则→0。",
-    "has_car_stated": "训练(LC): 无车字段，列恒为 0；系数主要来自模拟数据或未来含车 CSV。推理(Java): hasCar==true→1。",
-    "marriage_married": "训练(LC): 通常无该列则不进入矩阵；模拟路径含 0/1。推理(Java): 已婚→1。若无权重则贡献为 0。"
+    "days_birth": "训练/推理：申请表生日 → 负天数（与 HC DAYS_BIRTH 一致）",
+    "days_employed": "训练/推理：user_external_features.days_employed（入职天数，负值）",
+    "amt_income_total": "训练/推理：年总收入；申请表月收入×12 或第三方后台收入",
+    "ext_source_2": "仅来自第三方征信 user_external_features.ext_source_2",
+    "ext_source_3": "仅来自第三方征信 user_external_features.ext_source_3",
+    "amt_req_credit_bureau_mon": "第三方：近1月征信查询次数",
+    "amt_req_credit_bureau_week": "第三方：近1周征信查询次数",
+    "active_loans_count": "第三方：活跃贷款数"
   },
   "feature_weights": {
-    "device_is_virtual": -0.03540415517636731,
-    "ip_is_proxy": -0.12380824695236563,
-    "house_owner": 0.007896807190202918,
-    "job_stable": 0.08966078745156768,
-    "has_car_stated": 0.0,
-    "age_bin_age_26_35": 0.05107957516695493,
-    "age_bin_age_36_50": 0.0403531068192106,
-    "age_bin_age_51_plus": 0.035369689316629545,
-    "income_bin_income_5000_15000": -0.457159680636603,
-    "income_bin_income_15000_plus": -0.6466556523673903,
-    "multi_head_bin_multi_head_4_6": -0.08341027992524705,
-    "multi_head_bin_multi_head_7_plus": -0.012725856619818138,
-    "credit_query_bin_credit_query_4_8": 0.04820541313639992,
-    "credit_query_bin_credit_query_9_plus": 0.0,
-    "overdue_bin_overdue_12m_1_2": -0.02360488690459464,
-    "overdue_bin_overdue_12m_3_plus": -0.05772545939319952,
-    "dti_bin_dti_medium": 0.09649401428857844,
-    "dti_bin_dti_high": 0.0,
-    "edu_tier_mid": -0.4749181364103886,
-    "edu_tier_high": -1.144989051590354
+    "days_birth": 0.016412398278303666,
+    "days_employed": 0.23232715975208362,
+    "amt_income_total": -0.07074650414444968,
+    "ext_source_2": -0.48720992190514506,
+    "ext_source_3": -0.4695167311368082,
+    "amt_req_credit_bureau_mon": -0.031157978747593858,
+    "amt_req_credit_bureau_week": -0.008136192317415419,
+    "active_loans_count": 0.00484660767107959
   },
-  "intercept": 0.7602607080720707,
+  "feature_scaler": {
+    "days_birth": {
+      "mean": -14753.8948,
+      "scale": 3669.048022244048
+    },
+    "days_employed": {
+      "mean": -2378.95735,
+      "scale": 2338.096246785187
+    },
+    "amt_income_total": {
+      "mean": 172528.2902919375,
+      "scale": 83932.48219495312
+    },
+    "ext_source_2": {
+      "mean": 0.5155001022157311,
+      "scale": 0.1904710229051865
+    },
+    "ext_source_3": {
+      "mean": 0.5001952276498639,
+      "scale": 0.17576097888008654
+    },
+    "amt_req_credit_bureau_mon": {
+      "mean": 0.28241750023069123,
+      "scale": 0.8885259100263225
+    },
+    "amt_req_credit_bureau_week": {
+      "mean": 0.03337513322413952,
+      "scale": 0.1857012611794233
+    },
+    "active_loans_count": {
+      "mean": 1.7953125,
+      "scale": 1.8113918756977325
+    }
+  },
+  "intercept": -0.2569170829062917,
   "thresholds": {
-    "auto_approve": 787,
-    "manual_review": 638,
-    "_note": "测试集 LR+PDO 分数分位导出（非旧 80/50 线性换算）；可按业务再调"
+    "auto_approve": 776,
+    "manual_review": 642
   },
   "scorecard": {
     "scale": "odds_pdo",
     "min_score": 350,
     "max_score": 950,
-    "pdo": 201.702717,
+    "pdo": 131.399697,
     "target_score": 650.0,
-    "target_odds": 0.7850688928,
+    "target_odds": 0.7322287923,
     "_calibration": {
       "span_frac": 0.82,
-      "odds_p05": 0.44076466,
-      "odds_p50": 0.78506889,
-      "odds_p95": 2.3905024,
+      "odds_p05": 0.23020307,
+      "odds_p50": 0.73222879,
+      "odds_p95": 3.08502005,
       "note": "PDO 由校验集 odds 分位跨度反推；Java 仅消费 scale/pdo/target_*/min/max"
     }
   },
   "application_rule_bonus": {
-    "enabled": true,
-    "cap_absolute_sum": 55,
-    "notes": "主分数为 PDO+log-odds；bonus 与 LR 系数无关。cap/bonus 按量表跨度设定，勿与旧 0–100 线性倍乘混用。",
-    "married_equals_bonus": {
-      "match": "已婚",
-      "bonus": 18
-    },
-    "has_car_bonus": 12,
-    "age_rules": [
-      {
-        "lte": 25,
-        "bonus": -22,
-        "reason": "年龄≤25 低龄违约率偏高"
-      },
-      {
-        "gte": 26,
-        "lte": 35,
-        "bonus": 0,
-        "reason": "26–35 基准档"
-      },
-      {
-        "gte": 36,
-        "lte": 50,
-        "bonus": 16,
-        "reason": "36–50 风险相对较低"
-      },
-      {
-        "gte": 51,
-        "bonus": 10,
-        "reason": "51+"
-      }
-    ]
-  },
-  "feature_scores": {
-    "age": {
-      "description": "年龄评分",
-      "groups": [
-        {
-          "range": [
-            22,
-            25
-          ],
-          "score": -10,
-          "reason": "年轻，还款能力不稳定"
-        },
-        {
-          "range": [
-            25,
-            30
-          ],
-          "score": -5,
-          "reason": "较年轻"
-        },
-        {
-          "range": [
-            30,
-            40
-          ],
-          "score": 8,
-          "reason": "黄金年龄段，还款能力强"
-        },
-        {
-          "range": [
-            40,
-            50
-          ],
-          "score": 5,
-          "reason": "稳定年龄段"
-        },
-        {
-          "range": [
-            50,
-            60
-          ],
-          "score": -3,
-          "reason": "年龄较大"
-        }
-      ]
-    },
-    "income": {
-      "description": "月收入评分",
-      "groups": [
-        {
-          "range": [
-            0,
-            3000
-          ],
-          "score": -15,
-          "reason": "收入较低"
-        },
-        {
-          "range": [
-            3000,
-            8000
-          ],
-          "score": -5,
-          "reason": "收入一般"
-        },
-        {
-          "range": [
-            8000,
-            15000
-          ],
-          "score": 5,
-          "reason": "收入中等"
-        },
-        {
-          "range": [
-            15000,
-            999999
-          ],
-          "score": 15,
-          "reason": "收入较高"
-        }
-      ]
-    },
-    "multi_head_loan_count": {
-      "description": "多头借贷评分",
-      "groups": [
-        {
-          "range": [
-            0,
-            3
-          ],
-          "score": 0,
-          "reason": "正常"
-        },
-        {
-          "range": [
-            3,
-            6
-          ],
-          "score": -10,
-          "reason": "中等多头"
-        },
-        {
-          "range": [
-            6,
-            10
-          ],
-          "score": -20,
-          "reason": "高多头"
-        },
-        {
-          "range": [
-            10,
-            999
-          ],
-          "score": -30,
-          "reason": "极高多头"
-        }
-      ]
-    },
-    "credit_query_count_3m": {
-      "description": "征信查询评分",
-      "groups": [
-        {
-          "range": [
-            0,
-            3
-          ],
-          "score": 0,
-          "reason": "正常"
-        },
-        {
-          "range": [
-            3,
-            6
-          ],
-          "score": -5,
-          "reason": "查询较多"
-        },
-        {
-          "range": [
-            6,
-            10
-          ],
-          "score": -10,
-          "reason": "查询频繁"
-        },
-        {
-          "range": [
-            10,
-            999
-          ],
-          "score": -15,
-          "reason": "异常频繁"
-        }
-      ]
-    },
-    "overdue_count_12m": {
-      "description": "逾期评分",
-      "groups": [
-        {
-          "range": [
-            0,
-            1
-          ],
-          "score": 0,
-          "reason": "无逾期"
-        },
-        {
-          "range": [
-            1,
-            2
-          ],
-          "score": -15,
-          "reason": "有逾期记录"
-        },
-        {
-          "range": [
-            2,
-            3
-          ],
-          "score": -25,
-          "reason": "多次逾期"
-        },
-        {
-          "range": [
-            3,
-            99
-          ],
-          "score": -40,
-          "reason": "严重逾期"
-        }
-      ]
-    },
-    "dti": {
-      "description": "负债收入比评分",
-      "groups": [
-        {
-          "range": [
-            0,
-            15
-          ],
-          "score": 5,
-          "reason": "负债低"
-        },
-        {
-          "range": [
-            15,
-            30
-          ],
-          "score": 0,
-          "reason": "负债正常"
-        },
-        {
-          "range": [
-            30,
-            100
-          ],
-          "score": -15,
-          "reason": "负债较高"
-        }
-      ]
-    },
-    "job_type": {
-      "description": "工作类型评分",
-      "scores": {
-        "公务员": 15,
-        "企事业单位": 10,
-        "私营企业": 0,
-        "其他": -5
-      }
-    },
-    "education": {
-      "description": "学历评分",
-      "scores": {
-        "博士": 15,
-        "硕士": 10,
-        "本科": 5,
-        "高中及以下": -5
-      }
-    },
-    "has_house": {
-      "description": "房产评分",
-      "has": 10,
-      "none": 0
-    },
-    "has_car": {
-      "description": "车产评分",
-      "has": 5,
-      "none": 0
-    },
-    "marriage": {
-      "description": "婚姻评分",
-      "married": 5,
-      "single": 0
-    }
+    "enabled": false
   },
   "training_data": {
-    "total_count": 39786,
-    "default_rate": 0.14251244156235862,
-    "avg_age": 40.4632282712512,
-    "avg_income": 5748.255562928333,
-    "avg_multi_head": 9.294023023173981,
-    "avg_credit_query": 0.2558186296687277,
-    "feature_correlations": {
-      "overdue_count_12m": 0.0202,
-      "multi_head_loan_count": -0.0102,
-      "credit_query_count_3m": 0.055,
-      "income": -0.0412,
-      "dti": 0.042,
-      "age": 0.0023
-    }
+    "total_count": 100000,
+    "default_rate": 0.08723,
+    "data_source": "Home Credit (HC)",
+    "third_party_features": [
+      "ext_source_2",
+      "ext_source_3",
+      "amt_req_credit_bureau_mon",
+      "amt_req_credit_bureau_week",
+      "active_loans_count"
+    ]
   },
   "model_metrics": {
-    "accuracy": 0.6516712741894949,
-    "auc": 0.6618874715837333,
-    "avg_prob_default": 0.4755,
-    "avg_score": 608.09,
-    "scorecard_lr_clip_pct_below_min": 0.0847,
-    "scorecard_lr_clip_pct_above_max": 0.0,
-    "score_quantiles_test_lr_only": [
-      350.0,
-      474.7,
-      650.0,
-      750.34,
-      817.98
-    ]
+    "accuracy": 0.6696,
+    "auc": 0.7106331114684599
   }
 }

@@ -10,28 +10,26 @@
 
 ```
 risk-assessment/
-├── data/                           # 数据目录
-│   ├── raw/                        # 原始数据
-│   │   ├── blacklist.csv           # 黑名单原始数据（失信被执行人信息）
-│   │   └── user_features.csv       # 用户特征原始数据（Home Credit 数据集）
-│   ├── cleaned/                    # 清洗后数据
-│   │   ├── cleaned_blacklist.csv   # 清洗后的黑名单（200条有地区编码记录）
-│   │   └── cleaned_user_features.csv # 清洗后的用户特征（按地区抽样500条）
-│   ├── grouped_table.json          # 特征分组统计结果
-│   ├── LCDataDictionary.xlsx       # 数据字典说明文档
-│   ├── Receiver_Operating_Characteristic.png  # ROC曲线图表
-│   └── training_data.csv           # 模型训练数据集
-├── output/                         # 输出目录
-│   └── scoring_rules.json          # 训练好的评分规则（JSON格式）
-├── .env                            # 环境变量配置文件
-├── clean_blacklist.py              # 黑名单数据清洗脚本
-├── clean_user_features.py          # 用户特征数据清洗脚本
-├── Dockerfile                      # Docker 容器配置（可选）
-├── get_data.py                     # 数据获取脚本
-├── load_to_mysql.py                # 数据入库脚本（MySQL）
-├── requirements.txt                # Python 依赖包列表
-└── train_scoring_model.py          # 评分模型训练脚本
+├── data/
+│   ├── raw/
+│   │   ├── blacklist.csv
+│   │   └── home_credit_train_min.parquet   # HC 训练宽表（必需）
+│   └── cleaned/
+│       ├── cleaned_blacklist.csv
+│       └── cleaned_user_features.csv
+├── output/
+│   └── scoring_rules.json
+├── .env
+├── clean_blacklist.py
+├── clean_user_features.py
+├── load_to_mysql.py
+├── train_scoring_model.py
+├── requirements.txt
+├── 运行说明.md
+└── HomeCredit评分卡使用说明.md
 ```
+
+**Home Credit A 卡全链路说明**见 [HomeCredit评分卡使用说明.md](HomeCredit评分卡使用说明.md)；数据字段定义见 [../csv数据来源和数据库表设计.md](../csv数据来源和数据库表设计.md)。
 
 ## 快速开始
 
@@ -65,17 +63,9 @@ DB_NAME=credit_data_db
 
 ## 数据处理流程
 
-### 1. 数据获取（可选）
+将 `home_credit_train_min.parquet` 放入 `data/raw/` 后执行：
 
-从远程数据源获取示例数据：
-
-```bash
-python get_data.py
-```
-
-**输出**：下载原始数据到 `data/raw/` 目录
-
-### 2. 数据清洗
+### 1. 数据清洗
 
 ```bash
 # 清洗黑名单数据（保留200条有地区编码的记录）
@@ -89,7 +79,7 @@ python clean_user_features.py
 - `data/cleaned/cleaned_blacklist.csv` - 清洗后的黑名单数据
 - `data/cleaned/cleaned_user_features.csv` - 清洗后的用户特征数据
 
-### 3. 训练评分模型
+### 2. 训练评分模型
 
 ```bash
 python train_scoring_model.py
@@ -97,7 +87,7 @@ python train_scoring_model.py
 
 **输出**：`output/scoring_rules.json` - 训练好的评分规则
 
-### 4. 数据入库（可选）
+### 3. 数据入库（可选）
 
 将清洗后的数据和评分规则写入 MySQL 数据库：
 
@@ -116,11 +106,10 @@ python load_to_mysql.py
 
 | 脚本 | 功能 | 输入 | 输出 |
 |------|------|------|------|
-| `get_data.py` | 从远程数据源获取示例数据 | 无 | `data/raw/*.csv` |
-| `clean_blacklist.py` | 清洗黑名单数据，提取关键字段 | `data/raw/blacklist.csv` | `data/cleaned/cleaned_blacklist.csv` |
-| `clean_user_features.py` | 清洗用户特征，生成身份证号，按地区抽样 | `data/raw/user_features.csv` | `data/cleaned/cleaned_user_features.csv` |
-| `train_scoring_model.py` | 训练逻辑回归模型，生成评分卡 | `data/training_data.csv` | `output/scoring_rules.json` |
-| `load_to_mysql.py` | 将数据和规则入库到 MySQL | `data/cleaned/*.csv`, `output/scoring_rules.json` | MySQL 数据库表 |
+| `clean_blacklist.py` | 清洗黑名单 | `data/raw/blacklist.csv` | `data/cleaned/cleaned_blacklist.csv` |
+| `clean_user_features.py` | 从 parquet 抽样并生成演示证号 | `data/raw/home_credit_train_min.parquet` | `data/cleaned/cleaned_user_features.csv` |
+| `train_scoring_model.py` | HC 逻辑回归 + 评分卡 | parquet（优先） | `output/scoring_rules.json` |
+| `load_to_mysql.py` | 入库 | `data/cleaned/*.csv`, `output/scoring_rules.json` | MySQL |
 
 ## 数据说明
 
@@ -295,17 +284,14 @@ CREATE TABLE scoring_rules (
 ### 完整流程执行
 
 ```bash
-# 1. 获取数据
-python get_data.py
-
-# 2. 清洗数据
+# 1. 清洗数据（需已放置 data/raw/home_credit_train_min.parquet）
 python clean_blacklist.py
 python clean_user_features.py
 
-# 3. 训练模型
+# 2. 训练模型
 python train_scoring_model.py
 
-# 4. 入库（需要配置数据库）
+# 3. 入库（需要配置数据库）
 python load_to_mysql.py
 ```
 
