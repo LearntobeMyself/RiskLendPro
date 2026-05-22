@@ -87,10 +87,6 @@ def clean_blacklist():
     cleaned_df = cleaned_df.drop_duplicates(subset=["name", "area_code", "birth_year"], keep="first")
     print(f"去重后行数: {len(cleaned_df)} (删除 {initial_count - len(cleaned_df)} 条重复)")
     
-    initial_count = len(cleaned_df)
-    cleaned_df = cleaned_df[cleaned_df["area_code"] != "UNKNOWN"]
-    print(f"删除无地区记录: {initial_count - len(cleaned_df)} 条")
-    
     def get_risk_level(row):
         if row["duty_status"] == "全部未履行":
             return "HIGH"
@@ -100,9 +96,6 @@ def clean_blacklist():
             return "LOW"
     
     cleaned_df["risk_level"] = cleaned_df.apply(get_risk_level, axis=1)
-    
-    cleaned_df = cleaned_df.head(200)
-    print(f"保留前200条记录")
     
     output_path = "data/cleaned/cleaned_blacklist.csv"
     cleaned_df.to_csv(output_path, index=False, encoding="utf-8-sig")

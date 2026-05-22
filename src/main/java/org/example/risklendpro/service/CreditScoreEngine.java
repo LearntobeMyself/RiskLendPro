@@ -1,6 +1,5 @@
 package org.example.risklendpro.service;
 
-import org.example.risklendpro.entity.credit.Blacklist;
 import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 
 import java.util.List;
@@ -11,14 +10,6 @@ import java.util.List;
 public interface CreditScoreEngine {
 
     boolean isInBlacklist(String idCard);
-
-    /**
-     * 三级黑名单匹配检查
-     * @param name 用户姓名
-     * @param idCard 身份证号（用于提取地区编码和出生年份）
-     * @return 匹配结果
-     */
-    BlacklistMatchResult checkBlacklist(String name, String idCard);
 
     /**
      * 风控总分：优先为 Python 逻辑回归 + 评分卡映射结果（连续分值，保留小数）
@@ -32,11 +23,6 @@ public interface CreditScoreEngine {
     double calculateCreditLimitWithFeatures(double score, String monthlyIncome, String idCard);
 
     ScoreDetailReport getScoreDetailReport(RiskAssessmentRequest request);
-
-    /**
-     * 是否已关联可用于 HC 评分卡的第三方征信快照（user_external_features 按 id_card）
-     */
-    boolean hasExternalFeaturesForScoring(String idCard);
 
     class ScoreDetailReport {
         private double totalScore;
@@ -128,53 +114,5 @@ public interface CreditScoreEngine {
         public boolean isHit() { return hit; }
         public String getSource() { return source; }
         public String getReason() { return reason; }
-    }
-
-    /**
-     * 黑名单匹配结果枚举
-     */
-    enum MatchLevel {
-        NONE("未命中", "安全", "自动通过"),
-        NAME_ONLY("仅姓名命中", "低风险", "通过/标记"),
-        NAME_AREA("姓名+地域命中", "中风险", "人工审批"),
-        FULL("姓名+地域+出生年份命中", "高风险", "直接拒绝");
-
-        private final String description;
-        private final String riskLevel;
-        private final String action;
-
-        MatchLevel(String description, String riskLevel, String action) {
-            this.description = description;
-            this.riskLevel = riskLevel;
-            this.action = action;
-        }
-
-        public String getDescription() { return description; }
-        public String getRiskLevel() { return riskLevel; }
-        public String getAction() { return action; }
-    }
-
-    /**
-     * 黑名单匹配结果
-     */
-    class BlacklistMatchResult {
-        private MatchLevel matchLevel;
-        private Blacklist matchedRecord;
-
-        public BlacklistMatchResult(MatchLevel matchLevel, Blacklist matchedRecord) {
-            this.matchLevel = matchLevel;
-            this.matchedRecord = matchedRecord;
-        }
-
-        public MatchLevel getMatchLevel() { return matchLevel; }
-        public Blacklist getMatchedRecord() { return matchedRecord; }
-        
-        public boolean isNeedManualReview() {
-            return matchLevel == MatchLevel.NAME_AREA;
-        }
-        
-        public boolean isReject() {
-            return matchLevel == MatchLevel.FULL;
-        }
     }
 }
