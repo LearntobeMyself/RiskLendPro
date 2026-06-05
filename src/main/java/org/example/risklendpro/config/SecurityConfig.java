@@ -31,7 +31,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // 1. 放行登录注册接口
-                        .requestMatchers("/auth/**", "/admin/auth/**").permitAll()
+                        .requestMatchers("/auth/**", "/admin/login", "/admin/register").permitAll()
                         // 2. 彻底放行 Swagger 相关路径 (不带 /api/v1)
                         .requestMatchers(
                             "/v3/api-docs/**",

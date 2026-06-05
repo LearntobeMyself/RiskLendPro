@@ -5,6 +5,7 @@ import org.example.risklendpro.pojo.request.LoanApproveRequest;
 import org.example.risklendpro.pojo.request.RiskApproveRequest;
 import org.example.risklendpro.pojo.response.LoanApproveResponse;
 import java.util.Map;
+import java.util.List;
 
 public interface AdminService {
     /**
@@ -46,5 +47,15 @@ public interface AdminService {
      * 管理员审批贷款申请
      */
     LoanApproveResponse approveLoan(LoanApproveRequest request);
+
+    /**
+     * B 卡贷后监控列表（已启用 B 卡用户）
+     */
+    List<Map<String, Object>> getBCardMonitor();
+
+    /**
+     * 手动重算 B 卡分数（演示/seed 后刷新）
+     */
+    Map<String, Object> recalculateBCard(Long userId);
 
 }

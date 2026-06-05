@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RiskLendPro 联调测试入口</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <span>RiskLendPro 联调测试入口</span>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <h2>API 地址配置</h2>
+      <label>后端 Base URL（所有测试页共用）</label>
+      <input type="text" id="apiBase" placeholder="http://localhost:8080/api/v1">
+      <button type="button" id="btnSave">保存</button>
+      <p class="hint">
+        本地默认 <code>http://localhost:8080/api/v1</code>；
+        远程服务器可填 <code>http://47.109.109.231:8080/api/v1</code>
+      </p>
+    </div>
+
+    <div class="portal-links">
+      <a href="user.html">用户端测试台<br><small>注册 / 评估 / 补材料</small></a>
+      <a href="admin.html">管理员测试台<br><small>复核列表 / 报告 / 审批</small></a>
+    </div>
+
+    <div class="card">
+      <h2>快速说明</h2>
+      <ol>
+        <li>确保 MySQL 已执行 <code>sql/migration_supplement.sql</code></li>
+        <li>启动后端：<code>mvn spring-boot:run</code></li>
+        <li>用 Live Server 打开本目录，或 <code>npx serve test-web</code></li>
+        <li>用户端 <code>user.html</code> 按场景选择预设 → 注册 → 登录 → 提交评估</li>
+        <li>管理员端 <code>admin.html</code> 登录后刷新列表 → 点击行看报告 → 审批</li>
+      </ol>
+      <h3>推荐联调场景</h3>
+      <ul>
+        <li><strong>吴九</strong> — 收入异常 + 868 分 → 人工 + 仅 <code>INCOME_PROOF</code> 补材料</li>
+        <li><strong>孙七</strong> — L2 黑名单 + 762 分 → 人工 + 必传身份/户籍材料（需 seed SQL）</li>
+        <li><strong>张小梁</strong> — 纯分数人工（≈768），可选补材料</li>
+        <li><strong>李四</strong> — 纯分数拒绝（≈550），对比规则闸拒绝</li>
+        <li><strong>赵六</strong> — 自动通过（≈950）</li>
+        <li><strong>吴小微 / 周八</strong> — 不算分的系统拒绝（L3 黑名单 / 收入硬拒）</li>
+        <li><strong>方小巢</strong> — L2+低分联合拒绝（账号用后需清库，见 README）</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    document.getElementById('apiBase').value = getApiBase();
+    document.getElementById('btnSave').onclick = () => {
+      setApiBase(document.getElementById('apiBase').value.trim());
+      alert('已保存: ' + getApiBase());
+    };
+  </script>
+</body>
+</html>

@@ -79,6 +79,13 @@ def create_tables_if_not_exists():
                 ext_source_2 DECIMAL(10,6) DEFAULT 0 COMMENT '第三方评分A（评分：权重极高）',
                 ext_source_3 DECIMAL(10,6) DEFAULT 0 COMMENT '第三方评分B（评分：补充权威评价）',
                 flag_own_car TINYINT(1) DEFAULT 0 COMMENT '是否有车（0=否，1=是，验真：核实资产）',
+                gender_male TINYINT(1) DEFAULT 0 COMMENT '性别男=1（WOE/回测）',
+                married TINYINT(1) DEFAULT 0 COMMENT '已婚=1（WOE/回测）',
+                own_realty TINYINT(1) DEFAULT 0 COMMENT '有房=1（WOE/回测）',
+                employment_stable TINYINT(1) DEFAULT 0 COMMENT '稳定就业=1（WOE）',
+                credit_income_ratio DECIMAL(12,4) DEFAULT 0 COMMENT '授信收入比（WOE）',
+                cc_utilization DECIMAL(12,4) DEFAULT 0 COMMENT '信用卡使用代理（WOE）',
+                loan_overdue_max_6m INT DEFAULT 0 COMMENT '逾期次数代理（WOE）',
                 occupation_type VARCHAR(50) COMMENT '职业类型（评分：职业风险分级）',
                 education_type VARCHAR(50) COMMENT '学历（验真：核实背景）',
                 target TINYINT(1) DEFAULT 0 COMMENT '历史标签（0=正常，1=逾期，回测：验证模型）',
@@ -211,9 +218,11 @@ def load_user_features_to_mysql():
                 sk_id_curr, id_card, days_birth, days_employed, amt_income_total,
                 credit_bureau_week, credit_bureau_mon, days_last_phone_change,
                 active_loans_count, ext_source_2, ext_source_3,
-                flag_own_car, occupation_type, education_type,
+                flag_own_car, gender_male, married, own_realty, employment_stable,
+                credit_income_ratio, cc_utilization, loan_overdue_max_6m,
+                occupation_type, education_type,
                 target, prev_refused_count, data_source, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         for i in range(0, total_rows, BATCH_SIZE):
@@ -236,6 +245,13 @@ def load_user_features_to_mysql():
                     float(row["ext_source_2"]),
                     float(row["ext_source_3"]),
                     int(row["has_car"]),
+                    int(row.get("gender_male", 0)),
+                    int(row.get("married", 0)),
+                    int(row.get("own_realty", 0)),
+                    int(row.get("employment_stable", 0)),
+                    float(row.get("credit_income_ratio", 0)),
+                    float(row.get("cc_utilization", 0)),
+                    int(row.get("loan_overdue_max_6m", 0)),
                     row["occupation_type"],
                     row["education"],
                     int(row["has_default_history"]),
@@ -303,7 +319,7 @@ def load_scoring_rules_to_mysql():
         
         cursor.execute("DELETE FROM scoring_rules WHERE version = %s", (version,))
         
-        fw = rules.get("feature_weights") or {}
+        fw = rules.get("feature_weights") or rules.get("coefficients") or {}
         sc = rules.get("scorecard") or {}
         arb = rules.get("application_rule_bonus")
         fscores = rules.get("feature_scores")
@@ -349,6 +365,146 @@ def load_scoring_rules_to_mysql():
         if conn and conn.is_connected():
             conn.close()
 
+
+def create_b_card_tables_if_not_exists():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_behavior_features (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                sk_id_curr BIGINT NOT NULL,
+                id_card VARCHAR(20) NULL,
+                feature_json JSON NOT NULL,
+                data_source VARCHAR(50) DEFAULT 'Home Credit B-card',
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_sk_id_curr (sk_id_curr),
+                KEY idx_id_card (id_card)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS behavior_scoring_rules (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                version VARCHAR(32) NOT NULL,
+                rule_content JSON NOT NULL,
+                feature_weights JSON NOT NULL,
+                scorecard JSON NOT NULL,
+                intercept DECIMAL(16,8) NOT NULL,
+                threshold_watch DECIMAL(10,2) NOT NULL,
+                threshold_reduce_limit DECIMAL(10,2) NOT NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                trained_at DATETIME NULL,
+                training_data_count INT NULL,
+                accuracy DECIMAL(10,6) NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_version (version)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """
+        )
+        conn.commit()
+        print("B 卡表检查/创建完成")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"创建 B 卡表失败: {e}")
+
+
+def normalize_id_card(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    s = str(val).strip()
+    if not s or s.lower() == "nan":
+        return None
+    if "e" in s.lower():
+        s = f"{int(float(s))}"
+    elif s.endswith(".0"):
+        s = s[:-2]
+    return s
+
+
+def load_b_card_to_mysql():
+    create_b_card_tables_if_not_exists()
+    rules_path = "output/b_scoring_rules.json"
+    csv_path = "data/cleaned/cleaned_behavior_features.csv"
+
+    if os.path.isfile(rules_path):
+        try:
+            with open(rules_path, "r", encoding="utf-8") as f:
+                rules = json.load(f)
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            version = rules.get("version", "v1.0-b-woe")
+            th = rules.get("thresholds") or {}
+            fw = rules.get("coefficients") or {}
+            sc = rules.get("scorecard") or {}
+            metrics = rules.get("model_metrics") or {}
+            train = rules.get("training_data") or {}
+            cursor.execute("DELETE FROM behavior_scoring_rules WHERE version = %s", (version,))
+            cursor.execute(
+                """
+                INSERT INTO behavior_scoring_rules (
+                    version, rule_content, feature_weights, scorecard,
+                    intercept, threshold_watch, threshold_reduce_limit,
+                    is_active, trained_at, training_data_count, accuracy
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, 1, NOW(), %s, %s)
+                """,
+                (
+                    version,
+                    json.dumps(rules, ensure_ascii=False),
+                    json.dumps(fw, ensure_ascii=False),
+                    json.dumps(sc, ensure_ascii=False),
+                    float(rules.get("intercept", 0)),
+                    float(th.get("watch", 650)),
+                    float(th.get("reduce_limit", 550)),
+                    int(train.get("total_count", 0)),
+                    float(metrics.get("accuracy", 0)),
+                ),
+            )
+            conn.commit()
+            print(f"B 卡规则已写入: {version}")
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"写入 B 卡规则失败: {e}")
+    else:
+        print("警告：未找到 output/b_scoring_rules.json")
+
+    if not os.path.isfile(csv_path):
+        print(f"警告：未找到 {csv_path}，跳过 B 卡特征（可先运行 clean_behavior_features.py）")
+        return
+
+    try:
+        df = pd.read_csv(csv_path, encoding="utf-8-sig", dtype={"id_card": str})
+        feature_cols = [c for c in df.columns if c not in ("sk_id_curr", "id_card")]
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_behavior_features")
+        for _, row in df.iterrows():
+            feat = {c: float(row[c]) if pd.notna(row[c]) else 0.0 for c in feature_cols}
+            cursor.execute(
+                """
+                INSERT INTO user_behavior_features (sk_id_curr, id_card, feature_json, updated_at)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    int(row["sk_id_curr"]),
+                    normalize_id_card(row.get("id_card")),
+                    json.dumps(feat, ensure_ascii=False),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.commit()
+        print(f"成功写入 B 卡行为特征: {len(df)} 条")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"写入 B 卡行为特征失败: {e}")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("步骤1: 创建数据库（如果不存在）")
@@ -365,6 +521,9 @@ if __name__ == "__main__":
     
     print("\n步骤5: 写入评分规则数据")
     load_scoring_rules_to_mysql()
+
+    print("\n步骤6: 写入 B 卡行为特征与规则（不影响 A 卡）")
+    load_b_card_to_mysql()
     
     print("\n" + "=" * 60)
     print("所有数据写入完成！")

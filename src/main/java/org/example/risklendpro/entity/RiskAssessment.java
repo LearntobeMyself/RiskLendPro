@@ -53,4 +53,8 @@ public class RiskAssessment {
     private Long operatorId;
     @TableField("audit_remark")
     private String auditRemark;
+    @TableField("supplement_status")
+    private String supplementStatus;
+    @TableField("supplement_requirements")
+    private String supplementRequirements;
 }

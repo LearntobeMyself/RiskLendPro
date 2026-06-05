@@ -50,10 +50,28 @@ CREATE TABLE `risk_assessment` (
                                    `is_final` TINYINT(1) DEFAULT FALSE COMMENT '是否终态',
                                    `operator_id` BIGINT COMMENT '审批操作员ID',
                                    `audit_remark` VARCHAR(500) COMMENT '审批评语',
+                                   `supplement_status` VARCHAR(20) DEFAULT 'NONE' COMMENT '补充材料状态: NONE/REQUIRED/SUBMITTED',
+                                   `supplement_requirements` JSON NULL COMMENT '需补充材料 JSON 数组',
                                    INDEX `idx_id_card` (`id_card`),
                                    INDEX `idx_user_id` (`user_id`),
                                    INDEX `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='风控评估申请表';
+
+CREATE TABLE `risk_supplement_material` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+    `apply_id` VARCHAR(30) NOT NULL COMMENT '评估申请ID',
+    `user_id` BIGINT NOT NULL COMMENT '用户ID',
+    `material_type` VARCHAR(50) NOT NULL COMMENT '材料类型',
+    `original_name` VARCHAR(255) NOT NULL COMMENT '原始文件名',
+    `stored_path` VARCHAR(500) NOT NULL COMMENT '服务器存储路径',
+    `file_size` BIGINT COMMENT '文件大小(字节)',
+    `mime_type` VARCHAR(100) COMMENT 'MIME类型',
+    `remark` VARCHAR(500) COMMENT '用户备注',
+    `upload_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
+    `expire_at` DATETIME NOT NULL COMMENT '过期时间',
+    INDEX `idx_apply_id` (`apply_id`),
+    INDEX `idx_expire_at` (`expire_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='风控人工复核补充材料';
 
 CREATE TABLE `loan` (
                         `loan_id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '借款记录ID',
@@ -121,6 +139,9 @@ CREATE TABLE `user_credit_limit` (
                                      `remaining_limit` DECIMAL(15,2) NOT NULL DEFAULT 0.00 COMMENT '剩余额度',
                                      `overdue_amount` DECIMAL(15,2) DEFAULT 0.00 COMMENT '逾期金额',
                                      `has_overdue` TINYINT(1) DEFAULT FALSE COMMENT '是否有逾期',
+                                     `b_card_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'B卡是否已启动',
+                                     `b_score` DECIMAL(6,1) NULL COMMENT '最新B卡综合分',
+                                     `b_score_updated_at` DATETIME NULL COMMENT 'B分更新时间',
                                      `last_update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
                                      INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户额度表';
@@ -136,6 +157,17 @@ CREATE TABLE `limit_adjust_log` (
                                     INDEX `idx_user_id` (`user_id`),
                                     INDEX `idx_operator_id` (`operator_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='额度调整记录表';
+
+CREATE TABLE IF NOT EXISTS `user_b_card_log` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` BIGINT NOT NULL,
+    `base_score` DECIMAL(6,1) NULL COMMENT 'HC基线B分',
+    `delta_score` DECIMAL(6,1) NULL COMMENT '本项目还款动态修正',
+    `final_score` DECIMAL(6,1) NULL COMMENT '最终B分',
+    `live_features` JSON NULL COMMENT '实时还款特征快照',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='B卡评分历史';
 
 
 CREATE TABLE `vintage_data` (

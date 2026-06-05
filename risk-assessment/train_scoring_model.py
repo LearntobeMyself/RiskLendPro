@@ -600,11 +600,136 @@ def train_hc_scoring_model(df):
     return rules
 
 
-def train_scoring_model(csv_path="data/training_data.csv", use_hc=True):
-    """默认使用 Home Credit 全链路训练（与 user_external_features 一致）。"""
+def load_hc_training_data_woe():
+    """从 parquet 构建 WOE 候选特征宽表。"""
+    from feature_engineering_hc import build_hc_training_features, load_hc_raw_parquet
+
+    parquet_path = "data/raw/home_credit_train_min.parquet"
+    if os.path.isfile(parquet_path):
+        try:
+            raw = load_hc_raw_parquet(parquet_path)
+            if "TARGET" in raw.columns:
+                df = build_hc_training_features(raw)
+                print(f"HC WOE 训练数据: {parquet_path} ({len(df)} 行, {df.shape[1]-1} 候选特征)")
+                return df
+        except Exception as e:
+            print(f"读取 parquet 失败: {e}")
+
+    print("未找到 HC parquet，WOE 训练回退到 8 维 HC 管道")
+    return load_hc_training_data()
+
+
+def train_hc_woe_scoring_model(df):
+    """Home Credit：IV 筛选 → 分箱 WOE → LR → PDO 350-950。"""
+    from feature_engineering_hc import HC_CANDIDATE_FEATURES, FEATURE_SOURCE
+    from woe_binning import (
+        fit_feature_woe,
+        select_features,
+        transform_frame_woe,
+        transform_row_woe,
+    )
+
+    candidates = [c for c in HC_CANDIDATE_FEATURES if c in df.columns]
+    y = df["defaulted"].astype(int)
+
+    try:
+        train_idx, test_idx = train_test_split(
+            df.index, test_size=0.2, random_state=42, stratify=y
+        )
+    except ValueError:
+        train_idx, test_idx = train_test_split(df.index, test_size=0.2, random_state=42)
+
+    train_df = df.loc[train_idx]
+    test_df = df.loc[test_idx]
+    y_train = y.loc[train_idx]
+    y_test = y.loc[test_idx]
+
+    selected, iv_report = select_features(train_df, candidates, y_train, max_features=12)
+    print(f"\n=== IV 筛选：候选 {len(candidates)} → 入模 {len(selected)} ===")
+    for row in iv_report:
+        mark = "✓" if row.get("selected") else " "
+        print(f"  [{mark}] {row['feature']}: IV={row['iv']}, miss={row.get('missing_rate', '-')}, {row.get('reason', '')}")
+
+    feature_defs = {}
+    for key in selected:
+        feature_defs[key] = fit_feature_woe(train_df[key], y_train, key)
+
+    X_train = transform_frame_woe(train_df, feature_defs)
+    X_test = transform_frame_woe(test_df, feature_defs)
+
+    model = LogisticRegression(
+        class_weight="balanced", random_state=42, max_iter=500, C=0.5, solver="lbfgs"
+    )
+    model.fit(X_train, y_train)
+
+    y_pred_proba = model.predict_proba(X_test)[:, 1]
+    accuracy = accuracy_score(y_test, model.predict(X_test))
+    auc = roc_auc_score(y_test, y_pred_proba)
+
+    coefficients = {k: float(v) for k, v in zip(selected, model.coef_[0])}
+
+    scorecard_cfg = calibrate_odds_pdo_scorecard(y_pred_proba, min_s=350, max_s=950, span_frac=0.82)
+    _, clipped_lr = scores_odds_pdo_batch(y_pred_proba, scorecard_cfg)
+    auto_ap = float(np.quantile(clipped_lr, 0.82))
+    man_rev = float(np.quantile(clipped_lr, 0.48))
+
+    feature_derivation = {
+        k: f"来源={FEATURE_SOURCE.get(k, 'external')}; WOE+LR 入模"
+        for k in selected
+    }
+
+    rules = {
+        "version": "v7.0-hc-woe",
+        "model_type": "hc_woe_lr",
+        "description": "Home Credit：IV筛选+分箱WOE+LR+PDO(350-950)",
+        "feature_derivation": feature_derivation,
+        "features": feature_defs,
+        "coefficients": coefficients,
+        "intercept": float(model.intercept_[0]),
+        "thresholds": {
+            "auto_approve": round(auto_ap),
+            "manual_review": round(man_rev),
+            "_note": "测试集 PDO 分位；量表 350-950",
+        },
+        "scorecard": scorecard_cfg,
+        "application_rule_bonus": {"enabled": False},
+        "feature_selection_report": {
+            "candidates": len(candidates),
+            "selected": len(selected),
+            "selected_features": selected,
+            "iv_table": iv_report,
+        },
+        "training_data": {
+            "total_count": len(df),
+            "default_rate": float(y.mean()),
+            "data_source": "Home Credit (HC)",
+        },
+        "model_metrics": {
+            "accuracy": float(accuracy),
+            "auc": float(auc),
+        },
+    }
+
+    with open("output/scoring_rules.json", "w", encoding="utf-8") as f:
+        json.dump(rules, f, ensure_ascii=False, indent=2)
+
+    print(f"\nWOE 训练完成 AUC={auc:.4f}，阈值 auto={round(auto_ap)} manual={round(man_rev)}")
+    print("规则已写入 output/scoring_rules.json (v7.0-hc-woe)")
+    return rules
+
+
+def train_scoring_model(csv_path="data/training_data.csv", use_hc=True, use_woe=True):
+    """默认使用 Home Credit WOE 评分卡（v7.0-hc-woe）。"""
     if use_hc:
-        df = load_hc_training_data()
-        rules = train_hc_scoring_model(df)
+        if use_woe:
+            df = load_hc_training_data_woe()
+            if "gender_male" in df.columns:
+                rules = train_hc_woe_scoring_model(df)
+            else:
+                rules = train_hc_scoring_model(df)
+        else:
+            df = load_hc_training_data()
+            rules = train_hc_scoring_model(df)
         try:
             from load_to_mysql import load_scoring_rules_to_mysql
 

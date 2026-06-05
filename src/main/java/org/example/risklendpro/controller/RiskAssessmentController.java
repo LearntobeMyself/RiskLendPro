@@ -7,6 +7,7 @@ import org.example.risklendpro.pojo.response.CommonResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentStatusResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentResultResponse;
+import org.example.risklendpro.pojo.response.RiskAssessmentSubmitEligibilityResponse;
 import org.example.risklendpro.service.RiskAssessmentService;
 import org.example.risklendpro.utils.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,18 +35,32 @@ public class RiskAssessmentController {
         RiskAssessmentResponse response = riskAssessmentService.submit(userId, request);
         return CommonResponse.success("申请已受理，风控评估启动", response);
     }
+
+    @Operation(summary = "可否提交新评估", description = "重复申请预检：已通过/处理中/30天冷却期内不可提交")
+    @GetMapping("/submit-eligibility")
+    public CommonResponse<RiskAssessmentSubmitEligibilityResponse> submitEligibility(HttpServletRequest httpRequest) {
+        Long userId = SecurityUtils.getUserIdFromRequest(httpRequest);
+        RiskAssessmentSubmitEligibilityResponse response = riskAssessmentService.getSubmitEligibility(userId);
+        return CommonResponse.success("提交资格查询", response);
+    }
     
-    @Operation(summary = "轮询查询评估状态", description = "Android端轮询查询评估状态，当isFinal=true时停止轮询")
+    @Operation(summary = "轮询查询评估状态", description = "applyId 可选；未传时按 Token 查该用户最新评估，含补充材料状态")
     @GetMapping("/status")
-    public CommonResponse<RiskAssessmentStatusResponse> status(@RequestParam String applyId) {
-        RiskAssessmentStatusResponse response = riskAssessmentService.getStatus(applyId);
+    public CommonResponse<RiskAssessmentStatusResponse> status(
+            @RequestParam(required = false) String applyId,
+            HttpServletRequest httpRequest) {
+        Long userId = SecurityUtils.getUserIdFromRequest(httpRequest);
+        RiskAssessmentStatusResponse response = riskAssessmentService.getStatusForUser(userId, applyId);
         return CommonResponse.success("风控信息查询", response);
     }
     
-    @Operation(summary = "获取最终额度结果", description = "获取最终评估额度（如20,000）和失效日期")
+    @Operation(summary = "获取最终额度结果", description = "applyId 可选；未传时按 Token 查该用户最新终态评估")
     @GetMapping("/result")
-    public CommonResponse<RiskAssessmentResultResponse> result(@RequestParam String applyId) {
-        RiskAssessmentResultResponse response = riskAssessmentService.getResult(applyId);
+    public CommonResponse<RiskAssessmentResultResponse> result(
+            @RequestParam(required = false) String applyId,
+            HttpServletRequest httpRequest) {
+        Long userId = SecurityUtils.getUserIdFromRequest(httpRequest);
+        RiskAssessmentResultResponse response = riskAssessmentService.getResultForUser(userId, applyId);
         return CommonResponse.success("获取评估结果成功", response);
     }
 }

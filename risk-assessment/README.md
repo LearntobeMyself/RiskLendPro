@@ -1,197 +1,108 @@
-# Python 风控评分系统
+# Python 风控离线流水线
 
-基于工业级设计的风控评分系统，采用离线与在线分离架构。
+基于 Home Credit 数据的 **离线 ETL + 模型训练 + MySQL 入库** 脚本集。  
+在线评分由 Java 后端读取 `credit_data_db`，本目录不再包含 FastAPI 服务。
+
+详细联调步骤见 [`../参考文件/运行说明.md`](../参考文件/运行说明.md)。
 
 ## 项目结构
 
 ```
 risk-assessment/
-├── generate_mock_data.py      # 生成模拟外部API数据（模拟）
-├── clean_blacklist.py         # 清洗黑名单数据
-├── clean_user_features.py     # 清洗用户特征数据
-├── load_to_mysql.py           # 自动建库建表并写入数据
-├── train_scoring_model.py     # 模型训练（分析CSV文件）
-├── app/
-│   ├── api/
-│   │   ├── models.py          # Pydantic数据模型
-│   │   └── routes.py          # FastAPI路由
-│   ├── core/
-│   │   ├── credit_scorecard.py # 信用评分卡
-│   │   ├── fraud_engine.py    # 反欺诈引擎（模拟）
-│   │   ├── fusion.py          # 数据融合
-│   │   ├── identity_engine.py # 身份引擎（模拟）
-│   │   ├── limit_engine.py    # 额度引擎
-│   │   └── pipeline.py        # 评分管道
-│   ├── services/
-│   │   └── crawler.py         # 征信数据爬取服务（模拟）
-│   └── utils/
-│       └── __init__.py        # 工具函数
+├── clean_blacklist.py           # 清洗黑名单 → cleaned_blacklist.csv
+├── clean_user_features.py       # 从 parquet 抽样 → cleaned_user_features.csv
+├── clean_behavior_features.py   # B 卡行为特征清洗
+├── feature_engineering_hc.py    # HC 宽表特征工程
+├── woe_binning.py               # WOE 分箱与变换
+├── train_scoring_model.py       # A 卡 LR+PDO 训练 → scoring_rules.json
+├── train_b_card_model.py        # B 卡行为模型训练 → b_scoring_rules.json
+├── load_to_mysql.py             # 建表并写入 credit_data_db
+├── score_demo_users.py          # 离线复现 Java 算分（校准测试用例）
 ├── data/
-│   ├── raw/                   # 原始数据（模拟外部API）
-│   │   ├── raw_blacklist.csv  # 原始黑名单（模拟）
-│   │   └── raw_user_features.csv  # 原始用户特征（模拟）
-│   ├── cleaned/               # 清洗后数据
-│   │   ├── cleaned_blacklist.csv
-│   │   └── cleaned_user_features.csv
-│   └── training_data.csv      # 历史训练数据（可选）
+│   ├── raw/
+│   │   ├── blacklist.csv                    # 原始黑名单（温州公开数据）
+│   │   └── home_credit_train_min.parquet    # HC 训练宽表
+│   └── cleaned/
+│       ├── cleaned_blacklist.csv
+│       ├── cleaned_user_features.csv
+│       └── cleaned_behavior_features.csv
 ├── output/
-│   └── scoring_rules.json     # 评分规则文件
-├── main.py                    # 应用入口
-└── requirements.txt           # 依赖项
+│   ├── scoring_rules.json       # A 卡规则（入库 + Java 读取）
+│   ├── scoring_rules.md         # A 卡规则解读（与 scoring_rules.json 同步）
+│   ├── b_scoring_rules.json     # B 卡规则
+│   ├── b_scoring_rules.md       # B 卡规则解读（与 b_scoring_rules.json 同步）
+│   └── demo_user_scores.json    # score_demo_users 产出（测试文档引用）
+├── requirements.txt
+└── .env                         # 本地 MySQL 配置（勿提交）
 ```
 
-## 配置说明
+## 环境配置
 
-创建 `.env` 文件：
+创建 `.env`：
 
 ```env
-DB_HOST=47.109.109.231
+DB_HOST=localhost
 DB_PORT=3306
 DB_USER=admin
 DB_PASSWORD=admin
 DB_NAME=credit_data_db
 ```
 
-## 使用流程
-
-### 1. 生成模拟数据
-
 ```bash
-python generate_mock_data.py
+conda create -n risk-assessment python=3.9 -y
+conda activate risk-assessment
+cd risk-assessment
+pip install -r requirements.txt
 ```
 
-生成原始数据文件到 `data/raw/` 目录。
+确认存在 `data/raw/home_credit_train_min.parquet`。
 
-### 2. 清洗数据
+## 执行流程
+
+### 1. 清洗数据
 
 ```bash
 python clean_blacklist.py
 python clean_user_features.py
+python clean_behavior_features.py   # B 卡需要时执行
 ```
 
-清洗后的数据保存到 `data/cleaned/` 目录。
+### 2. 训练模型
 
-### 3. 写入数据库
+```bash
+python train_scoring_model.py       # A 卡 → output/scoring_rules.json
+python train_b_card_model.py        # B 卡 → output/b_scoring_rules.json
+```
+
+### 3. 写入 MySQL
 
 ```bash
 python load_to_mysql.py
 ```
 
-自动创建数据库和表，并将清洗后的数据写入MySQL。
+**注意**：会 `DROP` 后重建 `blacklist`、`user_external_features` 等表，生产环境慎用。
 
-### 4. 训练模型
-
-```bash
-python train_scoring_model.py
-```
-
-分析CSV训练数据，训练逻辑回归模型，产出评分规则。
-
-### 5. 启动API服务
+### 4. 可选：校准测试用例分数
 
 ```bash
-python main.py
+python score_demo_users.py
 ```
 
-## API接口
+产出 `output/demo_user_scores.json`，供 [`../sql/测试用例.md`](../sql/测试用例.md) 对照。
 
-### POST /predict
+## 入库表（credit_data_db）
 
-授信评估接口
+| 表名 | 说明 |
+|------|------|
+| `blacklist` | 失信被执行人黑名单 |
+| `user_external_features` | 用户外部特征（A 卡） |
+| `scoring_rules` | A 卡评分规则 |
+| `user_behavior_features` | B 卡行为特征 |
+| `behavior_scoring_rules` | B 卡评分规则 |
 
-### GET /health
+也可通过 Java 接口 `POST /sync/blacklist`（永久 API Token）增量写入黑名单。
 
-健康检查
+## 相关文档
 
-## 数据库表结构
-
-| 表名                       | 说明         |
-| ------------------------ | ---------- |
-| `blacklist`              | 黑名单表（一票否决） |
-| `user_external_features` | 用户外部特征表    |
-| `scoring_rules`          | 评分规则配置表    |
-
-## 依赖安装
-
-```bash
-pip install -r requirements.txt
-```
-
-## 启动运行步骤
-
-### 1. 创建并激活环境
-
-```
-# 删除旧环境（如果存在）
-conda remove -n risk-assessment --all -y
-
-# 创建新环境
-conda create -n risk-assessment 
-python=3.9 -y
-conda activate risk-assessment
-
-# 安装依赖
-cd 
-d:\javacode\RiskLendPro\risk-assessment
-pip install -r requirements.txt
-```
-
-### 2. 执行数据处理流程
-
-```
-# 步骤1: 生成模拟数据（自动创建data文件
-夹）
-python generate_mock_data.py
-# 输出: 原始黑名单数据生成完毕... 原始用
-户特征数据生成完毕...
-
-# 步骤2: 清洗数据
-python clean_blacklist.py
-# 输出: 原始数据行数: xxx → 去重后行数: 
-xxx → 清洗后黑名单数据: xxx 条
-
-python clean_user_features.py
-# 输出: 原始数据行数: xxx → 去重后行数: 
-xxx → 清洗后用户特征数据: xxx 条
-
-# 步骤3: 写入数据库（自动创建数据库和表）
-python load_to_mysql.py
-# 输出: 数据库检查/创建完成 → 所有表检查/
-创建完成 → 写入数据成功
-
-# 步骤4: 训练模型
-python train_scoring_model.py
-# 输出: 模型训练完成 → 测试准确率: xxx 
-→ 评分规则已保存
-
-# 步骤5: 启动API服务
-python main.py
-# 输出: INFO:     Started server 
-process [xxxx] → Uvicorn running on 
-http://127.0.0.1:8000
-```
-
-### 3. 验证运行成功
-
-检查服务是否启动：
-
-- 打开浏览器访问： <http://localhost:8000/health>
-- 返回 {"status": "healthy"} 表示服务正常
-  检查数据库数据：
-
-```
-# 使用MySQL客户端连接
-mysql -h 47.109.109.231 -u admin -p
-# 密码: admin
-
-# 查询数据
-USE credit_data_db;
-SELECT COUNT(*) FROM 
-blacklist;      # 查看黑名单数量
-SELECT COUNT(*) FROM 
-user_external_features;  # 查看用户特
-征数量
-SELECT * FROM 
-scoring_rules;  
-```
-
+- [`../参考文件/csv数据来源和数据库表设计.md`](../参考文件/csv数据来源和数据库表设计.md)
+- [`../参考文件/HomeCredit评分卡使用说明.md`](../参考文件/HomeCredit评分卡使用说明.md)

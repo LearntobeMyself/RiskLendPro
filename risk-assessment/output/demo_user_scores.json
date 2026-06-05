@@ -1,0 +1,230 @@
+[
+  {
+    "label": "A2方小巢",
+    "sk_id_curr": 200141,
+    "app": {
+      "education": "大专",
+      "gender": 0,
+      "monthlyIncome": "8000-15000",
+      "marriage": "未婚",
+      "jobType": "自由职业"
+    },
+    "blacklist": "L2",
+    "id_card": "310000198402260267",
+    "birthday": "1984-02-26",
+    "score": 580.4,
+    "decision": "REJECT",
+    "income": {
+      "pass": true,
+      "reject": false,
+      "manual": false,
+      "reason": "后台高于区间下沿"
+    },
+    "ext_source_2": 0.6723,
+    "ext_source_3": 0.2314,
+    "amt_income_total": 225000.0,
+    "has_default_history": 0
+  },
+  {
+    "label": "A3张小梁",
+    "sk_id_curr": 218467,
+    "app": {
+      "education": "高中及以下",
+      "gender": 0,
+      "monthlyIncome": "8000-15000",
+      "marriage": "已婚",
+      "jobType": "企事业单位"
+    },
+    "blacklist": "NAME_ONLY",
+    "id_card": "110112198212010000",
+    "birthday": "1982-12-01",
+    "score": 767.7,
+    "decision": "MANUAL_REVIEW",
+    "income": {
+      "pass": true,
+      "reject": false,
+      "manual": false,
+      "reason": "偏差15%内"
+    },
+    "ext_source_2": 0.6669,
+    "ext_source_3": 0.6754,
+    "amt_income_total": 90000.0,
+    "has_default_history": 0
+  },
+  {
+    "label": "李四",
+    "sk_id_curr": 120728,
+    "app": {
+      "education": "高中及以下",
+      "gender": 1,
+      "monthlyIncome": "3000以下",
+      "marriage": "未婚",
+      "jobType": "体力劳动者"
+    },
+    "id_card": "110112200101080001",
+    "birthday": "2001-01-08",
+    "score": 549.6,
+    "decision": "REJECT",
+    "income": {
+      "pass": true,
+      "reject": false,
+      "manual": false,
+      "reason": "后台高于区间下沿"
+    },
+    "ext_source_2": 0.4576,
+    "ext_source_3": 0.4794,
+    "amt_income_total": 157500.0,
+    "has_default_history": 1
+  },
+  {
+    "label": "王五",
+    "sk_id_curr": 140552,
+    "app": {
+      "education": "高中及以下",
+      "gender": 1,
+      "monthlyIncome": "8000-15000",
+      "marriage": "未婚",
+      "jobType": "体力劳动者"
+    },
+    "id_card": "110112198507140019",
+    "birthday": "1985-07-14",
+    "score": 504.2,
+    "decision": "REJECT",
+    "income": {
+      "pass": true,
+      "reject": false,
+      "manual": false,
+      "reason": "偏差15%内"
+    },
+    "ext_source_2": 0.0679,
+    "ext_source_3": 0.5549,
+    "amt_income_total": 90000.0,
+    "has_default_history": 1
+  },
+  {
+    "label": "赵六",
+    "sk_id_curr": 201057,
+    "app": {
+      "education": "本科",
+      "gender": 0,
+      "monthlyIncome": "15000以上",
+      "marriage": "已婚",
+      "jobType": "企事业单位"
+    },
+    "id_card": "110112199602030012",
+    "birthday": "1996-02-03",
+    "score": 950.0,
+    "decision": "APPROVE",
+    "income": {
+      "pass": true,
+      "reject": false,
+      "manual": false,
+      "reason": "收入在区间内"
+    },
+    "ext_source_2": 0.7662,
+    "ext_source_3": 0.761,
+    "amt_income_total": 256500.0,
+    "has_default_history": 0
+  },
+  {
+    "label": "孙七",
+    "sk_id_curr": 125887,
+    "blacklist": "L2",
+    "app": {
+      "education": "本科",
+      "gender": 0,
+      "monthlyIncome": "15000以上",
+      "marriage": "已婚",
+      "jobType": "企事业单位"
+    },
+    "id_card": "110112198702150007",
+    "birthday": "1987-02-15",
+    "score": 797.6,
+    "decision": "APPROVE",
+    "income": {
+      "pass": true,
+      "reject": false,
+      "manual": false,
+      "reason": "收入在区间内"
+    },
+    "ext_source_2": 0.6669,
+    "ext_source_3": 0.6754,
+    "amt_income_total": 210000.0,
+    "has_default_history": 0
+  },
+  {
+    "label": "周八",
+    "sk_id_curr": 220352,
+    "app": {
+      "education": "高中及以下",
+      "gender": 0,
+      "monthlyIncome": "15000以上",
+      "marriage": "已婚",
+      "jobType": "体力劳动者"
+    },
+    "id_card": "110112198011120027",
+    "birthday": "1980-11-12",
+    "score": 749.2,
+    "decision": "MANUAL_REVIEW",
+    "income": {
+      "pass": false,
+      "reject": true,
+      "manual": false,
+      "reason": "收入虚报>122%"
+    },
+    "ext_source_2": 0.7516,
+    "ext_source_3": 0.4507,
+    "amt_income_total": 81000.0,
+    "has_default_history": 0
+  },
+  {
+    "label": "吴九",
+    "sk_id_curr": 105579,
+    "app": {
+      "education": "高中及以下",
+      "gender": 0,
+      "monthlyIncome": "15000以上",
+      "marriage": "已婚",
+      "jobType": "体力劳动者"
+    },
+    "id_card": "110112198809220017",
+    "birthday": "1988-09-22",
+    "score": 867.9,
+    "decision": "APPROVE",
+    "income": {
+      "pass": false,
+      "reject": false,
+      "manual": true,
+      "reason": "收入偏差33%"
+    },
+    "ext_source_2": 0.7437,
+    "ext_source_3": 0.7993,
+    "amt_income_total": 135000.0,
+    "has_default_history": 0
+  },
+  {
+    "label": "郑十",
+    "sk_id_curr": 104716,
+    "app": {
+      "education": "高中及以下",
+      "gender": 1,
+      "monthlyIncome": "15000以上",
+      "marriage": "已婚",
+      "jobType": "企事业单位"
+    },
+    "id_card": "110112198904120002",
+    "birthday": "1989-04-12",
+    "score": 524.3,
+    "decision": "REJECT",
+    "income": {
+      "pass": true,
+      "reject": false,
+      "manual": false,
+      "reason": "收入在区间内"
+    },
+    "ext_source_2": 0.7029,
+    "ext_source_3": 0.2485,
+    "amt_income_total": 315000.0,
+    "has_default_history": 0
+  }
+]

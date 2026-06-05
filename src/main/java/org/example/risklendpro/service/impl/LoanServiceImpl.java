@@ -9,7 +9,6 @@ import org.example.risklendpro.entity.RiskAssessment;
 import org.example.risklendpro.entity.User;
 import org.example.risklendpro.entity.UserCreditLimit;
 import org.example.risklendpro.enums.LoanStatusEnum;
-import org.example.risklendpro.enums.StatusEnum;
 import org.example.risklendpro.mapper.LoanMapper;
 import org.example.risklendpro.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.mapper.RepaymentRecordMapper;
@@ -17,10 +16,9 @@ import org.example.risklendpro.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.mapper.UserMapper;
 import org.example.risklendpro.pojo.request.LoanRequest;
-import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 import org.example.risklendpro.pojo.response.LoanResponse;
-import org.example.risklendpro.service.CreditScoreEngine;
 import org.example.risklendpro.service.LoanService;
+import org.example.risklendpro.service.BehaviorScoreService;
 import org.example.risklendpro.utils.EmailUtil;
 import org.example.risklendpro.utils.RepaymentCalculator;
 import org.springframework.beans.BeanUtils;
@@ -56,10 +54,10 @@ public class LoanServiceImpl implements LoanService {
     private RiskAssessmentMapper riskAssessmentMapper;
 
     @Autowired
-    private CreditScoreEngine creditScoreEngine;
+    private EmailUtil emailUtil;
 
     @Autowired
-    private EmailUtil emailUtil;
+    private BehaviorScoreService behaviorScoreService;
 
     @Override
     @Transactional
@@ -80,20 +78,7 @@ public class LoanServiceImpl implements LoanService {
         // 2. 检查用户是否有未处理逾期
         checkOverdue(userId);
 
-        // 3. 重新进行风控评估（每次借款前都需要重新评估）
-        double newScore = creditScoreEngine.calculateScore(buildRiskRequest(latestAssessment));
-        String newDecision = creditScoreEngine.getDecision(newScore);
-
-        // 4. 如果风控评估未通过，拒绝借款
-        if (!"APPROVE".equals(newDecision)) {
-            throw new RuntimeException("您的风控评估未通过（评分：" + String.format("%.2f", newScore) + "），无法借款");
-        }
-
-        // 5. 计算新的授信额度
-        double newCreditLimit = creditScoreEngine.calculateCreditLimitWithFeatures(
-            newScore, latestAssessment.getMonthlyIncome(), latestAssessment.getIdCard());
-
-        // 6. 检查用户是否有授信额度
+        // 3. 检查用户是否有授信额度
         UserCreditLimit creditLimit = getUserCreditLimit(userId);
         if (creditLimit == null) {
             throw new RuntimeException("用户尚未获得授信额度，无法借款");
@@ -147,6 +132,7 @@ public class LoanServiceImpl implements LoanService {
         // 6. 生成还款计划和还款记录（仅当自动审批通过时）
         if (loan.getAutoApproved()) {
             generateRepaymentPlan(loan, request.getRepaymentMethod());
+            behaviorScoreService.activate(userId, latestAssessment.getIdCard());
         }
 
         // 7. 发送邮件通知
@@ -353,23 +339,5 @@ public class LoanServiceImpl implements LoanService {
             
             repaymentRecordMapper.insert(record);
         }
-    }
-
-    private RiskAssessmentRequest buildRiskRequest(RiskAssessment assessment) {
-        RiskAssessmentRequest request = new RiskAssessmentRequest();
-        request.setIdCard(assessment.getIdCard());
-        request.setName(assessment.getName());
-        request.setPhone(assessment.getPhone());
-        request.setEmail(assessment.getEmail());
-        request.setGender(assessment.getGender());
-        request.setBirthday(assessment.getBirthday() != null ? assessment.getBirthday().toString() : null);
-        request.setEducation(assessment.getEducation());
-        request.setMarriage(assessment.getMarriage());
-        request.setJobType(assessment.getJobType());
-        request.setMonthlyIncome(assessment.getMonthlyIncome());
-        request.setHasHouse(assessment.getHasHouse());
-        request.setHasCar(assessment.getHasCar());
-        request.setContactPhone(assessment.getContactPhone());
-        return request;
     }
 }

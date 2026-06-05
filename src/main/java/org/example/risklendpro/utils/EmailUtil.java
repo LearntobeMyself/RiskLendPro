@@ -6,6 +6,8 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 public class EmailUtil {
 
@@ -166,5 +168,49 @@ public class EmailUtil {
                 "此致\n" +
                 "RiskLendPro团队";
         sendSimpleEmail(userEmail, subject, content);
+    }
+
+    /**
+     * 人工复核需补充材料通知
+     */
+    public void sendManualReviewSupplementNotice(String userEmail, String userName,
+                                                 List<org.example.risklendpro.pojo.dto.SupplementRequirement> requirements,
+                                                 int retentionDays) {
+        String subject = "【RiskLendPro】您的授信评估需补充材料";
+        StringBuilder sb = new StringBuilder();
+        sb.append("尊敬的").append(userName).append("先生/女士：\n\n");
+        sb.append("您的授信评估已进入人工复核，请登录 App 在「补充材料」页面上传以下材料：\n\n");
+        for (org.example.risklendpro.pojo.dto.SupplementRequirement req : requirements) {
+            sb.append("- ").append(req.getLabel());
+            if (req.isRequired()) {
+                sb.append("（必填）");
+            } else {
+                sb.append("（可选）");
+            }
+            sb.append("：").append(req.getDescription()).append("\n");
+        }
+        sb.append("\n请在 ").append(retentionDays).append(" 天内完成上传，逾期材料将被系统自动清理，需重新提交。\n\n");
+        sb.append("此致\nRiskLendPro团队");
+        sendSimpleEmail(userEmail, subject, sb.toString());
+    }
+
+    /**
+     * 补充材料过期提醒
+     */
+    public void sendSupplementMaterialExpiredNotice(String userEmail, String userName,
+                                                    List<org.example.risklendpro.pojo.dto.SupplementRequirement> requirements,
+                                                    int retentionDays) {
+        String subject = "【RiskLendPro】补充材料已过期，请重新上传";
+        StringBuilder sb = new StringBuilder();
+        sb.append("尊敬的").append(userName).append("先生/女士：\n\n");
+        sb.append("您此前上传的复核材料已超过保留期限（").append(retentionDays).append(" 天），系统已自动清理。\n");
+        sb.append("您的评估仍处于人工复核中，请重新登录 App 上传以下材料：\n\n");
+        if (requirements != null) {
+            for (org.example.risklendpro.pojo.dto.SupplementRequirement req : requirements) {
+                sb.append("- ").append(req.getLabel()).append("\n");
+            }
+        }
+        sb.append("\n此致\nRiskLendPro团队");
+        sendSimpleEmail(userEmail, subject, sb.toString());
     }
 }

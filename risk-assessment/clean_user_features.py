@@ -63,6 +63,50 @@ def clean_user_features():
 
     cleaned_df["has_car"] = df["FLAG_OWN_CAR"].fillna("N").apply(lambda x: 1 if str(x).upper() == "Y" else 0)
 
+    cleaned_df["gender_male"] = (
+        df["CODE_GENDER"].fillna("").astype(str).str.upper().eq("M").astype(int)
+        if "CODE_GENDER" in df.columns
+        else 0
+    )
+    cleaned_df["married"] = (
+        df["NAME_FAMILY_STATUS"]
+        .fillna("")
+        .astype(str)
+        .str.contains("Married", case=False, na=False)
+        .astype(int)
+        if "NAME_FAMILY_STATUS" in df.columns
+        else 0
+    )
+    cleaned_df["own_realty"] = (
+        df["FLAG_OWN_REALTY"].fillna("N").apply(lambda x: 1 if str(x).upper() == "Y" else 0)
+        if "FLAG_OWN_REALTY" in df.columns
+        else 0
+    )
+    if "AMT_CREDIT" in df.columns:
+        inc = cleaned_df["AMT_INCOME_TOTAL"].replace(0, pd.NA)
+        cleaned_df["credit_income_ratio"] = (
+            pd.to_numeric(df["AMT_CREDIT"], errors="coerce") / inc
+        ).fillna(0).round(4)
+    else:
+        cleaned_df["credit_income_ratio"] = 0.0
+    cleaned_df["employment_stable"] = (
+        (cleaned_df["days_employed"] < -365).astype(int)
+    )
+    cc_cols = [c for c in df.columns if str(c).lower().startswith("cc_")]
+    if cc_cols:
+        cleaned_df["cc_utilization"] = (
+            pd.to_numeric(df[cc_cols[0]], errors="coerce").fillna(0).round(4)
+        )
+    else:
+        cleaned_df["cc_utilization"] = 0.0
+    overdue_cols = [c for c in df.columns if "OVERDUE" in c.upper() or "DPD" in c.upper()]
+    if overdue_cols:
+        cleaned_df["loan_overdue_max_6m"] = (
+            df[overdue_cols].apply(pd.to_numeric, errors="coerce").max(axis=1).fillna(0).astype(int)
+        )
+    else:
+        cleaned_df["loan_overdue_max_6m"] = 0
+
     cleaned_df["occupation_type"] = df["OCCUPATION_TYPE"].fillna("未知")
 
     edu_mapping = {
@@ -129,6 +173,13 @@ def clean_user_features():
             "ext_source_2",
             "ext_source_3",
             "has_car",
+            "gender_male",
+            "married",
+            "own_realty",
+            "employment_stable",
+            "credit_income_ratio",
+            "cc_utilization",
+            "loan_overdue_max_6m",
             "occupation_type",
             "education",
             "has_default_history",

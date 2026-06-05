@@ -12,6 +12,8 @@ import org.example.risklendpro.mapper.credit.ScoringRulesMapper;
 import org.example.risklendpro.mapper.credit.UserExternalFeaturesMapper;
 import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 import org.example.risklendpro.service.CreditScoreEngine;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +26,8 @@ import java.util.Map;
 
 @Service
 public class CreditScoreEngineImpl implements CreditScoreEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(CreditScoreEngineImpl.class);
 
     @Autowired
     private BlacklistMapper blacklistMapper;
@@ -75,15 +79,18 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     @Override
-    public BlacklistMatchResult checkBlacklist(String name, String idCard) {
+    public CreditScoreEngine.BlacklistMatchResult checkBlacklist(String name, String idCard) {
         if (name == null || name.trim().isEmpty()) {
-            return new BlacklistMatchResult(MatchLevel.NONE, null);
+            return new CreditScoreEngine.BlacklistMatchResult(CreditScoreEngine.MatchLevel.NONE, null);
         }
 
         String areaCode = extractAreaCodeFromIdCard(idCard);
         Integer birthYear = extractBirthYearFromIdCard(idCard);
 
         List<Blacklist> allBlacklist = blacklistMapper.selectAll();
+
+        Blacklist bestNameArea = null;
+        Blacklist bestNameOnly = null;
 
         for (Blacklist record : allBlacklist) {
             String blacklistName = record.getName();
@@ -98,23 +105,33 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             String recordAreaCode = record.getAreaCode();
             Integer recordBirthYear = record.getBirthYear();
 
-            boolean areaMatch = (recordAreaCode != null && !recordAreaCode.isEmpty()) && 
+            boolean areaMatch = (recordAreaCode != null && !recordAreaCode.isEmpty()) &&
                                (areaCode != null && areaCode.equals(recordAreaCode));
-            boolean birthYearMatch = (recordBirthYear != null) && (birthYear != null) && 
+            boolean birthYearMatch = (recordBirthYear != null) && (birthYear != null) &&
                                     recordBirthYear.equals(birthYear);
 
             if (areaMatch && birthYearMatch) {
-                return new BlacklistMatchResult(MatchLevel.FULL, record);
+                return new CreditScoreEngine.BlacklistMatchResult(CreditScoreEngine.MatchLevel.FULL, record);
             }
 
             if (areaMatch) {
-                return new BlacklistMatchResult(MatchLevel.NAME_AREA, record);
+                bestNameArea = record;
+                continue;
             }
 
-            return new BlacklistMatchResult(MatchLevel.NAME_ONLY, record);
+            if (bestNameOnly == null) {
+                bestNameOnly = record;
+            }
         }
 
-        return new BlacklistMatchResult(MatchLevel.NONE, null);
+        if (bestNameArea != null) {
+            return new CreditScoreEngine.BlacklistMatchResult(CreditScoreEngine.MatchLevel.NAME_AREA, bestNameArea);
+        }
+        if (bestNameOnly != null) {
+            return new CreditScoreEngine.BlacklistMatchResult(CreditScoreEngine.MatchLevel.NAME_ONLY, bestNameOnly);
+        }
+
+        return new CreditScoreEngine.BlacklistMatchResult(CreditScoreEngine.MatchLevel.NONE, null);
     }
 
     private boolean matchWildcardName(String realName, String patternName) {
@@ -156,8 +173,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             JsonNode root = null;
             if (rules.getRuleContent() != null && !rules.getRuleContent().isBlank()) {
                 JsonNode full = objectMapper.readTree(rules.getRuleContent());
-                if (full.has("model_type") && full.get("model_type").asText().startsWith("hc_")) {
-                    root = full;
+                if (full.has("model_type")) {
+                    String mt = full.get("model_type").asText();
+                    if (mt.startsWith("hc_")) {
+                        root = full;
+                    }
                 }
             }
             if (root == null) {
@@ -166,6 +186,7 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             if (root == null && rules.getRuleContent() != null) {
                 root = objectMapper.readTree(rules.getRuleContent());
             }
+            normalizeRuleRoot(root, rules);
             cfg.ruleRoot = root;
             JsonNode fs = cfg.ruleRoot != null ? cfg.ruleRoot.get("feature_scores") : null;
             if (fs != null && fs.isObject()) {
@@ -232,12 +253,64 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return root;
     }
 
-    private boolean hasFeatureWeights(FullRuleConfig cfg) {
-        if (cfg.ruleRoot == null) {
-            return false;
+    /**
+     * v7 WOE 规则 JSON 使用 coefficients；列拼装或旧规则使用 feature_weights。统一别名并补全 WOE 所需字段。
+     */
+    private void normalizeRuleRoot(JsonNode root, ScoringRules rules) {
+        if (root == null || !root.isObject()) {
+            return;
         }
-        JsonNode fw = cfg.ruleRoot.get("feature_weights");
-        return fw != null && fw.isObject() && fw.size() > 0;
+        ObjectNode obj = (ObjectNode) root;
+        JsonNode coef = obj.get("coefficients");
+        JsonNode fw = obj.get("feature_weights");
+        boolean hasCoef = coef != null && coef.isObject() && !coef.isEmpty();
+        boolean hasFw = fw != null && fw.isObject() && !fw.isEmpty();
+        if (!hasFw && hasCoef) {
+            obj.set("feature_weights", coef);
+        } else if (!hasCoef && hasFw) {
+            obj.set("coefficients", fw);
+        }
+
+        if (rules == null || rules.getRuleContent() == null || rules.getRuleContent().isBlank()) {
+            return;
+        }
+        try {
+            JsonNode full = objectMapper.readTree(rules.getRuleContent());
+            if (!obj.has("model_type") && full.has("model_type")) {
+                obj.set("model_type", full.get("model_type"));
+            }
+            if (!obj.has("features") && full.has("features")) {
+                obj.set("features", full.get("features"));
+            }
+            if ((!obj.has("coefficients") || obj.get("coefficients").isEmpty())
+                    && full.has("coefficients") && full.get("coefficients").isObject()) {
+                obj.set("coefficients", full.get("coefficients"));
+                if (!obj.has("feature_weights") || obj.get("feature_weights").isEmpty()) {
+                    obj.set("feature_weights", full.get("coefficients"));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to supplement rule root from rule_content: {}", e.getMessage());
+        }
+    }
+
+    private JsonNode getLrCoefficientsNode(JsonNode root) {
+        if (root == null || !root.isObject()) {
+            return null;
+        }
+        JsonNode weights = root.get("feature_weights");
+        if (weights != null && weights.isObject() && !weights.isEmpty()) {
+            return weights;
+        }
+        JsonNode coef = root.get("coefficients");
+        if (coef != null && coef.isObject() && !coef.isEmpty()) {
+            return coef;
+        }
+        return null;
+    }
+
+    private boolean hasFeatureWeights(FullRuleConfig cfg) {
+        return getLrCoefficientsNode(cfg.ruleRoot) != null;
     }
 
     private double readIntercept(FullRuleConfig cfg) {
@@ -466,7 +539,17 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return 0.0;
     }
 
+    private boolean isHcWoeModel(FullRuleConfig cfg) {
+        if (cfg.ruleRoot == null || !cfg.ruleRoot.has("model_type")) {
+            return false;
+        }
+        return "hc_woe_lr".equals(cfg.ruleRoot.get("model_type").asText());
+    }
+
     private boolean isHcStandardizedModel(FullRuleConfig cfg) {
+        if (isHcWoeModel(cfg)) {
+            return false;
+        }
         if (cfg.ruleRoot == null || !cfg.ruleRoot.has("model_type")) {
             return false;
         }
@@ -545,6 +628,139 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         m.put("active_loans_count",
                 ext != null && ext.getActiveLoansCount() != null ? ext.getActiveLoansCount().doubleValue() : 0.0);
         return m;
+    }
+
+    /** WOE 模型：申请表 + 第三方原始值（键与 scoring_rules.features 一致） */
+    private Map<String, Double> buildHcWoeRawFeatureMap(RiskAssessmentRequest request, UserExternalFeatures ext) {
+        Map<String, Double> m = new LinkedHashMap<>();
+        int birthYear = Integer.parseInt(request.getBirthday().substring(0, 4));
+        int age = java.time.LocalDate.now().getYear() - birthYear;
+
+        m.put("gender_male", request.getGender() != null && request.getGender() == 1 ? 1.0 : 0.0);
+        m.put("married", "已婚".equals(request.getMarriage()) ? 1.0 : 0.0);
+        if (Boolean.TRUE.equals(request.getHasCar())) {
+            m.put("own_car", 1.0);
+        } else if (ext != null && ext.getFlagOwnCar() != null) {
+            m.put("own_car", ext.getFlagOwnCar().doubleValue());
+        } else {
+            m.put("own_car", 0.0);
+        }
+        if (Boolean.TRUE.equals(request.getHasHouse())) {
+            m.put("own_realty", 1.0);
+        } else if (ext != null && ext.getOwnRealty() != null) {
+            m.put("own_realty", ext.getOwnRealty().doubleValue());
+        } else {
+            m.put("own_realty", 0.0);
+        }
+        String tier = mapEducationToTier(request.getEducation());
+        m.put("edu_high", "high".equals(tier) ? 1.0 : 0.0);
+        m.put("edu_mid", "mid".equals(tier) ? 1.0 : 0.0);
+        if (jobStableFromJobType(request.getJobType()) > 0.5) {
+            m.put("employment_stable", 1.0);
+        } else if (ext != null && ext.getEmploymentStable() != null) {
+            m.put("employment_stable", ext.getEmploymentStable().doubleValue());
+        } else if (ext != null && ext.getDaysEmployed() != null && ext.getDaysEmployed() < -365) {
+            m.put("employment_stable", 1.0);
+        } else {
+            m.put("employment_stable", 0.0);
+        }
+        m.put("age_years", (double) age);
+        m.put("amt_income_total", mapIncomeToValue(request.getMonthlyIncome()) * 12.0);
+        m.put("credit_inquiry_1m",
+                ext != null && ext.getCreditBureauMon() != null ? ext.getCreditBureauMon().doubleValue() : null);
+        m.put("credit_inquiry_week",
+                ext != null && ext.getCreditBureauWeek() != null ? ext.getCreditBureauWeek().doubleValue() : null);
+        m.put("ext_source_2", ext != null && ext.getExtSource2() != null ? ext.getExtSource2().doubleValue() : null);
+        m.put("ext_source_3", ext != null && ext.getExtSource3() != null ? ext.getExtSource3().doubleValue() : null);
+        m.put("active_loans_count",
+                ext != null && ext.getActiveLoansCount() != null ? ext.getActiveLoansCount().doubleValue() : null);
+        m.put("credit_income_ratio",
+                ext != null && ext.getCreditIncomeRatio() != null ? ext.getCreditIncomeRatio().doubleValue() : null);
+        m.put("cc_utilization",
+                ext != null && ext.getCcUtilization() != null ? ext.getCcUtilization().doubleValue() : null);
+        m.put("loan_overdue_max_6m",
+                ext != null && ext.getLoanOverdueMax6m() != null ? ext.getLoanOverdueMax6m().doubleValue() : null);
+        m.put("phone_change_days",
+                ext != null && ext.getDaysLastPhoneChange() != null
+                        ? Math.abs(ext.getDaysLastPhoneChange().doubleValue())
+                        : null);
+        m.put("prev_refused_count",
+                ext != null && ext.getPrevRefusedCount() != null ? ext.getPrevRefusedCount().doubleValue() : 0.0);
+        return m;
+    }
+
+    private double woeLookup(Double raw, JsonNode featDef) {
+        if (featDef == null || !featDef.isObject()) {
+            return 0.0;
+        }
+        if (raw == null || raw.isNaN()) {
+            return featDef.path("missing_bin").path("woe").asDouble(0.0);
+        }
+        String type = featDef.path("type").asText("numeric");
+        if ("categorical".equals(type)) {
+            int key = raw >= 0.5 ? 1 : 0;
+            JsonNode cat = featDef.path("categories").path(String.valueOf(key));
+            if (cat.isObject() && cat.has("woe")) {
+                return cat.get("woe").asDouble();
+            }
+            return featDef.path("missing_bin").path("woe").asDouble(0.0);
+        }
+        JsonNode cuts = featDef.get("cuts");
+        JsonNode woeArr = featDef.get("woe");
+        if (cuts == null || !cuts.isArray() || woeArr == null || !woeArr.isArray()) {
+            return 0.0;
+        }
+        double x = raw;
+        for (int i = 0; i < cuts.size(); i++) {
+            if (x <= cuts.get(i).asDouble()) {
+                return woeArr.get(Math.min(i, woeArr.size() - 1)).asDouble();
+            }
+        }
+        return woeArr.get(woeArr.size() - 1).asDouble();
+    }
+
+    private Pair<Double, List<ScoreContribution>> calculateHcWoeScorecard(
+            RiskAssessmentRequest request, FullRuleConfig cfg) {
+        UserExternalFeatures ext = resolveExternalFeatures(request.getIdCard());
+        Map<String, Double> rawValues = buildHcWoeRawFeatureMap(request, ext);
+        JsonNode features = cfg.ruleRoot.get("features");
+        JsonNode coefs = cfg.ruleRoot.has("coefficients")
+                ? cfg.ruleRoot.get("coefficients")
+                : cfg.ruleRoot.get("feature_weights");
+        double intercept = readIntercept(cfg);
+
+        List<ScoreContribution> contributions = new ArrayList<>();
+        contributions.add(new ScoreContribution(
+                "intercept", "1.0", intercept, intercept, "基础评分"));
+
+        double linear = intercept;
+        if (coefs != null && coefs.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> it = coefs.fields();
+            while (it.hasNext()) {
+                Map.Entry<String, JsonNode> e = it.next();
+                String key = e.getKey();
+                double w = e.getValue().asDouble();
+                Double raw = rawValues.get(key);
+                JsonNode featDef = features != null ? features.get(key) : null;
+                double woeVal = woeLookup(raw, featDef);
+                double contrib = w * woeVal;
+                linear += contrib;
+
+                String description = describeLogisticFeature(key, woeVal);
+                if (description == null) {
+                    continue;
+                }
+                String valStr = raw == null ? "缺失" : String.format("%.6g", raw);
+                contributions.add(new ScoreContribution(
+                        key, valStr + "→WOE=" + String.format("%.4f", woeVal), w, contrib, description));
+            }
+        }
+
+        double prob = sigmoid(linear);
+        JsonNode scNode = cfg.ruleRoot.get("scorecard");
+        double lrScore = scorecardFromProb(prob, scNode);
+        double total = applyApplicationRuleBonus(request, cfg.ruleRoot, scNode, lrScore, contributions);
+        return new Pair<>(total, contributions);
     }
 
     private double scaleHcFeature(String key, double raw, JsonNode scalerRoot) {
@@ -726,6 +942,48 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         if ("active_loans_count".equals(key)) {
             return "活跃贷款数(第三方)";
         }
+        if ("gender_male".equals(key)) {
+            return "性别(男)";
+        }
+        if ("married".equals(key)) {
+            return "婚姻(已婚)";
+        }
+        if ("own_car".equals(key)) {
+            return "有车";
+        }
+        if ("own_realty".equals(key)) {
+            return "有房";
+        }
+        if ("edu_high".equals(key)) {
+            return "高学历";
+        }
+        if ("edu_mid".equals(key)) {
+            return "本科学历";
+        }
+        if ("employment_stable".equals(key)) {
+            return "稳定就业";
+        }
+        if ("age_years".equals(key)) {
+            return "年龄";
+        }
+        if ("credit_inquiry_1m".equals(key)) {
+            return "近1月征信查询";
+        }
+        if ("credit_income_ratio".equals(key)) {
+            return "授信收入比";
+        }
+        if ("cc_utilization".equals(key)) {
+            return "信用卡使用(代理)";
+        }
+        if ("loan_overdue_max_6m".equals(key)) {
+            return "历史逾期(代理)";
+        }
+        if ("phone_change_days".equals(key)) {
+            return "手机稳定性";
+        }
+        if ("prev_refused_count".equals(key)) {
+            return "历史被拒次数";
+        }
         if (key.startsWith("rule_bonus_")) {
             return null;
         }
@@ -734,13 +992,19 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     private Pair<Double, List<ScoreContribution>> calculateLogisticScorecard(
             RiskAssessmentRequest request, FullRuleConfig cfg) {
+        if (isHcWoeModel(cfg)) {
+            return calculateHcWoeScorecard(request, cfg);
+        }
         UserExternalFeatures ext = resolveExternalFeatures(request.getIdCard());
         Map<String, Double> rawValues = isHcStandardizedModel(cfg)
                 ? buildHcRawFeatureMap(request, ext)
                 : null;
         Map<String, Double> values = buildLogisticFeatureMap(request, ext, cfg);
         double intercept = readIntercept(cfg);
-        JsonNode fw = cfg.ruleRoot.get("feature_weights");
+        JsonNode fw = getLrCoefficientsNode(cfg.ruleRoot);
+        if (fw == null) {
+            return calculateLegacyScoreWithDetails(request, cfg);
+        }
 
         List<ScoreContribution> contributions = new ArrayList<>();
         contributions.add(new ScoreContribution(
@@ -892,12 +1156,19 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     private Pair<Double, List<ScoreContribution>> calculateScoreWithDetails(RiskAssessmentRequest request) {
         FullRuleConfig cfg = loadFullRuleConfig();
         if (hasFeatureWeights(cfg)) {
-            if (isHcStandardizedModel(cfg) && !hasExternalFeaturesForScoring(request.getIdCard())) {
+            if ((isHcStandardizedModel(cfg) || isHcWoeModel(cfg))
+                    && !hasExternalFeaturesForScoring(request.getIdCard())) {
                 throw new IllegalStateException(
                         "THIRD_PARTY_MISSING: 未找到第三方征信快照，请确认 id_card 已写入 credit_data_db.user_external_features");
             }
             return calculateLogisticScorecard(request, cfg);
         }
+        String version = cfg.rulesEntity != null && cfg.rulesEntity.getVersion() != null
+                ? cfg.rulesEntity.getVersion()
+                : "unknown";
+        log.warn(
+                "Active rule version={} but no LR coefficients found; falling back to legacy scorecard (100-base, max 90)",
+                version);
         return calculateLegacyScoreWithDetails(request, cfg);
     }
 

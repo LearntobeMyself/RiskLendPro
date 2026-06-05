@@ -9,6 +9,7 @@ import org.example.risklendpro.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.mapper.UserMapper;
+import org.example.risklendpro.service.BehaviorScoreService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -35,6 +36,9 @@ public class RepaymentScheduleTask {
 
     @Autowired
     private EmailUtil emailUtil;
+
+    @Autowired
+    private BehaviorScoreService behaviorScoreService;
 
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd");
 
@@ -159,6 +163,8 @@ public class RepaymentScheduleTask {
         repaymentPlanMapper.updateById(plan);
 
         updateUserCreditLimit(plan.getUserId(), record.getAmount(), true);
+
+        behaviorScoreService.recalculate(plan.getUserId());
 
         if (isFirstOverdue) {
             emailUtil.sendOverdueNotification(

@@ -7,6 +7,7 @@ import org.example.risklendpro.entity.UserCreditLimit;
 import org.example.risklendpro.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.mapper.UserCreditLimitMapper;
+import org.example.risklendpro.service.BehaviorScoreService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -28,6 +29,9 @@ public class OverdueLimitAdjustTask {
     @Autowired
     private LimitAdjustLogMapper limitAdjustLogMapper;
 
+    @Autowired
+    private BehaviorScoreService behaviorScoreService;
+
     @Scheduled(cron = "0 0 2 * * ?")
     @Transactional
     public void autoAdjustOverdueUserLimit() {
@@ -36,6 +40,10 @@ public class OverdueLimitAdjustTask {
         List<UserCreditLimit> overdueUsers = userCreditLimitMapper.selectList(queryWrapper);
 
         for (UserCreditLimit creditLimit : overdueUsers) {
+            if (Boolean.TRUE.equals(creditLimit.getBCardEnabled())) {
+                behaviorScoreService.recalculate(creditLimit.getUserId());
+                creditLimit = userCreditLimitMapper.selectById(creditLimit.getId());
+            }
             adjustUserLimitByOverdue(creditLimit);
         }
     }
@@ -50,10 +58,18 @@ public class OverdueLimitAdjustTask {
             return;
         }
 
-        String overdueLevel = overduePlan.getOverdueLevel();
         BigDecimal oldLimit = creditLimit.getTotalLimit();
         BigDecimal newLimit;
 
+        if (Boolean.TRUE.equals(creditLimit.getBCardEnabled()) && creditLimit.getBScore() != null) {
+            double multiplier = behaviorScoreService.resolveLimitMultiplier(creditLimit.getBScore().doubleValue());
+            newLimit = oldLimit.multiply(BigDecimal.valueOf(multiplier));
+            applyLimitChange(creditLimit, oldLimit, newLimit,
+                    "B卡自动调额：B分=" + creditLimit.getBScore() + "，系数=" + multiplier);
+            return;
+        }
+
+        String overdueLevel = overduePlan.getOverdueLevel();
         switch (overdueLevel) {
             case "M1":
                 newLimit = oldLimit.multiply(new BigDecimal("0.8"));
@@ -71,6 +87,11 @@ public class OverdueLimitAdjustTask {
                 return;
         }
 
+        applyLimitChange(creditLimit, oldLimit, newLimit,
+                "系统自动调整：用户逾期等级为" + overdueLevel + "，根据风控规则调整额度");
+    }
+
+    private void applyLimitChange(UserCreditLimit creditLimit, BigDecimal oldLimit, BigDecimal newLimit, String reason) {
         if (newLimit.compareTo(oldLimit) == 0) {
             return;
         }
@@ -91,7 +112,7 @@ public class OverdueLimitAdjustTask {
         log.setUserId(creditLimit.getUserId());
         log.setOldLimit(oldLimit);
         log.setNewLimit(newLimit);
-        log.setReason("系统自动调整：用户逾期等级为" + overdueLevel + "，根据风控规则调整额度");
+        log.setReason(reason);
         log.setOperatorId(0L);
         log.setAdjustTime(new Date());
         limitAdjustLogMapper.insert(log);

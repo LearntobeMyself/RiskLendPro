@@ -17,9 +17,9 @@ public class RedisCacheUtil {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * 缓存过期时间：1天
+     * 缓存过期时间：30天
      */
-    public static final long CACHE_EXPIRE_DAYS = 1;
+    public static final long CACHE_EXPIRE_DAYS = 30;
 
     /**
      * 存入缓存

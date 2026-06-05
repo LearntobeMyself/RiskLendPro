@@ -16,45 +16,56 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Component
 public class JwtFilter extends OncePerRequestFilter {
-    
+
+    private static final String SYNC_BLACKLIST_PATH = "/sync/blacklist";
+
     private final JwtConfig jwtConfig;
-    
+    private final BlacklistSyncProperties blacklistSyncProperties;
+
     @Autowired
-    public JwtFilter(JwtConfig jwtConfig) {
+    public JwtFilter(JwtConfig jwtConfig, BlacklistSyncProperties blacklistSyncProperties) {
         this.jwtConfig = jwtConfig;
+        this.blacklistSyncProperties = blacklistSyncProperties;
     }
-    
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
 
-        // 1. 处理 OPTIONS 预检请求
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             chain.doFilter(request, response);
             return;
         }
 
-        // 2. 获取请求路径
         String requestURI = request.getRequestURI();
 
-        // 3. 白名单路径直接放行（不检查 token）
         if (isWhitelisted(requestURI)) {
             chain.doFilter(request, response);
             return;
         }
 
-        // 4. 提取并验证 token
         String token = extractToken(request);
         if (token == null) {
             sendError(response, 401, "请先登录");
             return;
         }
 
-        // 5. 解析 token
+        if (isSyncBlacklistRequest(requestURI, request.getMethod())) {
+            if (isValidSyncToken(token)) {
+                setSyncAuthentication(request);
+                chain.doFilter(request, response);
+                return;
+            }
+            sendError(response, 401, "同步 Token 无效");
+            return;
+        }
+
         try {
             Claims claims = jwtConfig.parseToken(token);
             String userId = claims.getSubject();
@@ -69,7 +80,7 @@ public class JwtFilter extends OncePerRequestFilter {
                     authentication = new UsernamePasswordAuthenticationToken(
                             userId, null, java.util.Collections.emptyList());
                 }
-                
+
                 authentication.setDetails(new org.springframework.security.web.authentication.WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
@@ -86,20 +97,38 @@ public class JwtFilter extends OncePerRequestFilter {
         }
     }
 
-    /**
-     * 判断请求路径是否在白名单中（不需要 token）
-     */
+    private boolean isSyncBlacklistRequest(String requestURI, String method) {
+        return "POST".equalsIgnoreCase(method) && requestURI.endsWith(SYNC_BLACKLIST_PATH);
+    }
+
+    private boolean isValidSyncToken(String token) {
+        String configuredToken = blacklistSyncProperties.getApiToken();
+        if (configuredToken == null || configuredToken.isBlank()) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                configuredToken.getBytes(StandardCharsets.UTF_8),
+                token.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void setSyncAuthentication(HttpServletRequest request) {
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                "sync", null,
+                java.util.Collections.singletonList(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_SYNC")));
+        authentication.setDetails(new org.springframework.security.web.authentication.WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
     private boolean isWhitelisted(String requestURI) {
         return requestURI.contains("/auth/")
+                || requestURI.contains("/admin/login")
+                || requestURI.contains("/admin/register")
                 || requestURI.contains("/swagger-ui")
                 || requestURI.contains("/v3/api-docs")
                 || requestURI.contains("/swagger-resources/")
                 || requestURI.contains("/webjars/");
     }
-    
-    /**
-     * 从请求头中提取 token
-     */
+
     private String extractToken(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
@@ -107,10 +136,7 @@ public class JwtFilter extends OncePerRequestFilter {
         }
         return null;
     }
-    
-    /**
-     * 统一错误响应
-     */
+
     private void sendError(HttpServletResponse response, int code, String message) throws IOException {
         response.setStatus(code);
         response.setContentType("application/json;charset=UTF-8");

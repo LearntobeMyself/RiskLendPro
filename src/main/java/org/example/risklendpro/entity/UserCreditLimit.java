@@ -25,6 +25,12 @@ public class UserCreditLimit {
     private BigDecimal overdueAmount;
     @TableField("has_overdue")
     private Boolean hasOverdue;
+    @TableField("b_card_enabled")
+    private Boolean bCardEnabled;
+    @TableField("b_score")
+    private BigDecimal bScore;
+    @TableField("b_score_updated_at")
+    private Date bScoreUpdatedAt;
     @TableField("last_update_time")
     private Date lastUpdateTime;
 }

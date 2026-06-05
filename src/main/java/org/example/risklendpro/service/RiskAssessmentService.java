@@ -4,6 +4,7 @@ import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 import org.example.risklendpro.pojo.response.RiskAssessmentResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentStatusResponse;
 import org.example.risklendpro.pojo.response.RiskAssessmentResultResponse;
+import org.example.risklendpro.pojo.response.RiskAssessmentSubmitEligibilityResponse;
 
 public interface RiskAssessmentService {
     /**
@@ -12,12 +13,17 @@ public interface RiskAssessmentService {
     RiskAssessmentResponse submit(Long userId, RiskAssessmentRequest request);
 
     /**
-     * 轮询查询评估状态
+     * 查询当前用户是否可提交新评估（重复申请预检）
      */
-    RiskAssessmentStatusResponse getStatus(String applyId);
+    RiskAssessmentSubmitEligibilityResponse getSubmitEligibility(Long userId);
 
     /**
-     * 获取最终额度结果
+     * 轮询查询评估状态（applyId 可选，未传时查该用户最新一条）
      */
-    RiskAssessmentResultResponse getResult(String applyId);
+    RiskAssessmentStatusResponse getStatusForUser(Long userId, String applyIdOptional);
+
+    /**
+     * 获取最终额度结果（applyId 可选，未传时查该用户最新一条）
+     */
+    RiskAssessmentResultResponse getResultForUser(Long userId, String applyIdOptional);
 }

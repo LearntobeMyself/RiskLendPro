@@ -75,6 +75,27 @@ public class UserExternalFeatures {
      * 是否有车（0=否，1=是，验真：核实资产）
      */
     private Integer flagOwnCar;
+
+    /** 性别男=1（HC/WOE 回测） */
+    private Integer genderMale;
+
+    /** 已婚=1（HC/WOE 回测） */
+    private Integer married;
+
+    /** 有房=1（HC/WOE 回测） */
+    private Integer ownRealty;
+
+    /** 稳定就业=1（HC/WOE） */
+    private Integer employmentStable;
+
+    /** 授信收入比（WOE） */
+    private BigDecimal creditIncomeRatio;
+
+    /** 信用卡使用代理（WOE） */
+    private BigDecimal ccUtilization;
+
+    /** 逾期次数代理（WOE） */
+    private Integer loanOverdueMax6m;
     
     /**
      * 职业类型（评分：职业风险分级）

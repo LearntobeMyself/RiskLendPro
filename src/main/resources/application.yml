@@ -38,4 +38,3 @@ logging:
   level:
     root: info
     org.example.risklendpro: debug
-

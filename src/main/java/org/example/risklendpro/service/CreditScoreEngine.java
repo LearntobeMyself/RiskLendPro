@@ -1,5 +1,6 @@
 package org.example.risklendpro.service;
 
+import org.example.risklendpro.entity.credit.Blacklist;
 import org.example.risklendpro.pojo.request.RiskAssessmentRequest;
 
 import java.util.List;
@@ -10,6 +11,53 @@ import java.util.List;
 public interface CreditScoreEngine {
 
     boolean isInBlacklist(String idCard);
+
+    BlacklistMatchResult checkBlacklist(String name, String idCard);
+
+    boolean hasExternalFeaturesForScoring(String idCard);
+
+    enum MatchLevel {
+        FULL("姓名+地域+出生年份命中"),
+        NAME_AREA("姓名+地域命中"),
+        NAME_ONLY("仅姓名命中"),
+        NONE("未命中");
+
+        private final String description;
+
+        MatchLevel(String description) {
+            this.description = description;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+    }
+
+    class BlacklistMatchResult {
+        private final MatchLevel matchLevel;
+        private final Blacklist record;
+
+        public BlacklistMatchResult(MatchLevel matchLevel, Blacklist record) {
+            this.matchLevel = matchLevel;
+            this.record = record;
+        }
+
+        public MatchLevel getMatchLevel() {
+            return matchLevel;
+        }
+
+        public Blacklist getRecord() {
+            return record;
+        }
+
+        public boolean isReject() {
+            return matchLevel == MatchLevel.FULL;
+        }
+
+        public boolean isNeedManualReview() {
+            return matchLevel == MatchLevel.NAME_AREA;
+        }
+    }
 
     /**
      * 风控总分：优先为 Python 逻辑回归 + 评分卡映射结果（连续分值，保留小数）

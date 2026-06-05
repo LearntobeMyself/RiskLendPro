@@ -84,4 +84,16 @@ public class AdminController {
         return CommonResponse.success("审批成功，已邮件通知用户", response);
     }
 
+    @Operation(summary = "B 卡贷后监控列表", description = "已启用 B 卡用户的 B 分、还款态势与预警标签")
+    @GetMapping("/b-card/monitor")
+    public CommonResponse<Object> bCardMonitor() {
+        return CommonResponse.success("查询成功", adminService.getBCardMonitor());
+    }
+
+    @Operation(summary = "手动重算 B 卡分数", description = "演示或 seed 调整还款日后立即刷新 B 分")
+    @PostMapping("/b-card/recalculate/{userId}")
+    public CommonResponse<Object> bCardRecalculate(@PathVariable Long userId) {
+        return CommonResponse.success("重算成功", adminService.recalculateBCard(userId));
+    }
+
 }

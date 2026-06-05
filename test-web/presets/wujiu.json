@@ -1,0 +1,29 @@
+{
+  "register": {
+    "realName": "吴九",
+    "phoneNumber": "13800138008",
+    "email": "wujiu@example.com",
+    "idCard": "110112198809220017",
+    "password": "Test123456",
+    "repassword": "Test123456"
+  },
+  "login": {
+    "phoneNumber": "13800138008",
+    "password": "Test123456"
+  },
+  "assessment": {
+    "idCard": "110112198809220017",
+    "name": "吴九",
+    "phone": "13800138008",
+    "email": "wujiu@example.com",
+    "gender": 1,
+    "birthday": "1988-09-22",
+    "education": "高中及以下",
+    "marriage": "已婚",
+    "jobType": "体力劳动者",
+    "monthlyIncome": "15000以上",
+    "hasHouse": false,
+    "hasCar": true,
+    "contactPhone": "13800138000"
+  }
+}

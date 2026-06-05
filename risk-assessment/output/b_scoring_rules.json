@@ -1,0 +1,230 @@
+{
+  "version": "v1.0-b-woe",
+  "model_type": "b_card_woe",
+  "card_type": "B",
+  "description": "B卡：HC inst_/pos_ 行为特征 WOE+LR+PDO",
+  "selected_features": [
+    "inst_amt_paid_1y",
+    "inst_dbd_mean_total",
+    "inst_dbd_mean_1y",
+    "pos_dpd_mean",
+    "inst_late_ratio_total",
+    "inst_partial_payment_ratio",
+    "pos_dpd_def_mean"
+  ],
+  "feature_derivation": {
+    "inst_amt_paid_1y": "来源=HC行为聚合; B卡入模",
+    "inst_dbd_mean_total": "来源=HC行为聚合; B卡入模",
+    "inst_dbd_mean_1y": "来源=HC行为聚合; B卡入模",
+    "pos_dpd_mean": "来源=HC行为聚合; B卡入模",
+    "inst_late_ratio_total": "来源=HC行为聚合; B卡入模",
+    "inst_partial_payment_ratio": "来源=HC行为聚合; B卡入模",
+    "pos_dpd_def_mean": "来源=HC行为聚合; B卡入模"
+  },
+  "features": {
+    "inst_amt_paid_1y": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        41311.602,
+        126289.215,
+        333744.597,
+        9000328.95
+      ],
+      "woe": [
+        0.001617,
+        -0.026126,
+        -0.021508,
+        0.04506
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    },
+    "inst_dbd_mean_total": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        4.306,
+        7.386,
+        10.703,
+        15.846,
+        194.889
+      ],
+      "woe": [
+        -0.120706,
+        -0.063874,
+        0.013833,
+        0.048255,
+        0.138088
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    },
+    "inst_dbd_mean_1y": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        0.0,
+        2.625,
+        7.167,
+        13.0,
+        212.727
+      ],
+      "woe": [
+        0.032498,
+        -0.242147,
+        -0.111242,
+        0.011154,
+        0.154428
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    },
+    "pos_dpd_mean": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        2622.078
+      ],
+      "woe": [
+        6.5e-05
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    },
+    "inst_late_ratio_total": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        0.0426,
+        0.139,
+        1.0
+      ],
+      "woe": [
+        0.178102,
+        -0.079554,
+        -0.358241
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    },
+    "inst_partial_payment_ratio": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        0.0156,
+        0.143,
+        1.0
+      ],
+      "woe": [
+        0.155584,
+        -0.058782,
+        -0.331415
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    },
+    "pos_dpd_def_mean": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        1671.398
+      ],
+      "woe": [
+        6.5e-05
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    }
+  },
+  "coefficients": {
+    "inst_amt_paid_1y": -1.554008917407066,
+    "inst_dbd_mean_total": 0.16003520501157298,
+    "inst_dbd_mean_1y": -0.8226406608723952,
+    "pos_dpd_mean": -2.8725527731060955e-08,
+    "inst_late_ratio_total": -0.7327324648085771,
+    "inst_partial_payment_ratio": -0.32160906783900634,
+    "pos_dpd_def_mean": -2.8725527705283472e-08
+  },
+  "intercept": -0.0005089810929602766,
+  "thresholds": {
+    "watch": 684.6,
+    "reduce_limit": 547.4,
+    "_note": "贷后 B 分：低于 reduce_limit 大幅降额"
+  },
+  "scorecard": {
+    "scale": "odds_pdo",
+    "min_score": 350,
+    "max_score": 950,
+    "pdo": 515.169276,
+    "target_score": 650.0,
+    "target_odds": 0.9040787474,
+    "_calibration": {
+      "span_frac": 0.82,
+      "odds_p05": 0.76571905,
+      "odds_p50": 0.90407875,
+      "odds_p95": 1.484434,
+      "note": "PDO 由校验集 odds 分位跨度反推；Java 仅消费 scale/pdo/target_*/min/max"
+    }
+  },
+  "training_data": {
+    "total_count": 100000,
+    "default_rate": 0.08723,
+    "data_source": "Home Credit inst_/pos_"
+  },
+  "model_metrics": {
+    "accuracy": 0.6101,
+    "auc": 0.5713454491802302
+  },
+  "iv_table": [
+    {
+      "feature": "inst_amt_paid_1y",
+      "iv": 0.0006310039460064017,
+      "selected": true
+    },
+    {
+      "feature": "inst_dbd_mean_total",
+      "iv": 0.007997713301515084,
+      "selected": true
+    },
+    {
+      "feature": "inst_dbd_mean_1y",
+      "iv": 0.011861801095589434,
+      "selected": true
+    },
+    {
+      "feature": "pos_dpd_mean",
+      "iv": 4.198731002384748e-09,
+      "selected": true
+    },
+    {
+      "feature": "inst_late_ratio_total",
+      "iv": 0.04874820758043244,
+      "selected": true
+    },
+    {
+      "feature": "inst_partial_payment_ratio",
+      "iv": 0.03936662719863113,
+      "selected": true
+    },
+    {
+      "feature": "pos_dpd_def_mean",
+      "iv": 4.198731002384748e-09,
+      "selected": true
+    }
+  ]
+}

@@ -1,98 +1,346 @@
 {
-  "version": "v6.0-hc",
-  "model_type": "hc_lr_standardized",
-  "description": "Home Credit 全链路：申请表+第三方征信标准化后 LR",
+  "version": "v7.0-hc-woe",
+  "model_type": "hc_woe_lr",
+  "description": "Home Credit：IV筛选+分箱WOE+LR+PDO(350-950)",
   "feature_derivation": {
-    "days_birth": "训练/推理：申请表生日 → 负天数（与 HC DAYS_BIRTH 一致）",
-    "days_employed": "训练/推理：user_external_features.days_employed（入职天数，负值）",
-    "amt_income_total": "训练/推理：年总收入；申请表月收入×12 或第三方后台收入",
-    "ext_source_2": "仅来自第三方征信 user_external_features.ext_source_2",
-    "ext_source_3": "仅来自第三方征信 user_external_features.ext_source_3",
-    "amt_req_credit_bureau_mon": "第三方：近1月征信查询次数",
-    "amt_req_credit_bureau_week": "第三方：近1周征信查询次数",
-    "active_loans_count": "第三方：活跃贷款数"
+    "ext_source_3": "来源=external; WOE+LR 入模",
+    "ext_source_2": "来源=external; WOE+LR 入模",
+    "edu_mid": "来源=application; WOE+LR 入模",
+    "phone_change_days": "来源=external; WOE+LR 入模",
+    "age_years": "来源=application; WOE+LR 入模",
+    "prev_refused_count": "来源=external; WOE+LR 入模",
+    "gender_male": "来源=application; WOE+LR 入模"
   },
-  "feature_weights": {
-    "days_birth": 0.016412398278303666,
-    "days_employed": 0.23232715975208362,
-    "amt_income_total": -0.07074650414444968,
-    "ext_source_2": -0.48720992190514506,
-    "ext_source_3": -0.4695167311368082,
-    "amt_req_credit_bureau_mon": -0.031157978747593858,
-    "amt_req_credit_bureau_week": -0.008136192317415419,
-    "active_loans_count": 0.00484660767107959
-  },
-  "feature_scaler": {
-    "days_birth": {
-      "mean": -14753.8948,
-      "scale": 3669.048022244048
-    },
-    "days_employed": {
-      "mean": -2378.95735,
-      "scale": 2338.096246785187
-    },
-    "amt_income_total": {
-      "mean": 172528.2902919375,
-      "scale": 83932.48219495312
+  "features": {
+    "ext_source_3": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        0.317,
+        0.46,
+        0.578,
+        0.685,
+        0.888
+      ],
+      "woe": [
+        -0.766344,
+        -0.101197,
+        0.296668,
+        0.553226,
+        0.909456
+      ],
+      "missing_bin": {
+        "woe": -0.136521,
+        "label": "缺失"
+      }
     },
     "ext_source_2": {
-      "mean": 0.5155001022157311,
-      "scale": 0.1904710229051865
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        0.344,
+        0.515,
+        0.609,
+        0.682,
+        0.855
+      ],
+      "woe": [
+        -0.760581,
+        -0.105731,
+        0.181161,
+        0.464779,
+        0.834007
+      ],
+      "missing_bin": {
+        "woe": -0.157839,
+        "label": "缺失"
+      }
     },
-    "ext_source_3": {
-      "mean": 0.5001952276498639,
-      "scale": 0.17576097888008654
+    "edu_mid": {
+      "source": "application",
+      "type": "categorical",
+      "categories": {
+        "0": {
+          "woe": -0.148254,
+          "label": "否"
+        },
+        "1": {
+          "woe": 0.435299,
+          "label": "是"
+        }
+      },
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
     },
-    "amt_req_credit_bureau_mon": {
-      "mean": 0.28241750023069123,
-      "scale": 0.8885259100263225
+    "phone_change_days": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        178.0,
+        558.0,
+        1060.0,
+        1732.0,
+        4153.0
+      ],
+      "woe": [
+        -0.1867,
+        -0.216879,
+        -0.077203,
+        0.206699,
+        0.384953
+      ],
+      "missing_bin": {
+        "woe": -1.249257,
+        "label": "缺失"
+      }
     },
-    "amt_req_credit_bureau_week": {
-      "mean": 0.03337513322413952,
-      "scale": 0.1857012611794233
+    "age_years": {
+      "source": "application",
+      "type": "numeric",
+      "cuts": [
+        30.7,
+        37.0,
+        42.9,
+        50.0,
+        69.0
+      ],
+      "woe": [
+        -0.297183,
+        -0.14702,
+        0.051052,
+        0.150893,
+        0.351926
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
     },
-    "active_loans_count": {
-      "mean": 1.7953125,
-      "scale": 1.8113918756977325
+    "prev_refused_count": {
+      "source": "external",
+      "type": "numeric",
+      "cuts": [
+        1.0,
+        58.0
+      ],
+      "woe": [
+        0.107655,
+        -0.408942
+      ],
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
+    },
+    "gender_male": {
+      "source": "application",
+      "type": "categorical",
+      "categories": {
+        "0": {
+          "woe": 0.154888,
+          "label": "否"
+        },
+        "1": {
+          "woe": -0.220945,
+          "label": "是"
+        }
+      },
+      "missing_bin": {
+        "woe": 0.0,
+        "label": "缺失"
+      }
     }
   },
-  "intercept": -0.2569170829062917,
+  "coefficients": {
+    "ext_source_3": -0.8751562648244493,
+    "ext_source_2": -0.8253353454132976,
+    "edu_mid": -0.8747445399551708,
+    "phone_change_days": -0.42019859051550573,
+    "age_years": -0.48761134636551906,
+    "prev_refused_count": -0.6621315977761947,
+    "gender_male": -0.9070855218071567
+  },
+  "intercept": -0.00086805002314112,
   "thresholds": {
-    "auto_approve": 776,
-    "manual_review": 642
+    "auto_approve": 788,
+    "manual_review": 642,
+    "_note": "测试集 PDO 分位；量表 350-950"
   },
   "scorecard": {
     "scale": "odds_pdo",
     "min_score": 350,
     "max_score": 950,
-    "pdo": 131.399697,
+    "pdo": 125.081232,
     "target_score": 650.0,
-    "target_odds": 0.7322287923,
+    "target_odds": 0.7456299122,
     "_calibration": {
       "span_frac": 0.82,
-      "odds_p05": 0.23020307,
-      "odds_p50": 0.73222879,
-      "odds_p95": 3.08502005,
+      "odds_p05": 0.20804287,
+      "odds_p50": 0.74562991,
+      "odds_p95": 3.1786112,
       "note": "PDO 由校验集 odds 分位跨度反推；Java 仅消费 scale/pdo/target_*/min/max"
     }
   },
   "application_rule_bonus": {
     "enabled": false
   },
+  "feature_selection_report": {
+    "candidates": 19,
+    "selected": 7,
+    "selected_features": [
+      "ext_source_3",
+      "ext_source_2",
+      "edu_mid",
+      "phone_change_days",
+      "age_years",
+      "prev_refused_count",
+      "gender_male"
+    ],
+    "iv_table": [
+      {
+        "feature": "ext_source_3",
+        "iv": 0.345625,
+        "missing_rate": 0.1968,
+        "selected": true,
+        "reason": "入模"
+      },
+      {
+        "feature": "ext_source_2",
+        "iv": 0.301121,
+        "missing_rate": 0.0019,
+        "selected": true,
+        "reason": "入模"
+      },
+      {
+        "feature": "edu_mid",
+        "iv": 0.06419,
+        "missing_rate": 0.0,
+        "selected": true,
+        "reason": "入模"
+      },
+      {
+        "feature": "phone_change_days",
+        "iv": 0.052194,
+        "missing_rate": 0.0,
+        "selected": true,
+        "reason": "入模"
+      },
+      {
+        "feature": "age_years",
+        "iv": 0.050943,
+        "missing_rate": 0.0,
+        "selected": true,
+        "reason": "入模"
+      },
+      {
+        "feature": "prev_refused_count",
+        "iv": 0.043864,
+        "missing_rate": 0.0,
+        "selected": true,
+        "reason": "入模"
+      },
+      {
+        "feature": "gender_male",
+        "iv": 0.034125,
+        "missing_rate": 0.0,
+        "selected": true,
+        "reason": "入模"
+      },
+      {
+        "feature": "cc_utilization",
+        "iv": 0.018409,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "amt_income_total",
+        "iv": 0.017041,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "active_loans_count",
+        "iv": 0.016972,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "loan_overdue_max_6m",
+        "iv": 0.013938,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "own_car",
+        "iv": 0.012228,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "credit_income_ratio",
+        "iv": 0.011286,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "employment_stable",
+        "iv": 0.010025,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "married",
+        "iv": 0.002856,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "own_realty",
+        "iv": 0.000175,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "edu_high",
+        "iv": 5.6e-05,
+        "missing_rate": 0.0,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "credit_inquiry_1m",
+        "iv": 0.0,
+        "missing_rate": 0.133,
+        "selected": false,
+        "reason": "IV<0.02"
+      },
+      {
+        "feature": "credit_inquiry_week",
+        "iv": 0.0,
+        "missing_rate": 0.133,
+        "selected": false,
+        "reason": "IV<0.02"
+      }
+    ]
+  },
   "training_data": {
     "total_count": 100000,
     "default_rate": 0.08723,
-    "data_source": "Home Credit (HC)",
-    "third_party_features": [
-      "ext_source_2",
-      "ext_source_3",
-      "amt_req_credit_bureau_mon",
-      "amt_req_credit_bureau_week",
-      "active_loans_count"
-    ]
+    "data_source": "Home Credit (HC)"
   },
   "model_metrics": {
-    "accuracy": 0.6696,
-    "auc": 0.7106331114684599
+    "accuracy": 0.66095,
+    "auc": 0.7138366770025718
   }
 }
