@@ -1,5 +1,7 @@
 package org.example.risklendpro.service.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.risklendpro.entity.*;
@@ -35,6 +37,7 @@ import java.util.stream.Collectors;
 public class AdminServiceImpl implements AdminService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminServiceImpl.class);
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
@@ -347,6 +350,7 @@ public class AdminServiceImpl implements AdminService {
             report.put("reportCachedAt", null);
         }
         report.put("reportDisplay", adminReportDisplayBuilder.build(report));
+        report.put("applyId", applyId);
         return report;
     }
 
@@ -498,10 +502,15 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public Map<String, Object> getVintageData() {
-        Map<String, Object> result = new HashMap<>();
-
         List<VintageData> vintageDataList = vintageDataMapper.selectList(null);
+        if (vintageDataList != null && !vintageDataList.isEmpty()) {
+            return buildVintageResponse(vintageDataList);
+        }
+        return computeVintageFromLoans();
+    }
 
+    private Map<String, Object> buildVintageResponse(List<VintageData> vintageDataList) {
+        Map<String, Object> result = new HashMap<>();
         List<String> months = vintageDataList.stream()
                 .map(VintageData::getMonth)
                 .collect(Collectors.toList());
@@ -518,8 +527,64 @@ public class AdminServiceImpl implements AdminService {
             vintageData.add(dataMap);
         }
         result.put("vintageData", vintageData);
-
         return result;
+    }
+
+    private Map<String, Object> computeVintageFromLoans() {
+        List<Loan> loans = loanMapper.selectList(new QueryWrapper<Loan>()
+                .in("status", LoanStatusEnum.DISBURRSED.getCode(), LoanStatusEnum.REPAID.getCode(),
+                        LoanStatusEnum.OVERDUE.getCode())
+                .isNotNull("disbursement_time")
+                .orderByAsc("disbursement_time"));
+
+        Map<String, List<Loan>> byMonth = loans.stream()
+                .collect(Collectors.groupingBy(l -> formatVintageMonth(l.getDisbursementTime())));
+
+        List<String> months = new ArrayList<>(byMonth.keySet());
+        Collections.sort(months);
+
+        List<Map<String, Object>> vintageData = new ArrayList<>();
+        for (String month : months) {
+            List<Loan> cohortLoans = byMonth.get(month);
+            BigDecimal disbursedAmount = cohortLoans.stream()
+                    .map(l -> l.getAmount() != null ? l.getAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            List<Long> loanIds = cohortLoans.stream().map(Loan::getLoanId).toList();
+            List<RepaymentPlan> plans = loanIds.isEmpty() ? List.of()
+                    : repaymentPlanMapper.selectList(new QueryWrapper<RepaymentPlan>().in("loan_id", loanIds));
+
+            int totalPlans = plans.size();
+            long m1Count = plans.stream().filter(p -> containsOverdueLevel(p.getOverdueLevel(), "M1")).count();
+            long m2Count = plans.stream().filter(p -> containsOverdueLevel(p.getOverdueLevel(), "M2")).count();
+            long m3Count = plans.stream().filter(p -> containsOverdueLevel(p.getOverdueLevel(), "M3")).count();
+
+            Map<String, Object> dataMap = new HashMap<>();
+            dataMap.put("month", month);
+            dataMap.put("disbursedAmount", disbursedAmount);
+            dataMap.put("M1Rate", totalPlans > 0 ? (double) m1Count / totalPlans : 0.0);
+            dataMap.put("M2Rate", totalPlans > 0 ? (double) m2Count / totalPlans : 0.0);
+            dataMap.put("M3Rate", totalPlans > 0 ? (double) m3Count / totalPlans : 0.0);
+            vintageData.add(dataMap);
+        }
+
+        if (vintageData.isEmpty()) {
+            log.info("Vintage compute: no disbursed loan cohorts found");
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("months", months);
+        result.put("vintageData", vintageData);
+        return result;
+    }
+
+    private String formatVintageMonth(Date date) {
+        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"));
+    }
+
+    private boolean containsOverdueLevel(String overdueLevel, String level) {
+        return overdueLevel != null && overdueLevel.toUpperCase().contains(level);
     }
 
     @Override
@@ -858,6 +923,8 @@ public class AdminServiceImpl implements AdminService {
             RepaymentPlan bestPlan = null;
             RepaymentRecord bestRecord = null;
             Integer daysToDue = null;
+            int activePlanCount = 0;
+            int bestPriority = Integer.MAX_VALUE;
 
             List<RepaymentPlan> plans = repaymentPlanMapper.selectList(
                     new QueryWrapper<RepaymentPlan>().eq("user_id", limit.getUserId()));
@@ -865,15 +932,17 @@ public class AdminServiceImpl implements AdminService {
                 if ("COMPLETED".equals(plan.getStatus())) {
                     continue;
                 }
-                RepaymentRecord record = repaymentRecordMapper.selectOne(
-                        new QueryWrapper<RepaymentRecord>()
-                                .eq("plan_id", plan.getPlanId())
-                                .eq("period", plan.getCurrentPeriod()));
+                activePlanCount++;
+                RepaymentRecord record = resolveFocusRecord(plan.getPlanId(), plan.getCurrentPeriod());
                 if (record == null || record.getDueDate() == null) {
                     continue;
                 }
                 int d = (int) ChronoUnit.DAYS.between(today, toLocalDate(record.getDueDate()));
-                if (daysToDue == null || d < daysToDue) {
+                int priority = planUrgencyPriority(plan, record, d);
+                if (bestPlan == null
+                        || priority < bestPriority
+                        || (priority == bestPriority && (daysToDue == null || d < daysToDue))) {
+                    bestPriority = priority;
                     daysToDue = d;
                     bestPlan = plan;
                     bestRecord = record;
@@ -889,16 +958,19 @@ public class AdminServiceImpl implements AdminService {
             row.put("bScoreUpdatedAt", limit.getBScoreUpdatedAt());
             row.put("totalLimit", limit.getTotalLimit());
             row.put("hasOverdue", Boolean.TRUE.equals(limit.getHasOverdue()));
+            row.put("activePlanCount", activePlanCount);
 
             if (latestLog != null) {
                 row.put("baseScore", latestLog.getBaseScore());
                 row.put("deltaScore", latestLog.getDeltaScore());
-                row.put("liveFeatures", latestLog.getLiveFeatures());
+                row.put("liveFeatures", parseLiveFeaturesJson(latestLog.getLiveFeatures()));
             }
 
             if (bestPlan != null) {
+                row.put("planId", bestPlan.getPlanId());
                 row.put("planStatus", bestPlan.getStatus());
                 row.put("overdueLevel", bestPlan.getOverdueLevel());
+                row.put("overdueDays", bestPlan.getOverdueDays());
             }
             if (bestRecord != null) {
                 row.put("dueDate", bestRecord.getDueDate());
@@ -948,6 +1020,40 @@ public class AdminServiceImpl implements AdminService {
         return result;
     }
 
+    private Map<String, Object> parseLiveFeaturesJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Collections.emptyMap();
+        }
+        try {
+            return objectMapper.readValue(raw, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.warn("解析 liveFeatures 失败: {}", raw, e);
+            Map<String, Object> fallback = new HashMap<>();
+            fallback.put("raw", raw);
+            return fallback;
+        }
+    }
+
+    /** 还款计划紧迫度：数值越小越优先展示 */
+    private static int planUrgencyPriority(RepaymentPlan plan, RepaymentRecord record, int daysToDue) {
+        if (plan != null && "OVERDUE".equals(plan.getStatus())) {
+            return 0;
+        }
+        if (record != null && "OVERDUE".equals(record.getStatus())) {
+            return 0;
+        }
+        if (daysToDue < 0) {
+            return 0;
+        }
+        if (daysToDue == 0) {
+            return 1;
+        }
+        if (daysToDue <= 3) {
+            return 2;
+        }
+        return 3;
+    }
+
     private static String resolveWatchLevel(RepaymentPlan plan, RepaymentRecord record, Integer daysToDue) {
         if (plan != null && "OVERDUE".equals(plan.getStatus())) {
             return "OVERDUE";
@@ -985,6 +1091,35 @@ public class AdminServiceImpl implements AdminService {
 
     private static LocalDate toLocalDate(Date date) {
         return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+    }
+
+    /** 监控展示用：当期已还清时推进到首个未还期次，避免误报逾期 */
+    private RepaymentRecord resolveFocusRecord(Long planId, Integer currentPeriod) {
+        if (planId == null || currentPeriod == null) {
+            return null;
+        }
+        RepaymentRecord current = repaymentRecordMapper.selectOne(
+                new QueryWrapper<RepaymentRecord>()
+                        .eq("plan_id", planId)
+                        .eq("period", currentPeriod));
+        if (current != null && !isRepaidRecord(current)) {
+            return current;
+        }
+        List<RepaymentRecord> records = repaymentRecordMapper.selectList(
+                new QueryWrapper<RepaymentRecord>()
+                        .eq("plan_id", planId)
+                        .orderByAsc("period"));
+        for (RepaymentRecord record : records) {
+            if (!isRepaidRecord(record)) {
+                return record;
+            }
+        }
+        return current;
+    }
+
+    private static boolean isRepaidRecord(RepaymentRecord record) {
+        String status = record.getStatus();
+        return "COMPLETED".equals(status) || "PAID".equals(status) || "SETTLED".equals(status);
     }
 
     private static String maskPhone(String phone) {

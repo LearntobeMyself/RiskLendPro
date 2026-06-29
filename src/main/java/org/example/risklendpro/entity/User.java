@@ -19,6 +19,8 @@ public class User {
     private String password;
     private String role;
     private String assessmentStatus;
+    @TableField("account_status")
+    private String accountStatus;
     @TableField("create_time")
     private Date createTime;
     @TableField("update_time")

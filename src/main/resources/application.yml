@@ -38,3 +38,7 @@ logging:
   level:
     root: info
     org.example.risklendpro: debug
+
+risk:
+  coze:
+    token: pat_wE5ce2g3MqpRy5ygqzCFlNk8oyvcOwt2j7eTvmBge8a6LiaBnmAjG7xbsVtOiiQG

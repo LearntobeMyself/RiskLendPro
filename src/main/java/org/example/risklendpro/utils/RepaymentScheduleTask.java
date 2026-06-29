@@ -76,7 +76,8 @@ public class RepaymentScheduleTask {
             return;
         }
 
-        if ("COMPLETED".equals(currentRecord.getStatus())) {
+        if (isRepaid(currentRecord)) {
+            advancePlanPeriodIfNeeded(plan, currentPeriod, today);
             return;
         }
 
@@ -114,7 +115,8 @@ public class RepaymentScheduleTask {
             return;
         }
 
-        if ("COMPLETED".equals(currentRecord.getStatus())) {
+        if (isRepaid(currentRecord)) {
+            advancePlanPeriodIfNeeded(plan, currentPeriod, today);
             return;
         }
 
@@ -128,7 +130,24 @@ public class RepaymentScheduleTask {
 
         if (diffDays >= 1) {
             updateOverdueLevel(plan, (int) diffDays);
+            behaviorScoreService.recalculate(plan.getUserId());
         }
+    }
+
+    private void advancePlanPeriodIfNeeded(RepaymentPlan plan, int currentPeriod, Date today) {
+        Integer totalPeriods = plan.getTotalPeriods();
+        if (totalPeriods == null || currentPeriod >= totalPeriods) {
+            return;
+        }
+        plan.setCurrentPeriod(currentPeriod + 1);
+        plan.setUpdateTime(new Date());
+        repaymentPlanMapper.updateById(plan);
+        checkAndUpdateActivePlan(plan, today);
+    }
+
+    private static boolean isRepaid(RepaymentRecord record) {
+        String status = record.getStatus();
+        return "COMPLETED".equals(status) || "PAID".equals(status) || "SETTLED".equals(status);
     }
 
     private void sendReminderEmail(User user, RepaymentRecord record, Date dueDate) {

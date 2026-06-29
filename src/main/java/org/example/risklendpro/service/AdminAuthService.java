@@ -4,6 +4,8 @@ import org.example.risklendpro.pojo.request.AdminRegisterRequest;
 import org.example.risklendpro.pojo.request.AdminLoginRequest;
 import org.example.risklendpro.pojo.response.AdminLoginResponse;
 
+import java.util.Map;
+
 public interface AdminAuthService {
     /**
      * 管理员注册
@@ -17,4 +19,9 @@ public interface AdminAuthService {
      * @return 登录响应，包含token
      */
     AdminLoginResponse login(AdminLoginRequest request);
+
+    /**
+     * 当前管理员资料
+     */
+    Map<String, Object> getProfile(Long adminId);
 }

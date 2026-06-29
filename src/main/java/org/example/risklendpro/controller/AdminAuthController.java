@@ -7,11 +7,15 @@ import org.example.risklendpro.pojo.request.AdminLoginRequest;
 import org.example.risklendpro.pojo.response.CommonResponse;
 import org.example.risklendpro.pojo.response.AdminLoginResponse;
 import org.example.risklendpro.service.AdminAuthService;
+import org.example.risklendpro.utils.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
 
 @Tag(name = "管理员认证模块", description = "管理员注册登录相关接口")
 @RestController
@@ -37,5 +41,12 @@ public class AdminAuthController {
     public CommonResponse<AdminLoginResponse> login(@RequestBody AdminLoginRequest request) {
         AdminLoginResponse response = adminAuthService.login(request);
         return CommonResponse.success("登录成功", response);
+    }
+
+    @Operation(summary = "当前管理员资料", description = "获取当前登录管理员信息")
+    @GetMapping("/profile")
+    public CommonResponse<Map<String, Object>> profile() {
+        Map<String, Object> data = adminAuthService.getProfile(SecurityUtils.getAdminId());
+        return CommonResponse.success("查询成功", data);
     }
 }

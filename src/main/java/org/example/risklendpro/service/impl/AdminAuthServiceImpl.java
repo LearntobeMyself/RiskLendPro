@@ -11,7 +11,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import org.example.risklendpro.utils.AdminDateHelper;
+
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 public class AdminAuthServiceImpl implements AdminAuthService {
@@ -76,5 +80,23 @@ public class AdminAuthServiceImpl implements AdminAuthService {
         response.setToken(token);
         
         return response;
+    }
+
+    @Override
+    public Map<String, Object> getProfile(Long adminId) {
+        Admin admin = adminMapper.selectById(adminId);
+        if (admin == null) {
+            throw new RuntimeException("管理员不存在");
+        }
+        Map<String, Object> profile = new HashMap<>();
+        profile.put("id", admin.getId());
+        profile.put("username", admin.getUsername());
+        profile.put("name", admin.getUsername());
+        profile.put("phoneNumber", admin.getPhoneNumber());
+        profile.put("email", admin.getEmail());
+        profile.put("role", "SUPER_ADMIN");
+        profile.put("avatar", "");
+        profile.put("lastLoginTime", AdminDateHelper.formatDateTime(admin.getUpdateTime()));
+        return profile;
     }
 }

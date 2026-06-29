@@ -27,8 +27,8 @@ home_credit_train_min.parquet
 data/raw/blacklist.csv
         └─► clean_blacklist.py          → cleaned_blacklist.csv   → load_to_mysql.py（全量）
 
-扣子平台 Cron 工作流（增量）
-        └─► 抓取温州公开数据 → 清洗 → POST /api/v1/sync/blacklist → blacklist 表
+扣子平台工作流（增量，由 Java 定时触发）
+        └─► Java Cron → POST api.coze.cn/workflow/run → 抓取温州公开数据 → 清洗 → POST /api/v1/sync/blacklist → blacklist 表
 ```
 
 ### 黑名单入库双通道
@@ -36,7 +36,7 @@ data/raw/blacklist.csv
 | 通道 | 适用场景 | 入口 | 表操作 |
 |------|----------|------|--------|
 | **全量** | 开发、重导、首次部署 | `clean_blacklist.py` + `load_to_mysql.py` | `DROP` 后重建 `blacklist` 并批量 INSERT |
-| **增量** | 生产定时更新 | 扣子工作流 → `POST /api/v1/sync/blacklist` | 单条 INSERT；`(name, area_code, birth_year)` 去重 |
+| **增量** | 生产定时更新 | Java `@Scheduled` → 扣子工作流 → `POST /api/v1/sync/blacklist` | 单条 INSERT；`(name, area_code, birth_year)` 去重 |
 
 ---
 
@@ -261,15 +261,16 @@ B 卡从 parquet 中选取 `inst_*`、`pos_*` 等贷后行为列，WOE + LR + PD
 
 ---
 
-## 七、扣子平台定时同步黑名单（通用模板）
+## 七、扣子平台同步黑名单（Java 定时触发）
 
-用于生产环境**增量**更新失信名单，无需重跑 `load_to_mysql.py`（避免 DROP 表）。
+用于生产环境**增量**更新失信名单，无需重跑 `load_to_mysql.py`（避免 DROP 表）。**定时由 Java `CozeBlacklistSyncJob` 调用扣子 API 触发**，扣子工作流内不再使用 Cron 节点。
 
 ### 7.1 工作流节点建议
 
 ```mermaid
 flowchart LR
-    cron[Cron定时触发] --> fetch[HTTP抓取温州公开CSV]
+    javaCron[Java_Scheduled_02:00] --> cozeApi[POST_api.coze.cn_workflow_run]
+    cozeApi --> fetch[HTTP抓取温州公开CSV]
     fetch --> parse[解析CSV行]
     parse --> clean[代码节点字段清洗]
     clean --> loop[循环每条记录]
@@ -277,14 +278,16 @@ flowchart LR
     post --> log[记录成功跳过失败]
 ```
 
-| 步骤 | 扣子节点类型 | 说明 |
-|------|-------------|------|
-| 1 | **定时触发** | Cron，建议每日 02:00 |
-| 2 | **HTTP 请求** | 下载温州失信被执行人公开 CSV |
-| 3 | **代码** | 复刻 `clean_blacklist.py`：`get_area_code()`、`extract_birth_year()`、去无姓名行 |
-| 4 | **循环** | 遍历清洗后记录 |
-| 5 | **HTTP 请求** | `POST {SPRING_BASE_URL}/api/v1/sync/blacklist` |
-| 6 | **条件分支** | 400 且 message 含「已存在」→ 跳过；401 → 告警；5xx → 重试 |
+| 步骤 | 位置 | 说明 |
+|------|------|------|
+| 1 | **Java** `CozeBlacklistSyncJob` | Cron 默认 `0 0 2 * * ?`，调用 `/v1/workflow/run` |
+| 2 | **扣子** HTTP 请求 | 下载温州失信被执行人公开 CSV |
+| 3 | **扣子** 代码 | 复刻 `clean_blacklist.py`：`get_area_code()`、`extract_birth_year()`、去无姓名行 |
+| 4 | **扣子** 循环 | 遍历清洗后记录 |
+| 5 | **扣子** HTTP 请求 | `POST {SPRING_BASE_URL}/api/v1/sync/blacklist` |
+| 6 | **扣子** 条件分支 | 400 且 message 含「已存在」→ 跳过；401 → 告警；5xx → 重试 |
+
+Java 配置见 [`application.yaml`](../src/main/resources/application.yaml) → `risk.coze.*`；部署说明见项目根 [`定时任务.md`](../定时任务.md)。
 
 ### 7.2 环境变量（扣子侧配置）
 

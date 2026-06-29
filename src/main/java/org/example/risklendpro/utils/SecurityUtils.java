@@ -41,11 +41,19 @@ public class SecurityUtils {
     }
 
     public static Long getManagerId() {
+        return getAdminId();
+    }
+
+    public static Long getAdminId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() != null) {
             return Long.parseLong(authentication.getPrincipal().toString());
         }
         throw new RuntimeException("获取管理员ID失败");
+    }
+
+    public static Long getAdminIdFromRequest(HttpServletRequest request) {
+        return getManagerIdFromRequest(request);
     }
 
     public static boolean isAuthenticated() {
