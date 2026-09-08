@@ -38,3 +38,11 @@ build/
 __pycache__/
 *.py[cod]
 risk-assessment/.env
+# 离线训练样本，不上传 GitHub
+*.parquet
+risk-assessment/data/raw/
+risk-assessment/data/cleaned/
+
+# 运行时用户上传与备份
+upload/backup/
+upload/export/
