@@ -1,5 +1,9 @@
 spring:
 # 多数据源配置
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   datasource:
     # 主数据源 - RiskLendPro（业务数据）
     primary:
@@ -54,3 +58,24 @@ spring:
           max-idle: 8
           min-idle: 0
           max-wait: -1
+
+risk:
+  schema:
+    auto-migrate-account-status: true
+  blacklist-sync:
+    api-token: "bl-sync-a3f8c2e1-7b4d-4f9a-9e6c-1d2b5a8f3c7e"
+  coze:
+    enabled: true
+    api-url: https://api.coze.cn/v1/workflow/run
+    workflow-id: "7647934026113089570"
+    workflow-version: "v0.0.3"
+    # 每周日 02:00
+    cron: "0 0 2 ? * SUN"
+    read-timeout-ms: 300000
+    connect-timeout-ms: 10000
+  supplement:
+    # 相对路径基于 JVM 启动目录（项目根）；生产可改为绝对路径如 D:/data/risklendpro/upload/risk-supplement
+    upload-dir: upload/risk-supplement
+    retention-days: 30
+    max-file-size-mb: 5
+    allowed-extensions: jpg,jpeg,png,pdf

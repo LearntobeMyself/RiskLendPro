@@ -20,18 +20,13 @@ server:
 
 # MyBatis-Plus配置（使用@Select注解，无需XML）
 mybatis-plus:
-  type-aliases-package: org.example.risklendpro.entity
+  type-aliases-package: org.example.risklendpro.user.entity,org.example.risklendpro.loan.entity,org.example.risklendpro.risk.entity,org.example.risklendpro.risk.credit
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
       id-type: assign_id
-
-# JWT配置
-jwt:
-  secret: your_jwt_secret_key_here
-  expire: 7200
 
 # 日志配置
 logging:
@@ -41,4 +36,4 @@ logging:
 
 risk:
   coze:
-    token: pat_wE5ce2g3MqpRy5ygqzCFlNk8oyvcOwt2j7eTvmBge8a6LiaBnmAjG7xbsVtOiiQG
+    token: pat_JbXEzhPyB3jDRjS8d4WJa3C3jcYphuyyO1Hp9y250t5D0gysF5GHHHSRN6JZer07

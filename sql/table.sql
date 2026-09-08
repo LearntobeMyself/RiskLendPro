@@ -10,6 +10,7 @@ CREATE TABLE `user` (
                         `password` VARCHAR(255) NOT NULL COMMENT '密码',
                         `role` VARCHAR(20) DEFAULT 'USER' COMMENT '角色: USER/ADMIN',
                         `assessment_status` VARCHAR(30) DEFAULT 'NOT_ASSESSED' COMMENT '评估状态: NOT_ASSESSED/ASSESSING/APPROVED',
+                        `account_status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/DISABLED/FROZEN',
                         `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                         `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';

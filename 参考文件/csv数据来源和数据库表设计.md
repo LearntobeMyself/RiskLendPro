@@ -287,7 +287,7 @@ flowchart LR
 | 5 | **扣子** HTTP 请求 | `POST {SPRING_BASE_URL}/api/v1/sync/blacklist` |
 | 6 | **扣子** 条件分支 | 400 且 message 含「已存在」→ 跳过；401 → 告警；5xx → 重试 |
 
-Java 配置见 [`application.yaml`](../src/main/resources/application.yaml) → `risk.coze.*`；部署说明见项目根 [`定时任务.md`](../定时任务.md)。
+Java 配置见 [`application.yaml`](../src/main/resources/application.yaml) → `risk.coze.*`。
 
 ### 7.2 环境变量（扣子侧配置）
 

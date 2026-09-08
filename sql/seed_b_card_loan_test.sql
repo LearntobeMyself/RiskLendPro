@@ -41,6 +41,7 @@ SET l.has_overdue = 0, l.last_update_time = NOW()
 WHERE u.phone_number = '13800138102';
 
 -- 许静雅 13800138103 — 今日到期 DUE_TODAY
+
 UPDATE repayment_record rr
 INNER JOIN repayment_plan rp ON rp.plan_id = rr.plan_id
 INNER JOIN user u ON u.id = rp.user_id
