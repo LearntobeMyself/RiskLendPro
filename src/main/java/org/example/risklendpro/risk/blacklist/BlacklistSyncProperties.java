@@ -1,0 +1,12 @@
+package org.example.risklendpro.risk.blacklist;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+@Data
+@Component
+@ConfigurationProperties(prefix = "risk.blacklist-sync")
+public class BlacklistSyncProperties {
+    private String apiToken;
+}

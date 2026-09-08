@@ -5,7 +5,11 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @MapperScan(
-    basePackages = "org.example.risklendpro.mapper",
+    basePackages = {
+        "org.example.risklendpro.user.mapper",
+        "org.example.risklendpro.loan.mapper",
+        "org.example.risklendpro.risk.mapper"
+    },
     sqlSessionFactoryRef = "primarySqlSessionFactory"
 )
 public class PrimaryMapperScanConfig {

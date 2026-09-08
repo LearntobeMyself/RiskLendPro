@@ -33,7 +33,8 @@ public class DataSourceConfig {
     public SqlSessionFactory primarySqlSessionFactory(@Qualifier("primaryDataSource") DataSource dataSource) throws Exception {
         MybatisSqlSessionFactoryBean bean = new MybatisSqlSessionFactoryBean();
         bean.setDataSource(dataSource);
-        bean.setTypeAliasesPackage("org.example.risklendpro.entity");
+        bean.setTypeAliasesPackage(
+                "org.example.risklendpro.user.entity,org.example.risklendpro.loan.entity,org.example.risklendpro.risk.entity");
         return bean.getObject();
     }
 
@@ -41,7 +42,7 @@ public class DataSourceConfig {
     public SqlSessionFactory creditSqlSessionFactory(@Qualifier("creditDataSource") DataSource dataSource) throws Exception {
         MybatisSqlSessionFactoryBean bean = new MybatisSqlSessionFactoryBean();
         bean.setDataSource(dataSource);
-        bean.setTypeAliasesPackage("org.example.risklendpro.entity.credit");
+        bean.setTypeAliasesPackage("org.example.risklendpro.risk.credit");
         return bean.getObject();
     }
 

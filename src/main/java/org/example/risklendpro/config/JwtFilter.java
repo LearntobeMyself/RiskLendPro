@@ -1,5 +1,7 @@
 package org.example.risklendpro.config;
 
+import org.example.risklendpro.common.security.JwtConfig;
+import org.example.risklendpro.risk.blacklist.BlacklistSyncProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.MalformedJwtException;
