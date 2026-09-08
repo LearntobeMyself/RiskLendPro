@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: loan-service
+
+server:
+  port: ${LOAN_SERVICE_PORT:8083}
+
+service:
+  user:
+    url: ${USER_SERVICE_URL:http://localhost:8081}
+  risk:
+    url: ${RISK_SERVICE_URL:http://localhost:8082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

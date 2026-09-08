@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: risklendpro-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: user-service-health
+              uri: ${USER_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/platform/user/health
+              filters:
+                - SetPath=/actuator/health
+            - id: risk-service-health
+              uri: ${RISK_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/platform/risk/health
+              filters:
+                - SetPath=/actuator/health
+            - id: loan-service-health
+              uri: ${LOAN_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/platform/loan/health
+              filters:
+                - SetPath=/actuator/health
+            - id: cs-service-health
+              uri: ${CS_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/platform/cs/health
+              filters:
+                - SetPath=/actuator/health
+            - id: cs-service
+              uri: ${CS_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/v1/cs/**
+            - id: legacy-service
+              uri: ${LEGACY_SERVICE_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/**
+
+server:
+  port: ${GATEWAY_PORT:8088}
+
+security:
+  jwt:
+    # Override in every non-local environment.
+    secret: ${JWT_SECRET:MySecretKeyForJWT2024VeryLongAndSafe12345678}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway

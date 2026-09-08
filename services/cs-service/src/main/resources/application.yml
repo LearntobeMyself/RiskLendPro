@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: cs-service
+
+server:
+  port: ${CS_SERVICE_PORT:8084}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
