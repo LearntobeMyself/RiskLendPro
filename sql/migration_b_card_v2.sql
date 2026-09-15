@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `b_card_feature_snapshot` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` BIGINT NOT NULL,
+    `as_of_date` DATE NOT NULL,
+    `snapshot_time` DATETIME NOT NULL,
+    `feature_version` VARCHAR(32) NOT NULL,
+    `observation_start` DATE NOT NULL,
+    `observation_end` DATE NOT NULL,
+    `performance_start` DATE NULL,
+    `performance_end` DATE NULL,
+    `sample_status` VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+    `label_30dpd_6m` TINYINT NULL,
+    `label_90dpd_12m` TINYINT NULL,
+    `feature_json` JSON NOT NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_user_asof_version` (`user_id`, `as_of_date`, `feature_version`),
+    KEY `idx_asof_status` (`as_of_date`, `sample_status`),
+    KEY `idx_user_time` (`user_id`, `snapshot_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='B卡V2真实特征快照';
