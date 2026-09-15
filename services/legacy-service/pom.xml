@@ -79,15 +79,9 @@
     </dependencies>
 
     <build>
-        <!-- Transitional module: keep the verified source tree running while endpoints
-             are moved one domain at a time into independent services. -->
-        <sourceDirectory>${project.basedir}/../../src/main/java</sourceDirectory>
-        <testSourceDirectory>${project.basedir}/../../src/test/java</testSourceDirectory>
-        <resources>
-            <resource>
-                <directory>${project.basedir}/../../src/main/resources</directory>
-            </resource>
-        </resources>
+        <!-- Transitional module: keeps the verified monolith source tree running (now at
+             services/legacy-service/src) while endpoints are moved one domain at a time
+             into independent services. -->
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

@@ -2,6 +2,8 @@
 
 当前采用绞杀式迁移：`legacy-service` 保留综设 II 已验证功能，Gateway 作为唯一入口，新接口直接进入独立服务；旧接口逐个迁出后删除 legacy 模块。
 
+> 目录布局：单体源码已从根目录 `src/` 整体迁入 `services/legacy-service/src`，根 `pom.xml` 是纯聚合器（`packaging=pom`），根目录不再含源码。依赖关系为 `common-api`（契约）← user/risk/loan/cs；`legacy-service` 为单体过渡模块，运行端口 8080；所有外部请求只走 `gateway`（8088）。
+
 **接手后要先跑通现有功能：只启动 `legacy-service`。** 其余模块还没有迁过去的业务接口，全部拉起来也不能替代单体。
 
 ## 模块与端口
