@@ -21,6 +21,7 @@
     </properties>
     <modules>
         <module>common-api</module>
+        <module>services/common-runtime</module>
         <module>services/gateway</module>
         <module>services/user-service</module>
         <module>services/risk-service</module>
