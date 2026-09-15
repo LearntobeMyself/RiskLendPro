@@ -553,11 +553,17 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
             row.put("hasOverdue", Boolean.TRUE.equals(limit.getHasOverdue()));
             row.put("activePlanCount", activePlanCount);
 
+            Map<String, Object> liveFeatures = Collections.emptyMap();
             if (latestLog != null) {
+                liveFeatures = parseLiveFeaturesJson(latestLog.getLiveFeatures());
                 row.put("baseScore", latestLog.getBaseScore());
                 row.put("deltaScore", latestLog.getDeltaScore());
-                row.put("liveFeatures", parseLiveFeaturesJson(latestLog.getLiveFeatures()));
+                row.put("liveFeatures", liveFeatures);
             }
+            boolean scoreReliable = Boolean.TRUE.equals(liveFeatures.get("scoreReliable"));
+            row.put("baseScoreResolved", Boolean.TRUE.equals(liveFeatures.get("baseScoreResolved")));
+            row.put("scoreReliable", scoreReliable);
+            row.put("dataStatus", liveFeatures.getOrDefault("dataStatus", "RECALCULATION_REQUIRED"));
 
             if (bestPlan != null) {
                 row.put("planId", bestPlan.getPlanId());
@@ -575,9 +581,10 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
             String watchLevel = resolveWatchLevel(bestPlan, bestRecord, daysToDue);
             row.put("watchLevel", watchLevel);
 
-            double multiplier = limit.getBScore() != null
-                    ? behaviorScoreService.resolveLimitMultiplier(limit.getBScore().doubleValue())
-                    : 1.0;
+            Double multiplier = null;
+            if (scoreReliable && limit.getBScore() != null) {
+                multiplier = behaviorScoreService.resolveLimitMultiplier(limit.getBScore().doubleValue());
+            }
             row.put("limitMultiplier", multiplier);
 
             rows.add(row);
@@ -602,14 +609,33 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         limit = userCreditLimitMapper.selectOne(
                 new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
 
+        UserBCardLog latestLog = userBCardLogMapper.selectOne(
+                new QueryWrapper<UserBCardLog>()
+                        .eq("user_id", userId)
+                        .orderByDesc("created_at")
+                        .last("LIMIT 1"));
+        Map<String, Object> liveFeatures = latestLog == null
+                ? Collections.emptyMap()
+                : parseLiveFeaturesJson(latestLog.getLiveFeatures());
+        boolean scoreReliable = Boolean.TRUE.equals(liveFeatures.get("scoreReliable"));
+
         Map<String, Object> result = new HashMap<>();
         result.put("userId", userId);
         result.put("bScore", limit.getBScore());
         result.put("bScoreUpdatedAt", limit.getBScoreUpdatedAt());
-        if (limit.getBScore() != null) {
-            result.put("limitMultiplier",
-                    behaviorScoreService.resolveLimitMultiplier(limit.getBScore().doubleValue()));
+        if (latestLog != null) {
+            result.put("baseScore", latestLog.getBaseScore());
+            result.put("deltaScore", latestLog.getDeltaScore());
         }
+        result.put("liveFeatures", liveFeatures);
+        result.put("baseScoreResolved", Boolean.TRUE.equals(liveFeatures.get("baseScoreResolved")));
+        result.put("scoreReliable", scoreReliable);
+        result.put("dataStatus", liveFeatures.getOrDefault("dataStatus", "RECALCULATION_REQUIRED"));
+        Double multiplier = null;
+        if (scoreReliable && limit.getBScore() != null) {
+            multiplier = behaviorScoreService.resolveLimitMultiplier(limit.getBScore().doubleValue());
+        }
+        result.put("limitMultiplier", multiplier);
         return result;
     }
 
