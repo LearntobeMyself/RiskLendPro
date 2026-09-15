@@ -15,8 +15,8 @@ public class BehaviorLiveFeatureServiceImpl implements BehaviorLiveFeatureServic
     @Override
     public LiveFeatures aggregate(Long userId) {
         LiveFeatures live = new LiveFeatures();
+        live.setOnTimeRate(1.0);
         if (userId == null) {
-            live.setOnTimeRate(1.0);
             return live;
         }
 
@@ -24,6 +24,7 @@ public class BehaviorLiveFeatureServiceImpl implements BehaviorLiveFeatureServic
         live.setMaxOverdueDays(snap.maxOverdueDays());
         live.setOverduePeriodCount(snap.overduePeriodCount());
         live.setOnTimeRate(snap.onTimeRate());
+        live.setHistoryAvailable(snap.historyAvailable());
         return live;
     }
 }
