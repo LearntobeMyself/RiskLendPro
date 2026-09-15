@@ -41,7 +41,7 @@ mvnw.cmd -pl services/legacy-service spring-boot:run
 | `services/gateway` 等 | 微服务空壳，跑业务可忽略 |
 | `risk-assessment/` | Python 离线训练，日常运行用不到 |
 | `参考文件/` | 接口、表结构、评分卡说明 |
-| `报告结构内容说明/` | 综设 III 报告与分工，不是运行说明 |
+| `报告结构内容说明/` | 综设 III 报告与分工。干活看 `综设III四阶段计划.md` |
 | `sql/` | 测试数据与用例 |
 
 扣子黑名单由 Java **每周日 02:00** 触发，配置在 `src/main/resources/application.yaml`。
