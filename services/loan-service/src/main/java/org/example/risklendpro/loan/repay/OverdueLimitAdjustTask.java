@@ -7,7 +7,7 @@ import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.risk.score.BehaviorScoreService;
+import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -30,7 +30,7 @@ public class OverdueLimitAdjustTask {
     private LimitAdjustLogMapper limitAdjustLogMapper;
 
     @Autowired
-    private BehaviorScoreService behaviorScoreService;
+    private RiskServiceClient riskServiceClient;
 
     @Scheduled(cron = "0 0 2 * * ?")
     @Transactional
@@ -41,7 +41,7 @@ public class OverdueLimitAdjustTask {
 
         for (UserCreditLimit creditLimit : overdueUsers) {
             if (Boolean.TRUE.equals(creditLimit.getBCardEnabled())) {
-                behaviorScoreService.recalculate(creditLimit.getUserId());
+                riskServiceClient.recalculateBehaviorScore(creditLimit.getUserId());
                 creditLimit = userCreditLimitMapper.selectById(creditLimit.getId());
             }
             adjustUserLimitByOverdue(creditLimit);
@@ -62,7 +62,7 @@ public class OverdueLimitAdjustTask {
         BigDecimal newLimit;
 
         if (Boolean.TRUE.equals(creditLimit.getBCardEnabled()) && creditLimit.getBScore() != null) {
-            double multiplier = behaviorScoreService.resolveLimitMultiplier(creditLimit.getBScore().doubleValue());
+            double multiplier = riskServiceClient.getLimitMultiplier(creditLimit.getBScore().doubleValue());
             newLimit = oldLimit.multiply(BigDecimal.valueOf(multiplier));
             applyLimitChange(creditLimit, oldLimit, newLimit,
                     "B卡自动调额：B分=" + creditLimit.getBScore() + "，系数=" + multiplier);

@@ -28,4 +28,7 @@ public interface RiskDecisionApi {
 
     @GetMapping("/internal/risk-assessments/overview-counts")
     RiskOverviewCounts getOverviewCounts();
+
+    @GetMapping("/internal/behavior-scores/limit-multiplier")
+    double getLimitMultiplier(@RequestParam("score") double score);
 }

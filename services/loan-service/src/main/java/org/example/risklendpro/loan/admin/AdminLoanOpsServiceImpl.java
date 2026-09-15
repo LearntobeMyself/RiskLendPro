@@ -19,7 +19,7 @@ import org.example.risklendpro.loan.mapper.VintageDataMapper;
 import org.example.risklendpro.loan.repay.RepaymentCalculator;
 import org.example.risklendpro.risk.entity.RiskAssessment;
 import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
-import org.example.risklendpro.risk.score.BehaviorScoreService;
+import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.user.mapper.UserMapper;
 import org.slf4j.Logger;
@@ -60,7 +60,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     @Autowired
     private EmailUtil emailUtil;
     @Autowired
-    private BehaviorScoreService behaviorScoreService;
+    private RiskServiceClient riskServiceClient;
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
 
@@ -287,7 +287,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             generateRepaymentPlan(loan, loan.getRepaymentMethod());
 
             if (user != null && user.getIdCard() != null) {
-                behaviorScoreService.activate(loan.getUserId(), user.getIdCard());
+                riskServiceClient.activateBehaviorScore(loan.getUserId(), user.getIdCard());
             }
 
             response.setStatus(LoanStatusEnum.DISBURRSED.getCode());

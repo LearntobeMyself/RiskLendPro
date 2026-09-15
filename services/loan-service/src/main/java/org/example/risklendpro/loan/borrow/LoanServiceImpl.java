@@ -18,7 +18,7 @@ import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.loan.borrow.LoanRequest;
 import org.example.risklendpro.loan.borrow.LoanResponse;
 import org.example.risklendpro.loan.borrow.LoanService;
-import org.example.risklendpro.risk.score.BehaviorScoreService;
+import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.repay.RepaymentCalculator;
 import org.springframework.beans.BeanUtils;
@@ -57,7 +57,7 @@ public class LoanServiceImpl implements LoanService {
     private EmailUtil emailUtil;
 
     @Autowired
-    private BehaviorScoreService behaviorScoreService;
+    private RiskServiceClient riskServiceClient;
 
     @Override
     @Transactional
@@ -132,7 +132,7 @@ public class LoanServiceImpl implements LoanService {
         // 6. 生成还款计划和还款记录（仅当自动审批通过时）
         if (loan.getAutoApproved()) {
             generateRepaymentPlan(loan, request.getRepaymentMethod());
-            behaviorScoreService.activate(userId, latestAssessment.getIdCard());
+            riskServiceClient.activateBehaviorScore(userId, latestAssessment.getIdCard());
         }
 
         // 7. 发送邮件通知
