@@ -1,9 +1,9 @@
 package org.example.risklendpro.api.dto;
 
 /**
- * 用户摘要，供跨服务只读展示（发邮件、展示姓名/手机等）。
+ * 用户完整只读明细，供跨服务（贷款审批、风控、管理端）取身份与状态信息。
  */
-public record UserSummary(
+public record UserDetail(
         Long id,
         String realName,
         String phoneNumber,

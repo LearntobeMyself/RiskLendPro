@@ -2,6 +2,9 @@ package org.example.risklendpro.api.dto;
 
 import java.math.BigDecimal;
 
+/**
+ * 用户授信额度快照。属主服务：loan-service。
+ */
 public record CreditLimitSnapshot(
         Long userId,
         BigDecimal totalLimit,
@@ -9,6 +12,8 @@ public record CreditLimitSnapshot(
         BigDecimal remainingLimit,
         BigDecimal overdueAmount,
         boolean hasOverdue,
-        BigDecimal behaviorScore
+        BigDecimal behaviorScore,
+        boolean bCardEnabled,
+        Long lastUpdateTime
 ) {
 }
