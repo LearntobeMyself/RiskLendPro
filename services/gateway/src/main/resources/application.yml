@@ -30,14 +30,28 @@ spring:
                 - Path=/platform/cs/health
               filters:
                 - SetPath=/actuator/health
+            - id: user-service
+              uri: ${USER_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/v1/user/**,/api/v1/auth/**,/api/v1/admin/login,/api/v1/admin/register,/api/v1/admin/profile,/api/v1/admin/users/**,/api/v1/admin/system/**
+              filters:
+                - StripPrefix=2
+            - id: risk-service
+              uri: ${RISK_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/risk/**,/api/v1/sync/**,/api/v1/admin/risk/**,/api/v1/admin/b-card/**,/api/v1/admin/supplement/**
+              filters:
+                - StripPrefix=2
+            - id: loan-service
+              uri: ${LOAN_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/v1/loan/**,/api/v1/repayment/**,/api/v1/admin/loan/**,/api/v1/admin/credit/**,/api/v1/admin/repayment/**,/api/v1/admin/bi/**,/api/v1/admin/dashboard/**
+              filters:
+                - StripPrefix=2
             - id: cs-service
               uri: ${CS_SERVICE_URL:http://localhost:8084}
               predicates:
                 - Path=/api/v1/cs/**
-            - id: legacy-service
-              uri: ${LEGACY_SERVICE_URL:http://localhost:8080}
-              predicates:
-                - Path=/api/v1/**
 
 server:
   port: ${GATEWAY_PORT:8088}

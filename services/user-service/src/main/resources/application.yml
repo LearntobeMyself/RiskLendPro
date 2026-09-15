@@ -1,6 +1,8 @@
 spring:
   application:
     name: user-service
+  config:
+    import: classpath:application-common.yml
 
 server:
   port: ${USER_SERVICE_PORT:8081}

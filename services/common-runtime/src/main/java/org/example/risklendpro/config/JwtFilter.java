@@ -123,6 +123,7 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private boolean isWhitelisted(String requestURI) {
         return requestURI.contains("/auth/")
+                || requestURI.contains("/actuator/health")
                 || requestURI.startsWith("/internal/")
                 || requestURI.contains("/internal/")
                 || requestURI.contains("/admin/login")
