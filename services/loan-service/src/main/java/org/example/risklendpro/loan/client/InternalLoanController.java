@@ -184,18 +184,21 @@ public class InternalLoanController implements LoanApi {
                     new QueryWrapper<RepaymentRecord>().in("loan_id", loanIds));
         }
         double onTimeRate = 1.0;
+        boolean historyAvailable = false;
         if (!records.isEmpty()) {
             int paid = 0;
             int onTime = 0;
             for (RepaymentRecord r : records) {
                 if (isRepaid(r)) {
                     paid++;
+                    historyAvailable = true;
                     if (r.getRepaymentDate() != null && r.getDueDate() != null
                             && !r.getRepaymentDate().after(r.getDueDate())) {
                         onTime++;
                     }
                 } else if (r.getDueDate() != null && r.getDueDate().before(now)) {
                     paid++;
+                    historyAvailable = true;
                 }
             }
             onTimeRate = paid == 0 ? 1.0 : (double) onTime / (double) paid;
@@ -208,7 +211,8 @@ public class InternalLoanController implements LoanApi {
                 outstandingAmount,
                 maxOverdueDays,
                 overduePeriodCount,
-                onTimeRate
+                onTimeRate,
+                historyAvailable
         );
     }
 

@@ -12,6 +12,7 @@ public record LoanBehaviorSnapshot(
         BigDecimal outstandingAmount,
         int maxOverdueDays,
         int overduePeriodCount,
-        double onTimeRate
+        double onTimeRate,
+        boolean historyAvailable
 ) {
 }
