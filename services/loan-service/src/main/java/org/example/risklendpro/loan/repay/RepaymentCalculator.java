@@ -15,6 +15,11 @@ public class RepaymentCalculator {
      */
     public static List<RepaymentDetail> calculateEqualPrincipalAndInterest(
             BigDecimal principal, BigDecimal annualRate, int months) {
+        validate(principal, months);
+        // 零利率：退化为等额本金（无利息），避免 (1+0)^n - 1 = 0 除零
+        if (annualRate == null || annualRate.signum() == 0) {
+            return equalPaymentNoInterest(principal, months);
+        }
         List<RepaymentDetail> details = new ArrayList<>();
         
         // 月利率
@@ -52,6 +57,7 @@ public class RepaymentCalculator {
      */
     public static List<RepaymentDetail> calculateEqualPrincipal(
             BigDecimal principal, BigDecimal annualRate, int months) {
+        validate(principal, months);
         List<RepaymentDetail> details = new ArrayList<>();
         
         // 月利率
@@ -87,6 +93,7 @@ public class RepaymentCalculator {
      */
     public static List<RepaymentDetail> calculateInterestFirst(
             BigDecimal principal, BigDecimal annualRate, int months) {
+        validate(principal, months);
         List<RepaymentDetail> details = new ArrayList<>();
         
         // 月利率
@@ -140,5 +147,27 @@ public class RepaymentCalculator {
         public BigDecimal getAmount() {
             return amount;
         }
+    }
+
+    private static void validate(BigDecimal principal, int months) {
+        if (months <= 0) {
+            throw new IllegalArgumentException("还款期数必须大于0");
+        }
+        if (principal == null || principal.signum() <= 0) {
+            throw new IllegalArgumentException("贷款本金必须大于0");
+        }
+    }
+
+    /** 零利率场景：等额本金、无利息，避免除零。 */
+    private static List<RepaymentDetail> equalPaymentNoInterest(BigDecimal principal, int months) {
+        BigDecimal each = principal.divide(BigDecimal.valueOf(months), 2, RoundingMode.HALF_UP);
+        BigDecimal remaining = principal;
+        List<RepaymentDetail> details = new ArrayList<>();
+        for (int i = 1; i <= months; i++) {
+            BigDecimal p = (i == months) ? remaining : each;
+            details.add(new RepaymentDetail(i, p, BigDecimal.ZERO, p));
+            remaining = remaining.subtract(p);
+        }
+        return details;
     }
 }

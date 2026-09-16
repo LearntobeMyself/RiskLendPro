@@ -99,7 +99,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         Page<Loan> pageInfo = new Page<>(page, size);
         QueryWrapper<Loan> qw = new QueryWrapper<>();
         qw.isNotNull("approve_time");
-        qw.in("status", LoanStatusEnum.DISBURRSED.getCode(), LoanStatusEnum.REJECTED.getCode(),
+        qw.in("status", LoanStatusEnum.DISBURSED.getCode(), LoanStatusEnum.REJECTED.getCode(),
                 LoanStatusEnum.APPROVED.getCode());
         if (userId != null) {
             qw.eq("user_id", userId);
@@ -109,7 +109,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         }
         if (status != null && !status.isBlank()) {
             if ("APPROVED".equals(status)) {
-                qw.eq("status", LoanStatusEnum.DISBURRSED.getCode());
+                qw.eq("status", LoanStatusEnum.DISBURSED.getCode());
             } else if ("REJECTED".equals(status)) {
                 qw.eq("status", LoanStatusEnum.REJECTED.getCode());
             }
@@ -241,7 +241,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
 
     private QueryWrapper<Loan> buildRecordQuery(String status, String userName, String startDate, String endDate) {
         QueryWrapper<Loan> qw = new QueryWrapper<>();
-        qw.in("status", LoanStatusEnum.DISBURRSED.getCode(), LoanStatusEnum.REPAID.getCode(),
+        qw.in("status", LoanStatusEnum.DISBURSED.getCode(), LoanStatusEnum.REPAID.getCode(),
                 LoanStatusEnum.OVERDUE.getCode());
         if (status != null && !status.isBlank()) {
             String dbStatus = mapFrontendStatusToDb(status);
@@ -303,7 +303,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
     }
 
     private String mapDbStatusToFrontend(String dbStatus) {
-        if (LoanStatusEnum.DISBURRSED.getCode().equals(dbStatus)) {
+        if (LoanStatusEnum.DISBURSED.getCode().equals(dbStatus)) {
             return "REPAYING";
         }
         if (LoanStatusEnum.REPAID.getCode().equals(dbStatus)) {
@@ -317,7 +317,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
 
     private String mapFrontendStatusToDb(String frontendStatus) {
         return switch (frontendStatus) {
-            case "REPAYING" -> LoanStatusEnum.DISBURRSED.getCode();
+            case "REPAYING" -> LoanStatusEnum.DISBURSED.getCode();
             case "SETTLED" -> LoanStatusEnum.REPAID.getCode();
             case "OVERDUE" -> LoanStatusEnum.OVERDUE.getCode();
             default -> null;

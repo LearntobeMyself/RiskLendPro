@@ -92,7 +92,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
 
     private Map<String, Object> computeVintageFromLoans() {
         List<Loan> loans = loanMapper.selectList(new QueryWrapper<Loan>()
-                .in("status", LoanStatusEnum.DISBURRSED.getCode(), LoanStatusEnum.REPAID.getCode(),
+                .in("status", LoanStatusEnum.DISBURSED.getCode(), LoanStatusEnum.REPAID.getCode(),
                         LoanStatusEnum.OVERDUE.getCode())
                 .isNotNull("disbursement_time")
                 .orderByAsc("disbursement_time"));
@@ -167,7 +167,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
         long pendingReview = riskOverview.pendingReview();
 
         long totalDisbursedCount = loanMapper.selectCount(
-                new QueryWrapper<Loan>().eq("status", LoanStatusEnum.DISBURRSED.getCode())
+                new QueryWrapper<Loan>().eq("status", LoanStatusEnum.DISBURSED.getCode())
         );
 
         long totalOverdueCount = loanMapper.selectCount(
@@ -255,7 +255,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
         response.setUserId(loan.getUserId());
 
         if ("APPROVE".equals(request.getApproveResult())) {
-            loan.setStatus(LoanStatusEnum.DISBURRSED.getCode());
+            loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
             loan.setApproveTime(new Date());
             loan.setDisbursementTime(new Date());
             loan.setAdditionalLimit(request.getAdditionalLimit());
@@ -286,7 +286,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
                 riskServiceClient.activateBehaviorScore(loan.getUserId(), user.idCard());
             }
 
-            response.setStatus(LoanStatusEnum.DISBURRSED.getCode());
+            response.setStatus(LoanStatusEnum.DISBURSED.getCode());
             response.setEmailSent(true);
 
             if (user != null) {
@@ -382,7 +382,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
 
     private BigDecimal calculateTotalDisbursedAmount() {
         List<Loan> loans = loanMapper.selectList(
-                new QueryWrapper<Loan>().eq("status", LoanStatusEnum.DISBURRSED.getCode())
+                new QueryWrapper<Loan>().eq("status", LoanStatusEnum.DISBURSED.getCode())
         );
 
         return loans.stream()

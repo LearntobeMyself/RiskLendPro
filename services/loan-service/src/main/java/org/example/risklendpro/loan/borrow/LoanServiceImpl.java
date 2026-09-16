@@ -116,7 +116,7 @@ public class LoanServiceImpl implements LoanService {
             // 4. 根据额度判断处理方式
             if (request.getAmount().compareTo(remainingLimit) <= 0) {
                 // 4.1 额度内借款，自动审批通过
-                newLoan.setStatus(LoanStatusEnum.DISBURRSED.getCode());
+                newLoan.setStatus(LoanStatusEnum.DISBURSED.getCode());
                 newLoan.setDisbursementTime(new Date());
                 newLoan.setAutoApproved(true);
 
