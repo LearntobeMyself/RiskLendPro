@@ -12,6 +12,7 @@ import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
 import org.springframework.beans.factory.annotation.Autowired;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +45,7 @@ public class RepaymentScheduleTask {
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd");
 
     @Scheduled(cron = "0 0 1 * * ?")
+    @SchedulerLock(name = "repaymentDailyCheck", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10S")
     @Transactional
     public void dailyCheckAndUpdate() {
         Date today = new Date();

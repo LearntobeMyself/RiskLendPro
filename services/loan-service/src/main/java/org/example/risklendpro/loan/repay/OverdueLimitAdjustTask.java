@@ -10,6 +10,7 @@ import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +46,7 @@ public class OverdueLimitAdjustTask {
     private boolean bCardAutoAdjustEnabled;
 
     @Scheduled(cron = "0 0 2 * * ?")
+    @SchedulerLock(name = "overdueLimitAdjust", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10S")
     @Transactional
     public void autoAdjustOverdueUserLimit() {
         QueryWrapper<UserCreditLimit> queryWrapper = new QueryWrapper<>();

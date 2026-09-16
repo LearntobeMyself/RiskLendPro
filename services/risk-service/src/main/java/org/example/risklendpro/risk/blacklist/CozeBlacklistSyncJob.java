@@ -3,6 +3,7 @@ package org.example.risklendpro.risk.blacklist;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -17,6 +18,7 @@ public class CozeBlacklistSyncJob {
     private CozeWorkflowService cozeWorkflowService;
 
     @Scheduled(cron = "${risk.coze.cron}")
+    @SchedulerLock(name = "cozeBlacklistSync", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10S")
     public void triggerBlacklistSync() {
         log.info("Coze blacklist sync job started");
         try {
