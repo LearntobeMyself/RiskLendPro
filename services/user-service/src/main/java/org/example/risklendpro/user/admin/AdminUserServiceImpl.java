@@ -49,8 +49,36 @@ public class AdminUserServiceImpl implements AdminUserService {
         Page<User> pageInfo = new Page<>(page, size);
         QueryWrapper<User> qw = buildUserQuery(status, name, phone);
         Page<User> result = userMapper.selectPage(pageInfo, qw);
-        List<Map<String, Object>> list = result.getRecords().stream().map(this::toUserListItem).toList();
+        List<User> records = result.getRecords();
+
+        // 批量装配跨域数据，避免每行 3 次 Feign 调用（N+1）
+        Map<Long, CreditLimitSnapshot> limits = batchCreditLimits(records);
+        Map<Long, LoanUserSummaryItem> loanSummaries = batchLoanSummaries(records);
+        Map<Long, RiskAssessmentSummary> assessments = batchLatestFinalAssessments(records);
+
+        List<Map<String, Object>> list = records.stream()
+                .map(u -> AdminEntityMapper.toUserListItem(
+                        u,
+                        limits.get(u.getId()),
+                        assessments.get(u.getId()),
+                        loanSummaries.get(u.getId())))
+                .toList();
         return AdminPageHelper.toListPage(list, result.getTotal());
+    }
+
+    private Map<Long, CreditLimitSnapshot> batchCreditLimits(List<User> records) {
+        List<Long> ids = records.stream().map(User::getId).toList();
+        return ids.isEmpty() ? Map.of() : loanServiceClient.listCreditLimits(ids);
+    }
+
+    private Map<Long, LoanUserSummaryItem> batchLoanSummaries(List<User> records) {
+        List<Long> ids = records.stream().map(User::getId).toList();
+        return ids.isEmpty() ? Map.of() : loanServiceClient.listUserLoanSummaries(ids);
+    }
+
+    private Map<Long, RiskAssessmentSummary> batchLatestFinalAssessments(List<User> records) {
+        List<Long> ids = records.stream().map(User::getId).toList();
+        return ids.isEmpty() ? Map.of() : riskServiceClient.listLatestFinalAssessments(ids);
     }
 
     @Override

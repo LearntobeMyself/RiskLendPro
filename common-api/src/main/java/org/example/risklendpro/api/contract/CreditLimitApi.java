@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 授信/额度域契约。由 loan-service 实现（额度归 loan 域所有），risk（评估放款、B卡回写）与 user 消费。
@@ -17,6 +18,10 @@ public interface CreditLimitApi {
 
     @GetMapping("/internal/credit-limits/users/{userId}")
     CreditLimitSnapshot getCreditLimit(@PathVariable("userId") Long userId);
+
+    /** 批量查询多用户额度（用户管理列表批量填充，避免 N+1）。 */
+    @PostMapping("/internal/credit-limits/users/batch")
+    Map<Long, CreditLimitSnapshot> listCreditLimits(@RequestBody List<Long> userIds);
 
     /** 无额度记录时创建零额度行并返回，已有则直接返回。供 risk B 卡激活前兜底建行。 */
     @PostMapping("/internal/credit-limits/users/{userId}/ensure")

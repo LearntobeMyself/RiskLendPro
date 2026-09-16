@@ -14,6 +14,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * risk-service 对外契约实现，供 loan/user 通过 Feign 消费。
@@ -42,6 +45,26 @@ public class InternalRiskController implements RiskDecisionApi {
         if (assessment == null) {
             return null;
         }
+        return toSummary(assessment);
+    }
+
+    @Override
+    public Map<Long, RiskAssessmentSummary> listLatestFinalAssessments(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Map.of();
+        }
+        // 按 approval_time 倒序，遍历时每个 userId 仅保留最近一条
+        Map<Long, RiskAssessmentSummary> latest = new LinkedHashMap<>();
+        riskAssessmentMapper.selectList(
+                        new QueryWrapper<RiskAssessment>()
+                                .in("user_id", userIds)
+                                .eq("is_final", true)
+                                .orderByDesc("approval_time"))
+                .forEach(a -> latest.putIfAbsent(a.getUserId(), toSummary(a)));
+        return latest;
+    }
+
+    private RiskAssessmentSummary toSummary(RiskAssessment assessment) {
         return new RiskAssessmentSummary(
                 assessment.getApplyId(),
                 assessment.getUserId(),

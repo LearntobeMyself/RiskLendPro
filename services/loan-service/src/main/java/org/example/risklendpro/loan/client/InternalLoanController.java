@@ -27,6 +27,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -54,6 +55,17 @@ public class InternalLoanController implements LoanApi {
             return null;
         }
         return toSnapshot(limit);
+    }
+
+    @Override
+    public Map<Long, CreditLimitSnapshot> listCreditLimits(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return userCreditLimitMapper.selectList(
+                        new QueryWrapper<UserCreditLimit>().in("user_id", userIds))
+                .stream()
+                .collect(Collectors.toMap(UserCreditLimit::getUserId, this::toSnapshot, (a, b) -> a));
     }
 
     @Override
@@ -129,12 +141,12 @@ public class InternalLoanController implements LoanApi {
         List<Long> loanIds = loans.stream().map(Loan::getLoanId).collect(Collectors.toList());
 
         long activeLoanCount = loans.stream()
-                .filter(l -> LoanStatusEnum.DISBURRSED.getCode().equals(l.getStatus())
+                .filter(l -> LoanStatusEnum.DISBURSED.getCode().equals(l.getStatus())
                         || LoanStatusEnum.OVERDUE.getCode().equals(l.getStatus()))
                 .count();
 
         BigDecimal outstandingAmount = loans.stream()
-                .filter(l -> LoanStatusEnum.DISBURRSED.getCode().equals(l.getStatus())
+                .filter(l -> LoanStatusEnum.DISBURSED.getCode().equals(l.getStatus())
                         || LoanStatusEnum.OVERDUE.getCode().equals(l.getStatus()))
                 .map(l -> l.getAmount() == null ? BigDecimal.ZERO : l.getAmount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -220,16 +232,44 @@ public class InternalLoanController implements LoanApi {
     public LoanUserSummaryItem getUserLoanSummary(Long userId) {
         List<Loan> loans = loanMapper.selectList(new QueryWrapper<Loan>()
                 .eq("user_id", userId)
-                .in("status", LoanStatusEnum.DISBURRSED.getCode(), LoanStatusEnum.REPAID.getCode(),
+                .in("status", LoanStatusEnum.DISBURSED.getCode(), LoanStatusEnum.REPAID.getCode(),
                         LoanStatusEnum.OVERDUE.getCode()));
         BigDecimal totalAmount = loans.stream()
                 .map(l -> l.getAmount() == null ? BigDecimal.ZERO : l.getAmount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         long activeCount = loans.stream()
-                .filter(l -> LoanStatusEnum.DISBURRSED.getCode().equals(l.getStatus())
+                .filter(l -> LoanStatusEnum.DISBURSED.getCode().equals(l.getStatus())
                         || LoanStatusEnum.OVERDUE.getCode().equals(l.getStatus()))
                 .count();
         return new LoanUserSummaryItem(userId, loans.size(), totalAmount, (int) activeCount);
+    }
+
+    @Override
+    public Map<Long, LoanUserSummaryItem> listUserLoanSummaries(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<Long, List<Loan>> byUser = loanMapper.selectList(
+                        new QueryWrapper<Loan>()
+                                .in("user_id", userIds)
+                                .in("status", LoanStatusEnum.DISBURSED.getCode(),
+                                        LoanStatusEnum.REPAID.getCode(), LoanStatusEnum.OVERDUE.getCode()))
+                .stream()
+                .collect(Collectors.groupingBy(Loan::getUserId));
+        return byUser.entrySet().stream().collect(Collectors.toMap(
+                Map.Entry::getKey,
+                e -> {
+                    List<Loan> loans = e.getValue();
+                    BigDecimal totalAmount = loans.stream()
+                            .map(l -> l.getAmount() == null ? BigDecimal.ZERO : l.getAmount())
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    long activeCount = loans.stream()
+                            .filter(l -> LoanStatusEnum.DISBURSED.getCode().equals(l.getStatus())
+                                    || LoanStatusEnum.OVERDUE.getCode().equals(l.getStatus()))
+                            .count();
+                    return new LoanUserSummaryItem(e.getKey(), loans.size(), totalAmount, (int) activeCount);
+                },
+                (a, b) -> a));
     }
 
     @Override
