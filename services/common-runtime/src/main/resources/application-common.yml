@@ -14,7 +14,8 @@ spring:
       driver-class-name: com.mysql.cj.jdbc.Driver
       hikari:
         connection-timeout: 30000
-        maximum-pool-size: 10
+        maximum-pool-size: 4
+        minimum-idle: 1
     # 从数据源 - credit_data_db（Python同步的风控数据）
     credit:
       jdbc-url: ${CREDIT_DB_URL:jdbc:mysql://47.109.109.231:3306/credit_data_db?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
@@ -23,7 +24,8 @@ spring:
       driver-class-name: com.mysql.cj.jdbc.Driver
       hikari:
         connection-timeout: 30000
-        maximum-pool-size: 5
+        maximum-pool-size: 2
+        minimum-idle: 1
 
   # 邮件服务器配置
   mail:
