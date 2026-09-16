@@ -2,20 +2,16 @@ package org.example.risklendpro.user.system;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.dto.OperationLogItem;
+import org.example.risklendpro.user.client.LoanAdminQueryClient;
+import org.example.risklendpro.user.client.RiskAdminQueryClient;
 import org.example.risklendpro.user.entity.Admin;
-import org.example.risklendpro.loan.entity.LimitAdjustLog;
-import org.example.risklendpro.loan.entity.Loan;
-import org.example.risklendpro.risk.entity.RiskAssessment;
 import org.example.risklendpro.user.mapper.AdminMapper;
-import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
-import org.example.risklendpro.loan.mapper.LoanMapper;
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.user.admin.AdminCreateRequest;
 import org.example.risklendpro.user.admin.AdminUpdateRequest;
 import org.example.risklendpro.user.system.SystemConfigUpdateRequest;
 import org.example.risklendpro.user.system.AdminSystemService;
 import org.example.risklendpro.common.admin.AdminDateHelper;
-import org.example.risklendpro.common.admin.AdminEntityMapper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +29,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
@@ -53,11 +48,9 @@ public class AdminSystemServiceImpl implements AdminSystemService {
     @Autowired
     private AdminMapper adminMapper;
     @Autowired
-    private LimitAdjustLogMapper limitAdjustLogMapper;
+    private LoanAdminQueryClient loanAdminQueryClient;
     @Autowired
-    private LoanMapper loanMapper;
-    @Autowired
-    private RiskAssessmentMapper riskAssessmentMapper;
+    private RiskAdminQueryClient riskAdminQueryClient;
     @Autowired
     private PasswordEncoder passwordEncoder;
 
@@ -133,24 +126,23 @@ public class AdminSystemServiceImpl implements AdminSystemService {
         Date start = AdminDateHelper.parseDateStart(startDate);
         Date end = AdminDateHelper.parseDateEnd(endDate);
 
-        for (LimitAdjustLog log : limitAdjustLogMapper.selectList(new QueryWrapper<LimitAdjustLog>().orderByDesc("adjust_time"))) {
-            if (!inRange(log.getAdjustTime(), start, end)) {
+        for (OperationLogItem log : loanAdminQueryClient.listCreditAdjustLogs()) {
+            if (!inRange(log.createTime(), start, end)) {
                 continue;
             }
-            all.add(logEntry("CREDIT", "额度调整", log.getOperatorId(), log.getReason(), log.getAdjustTime()));
+            all.add(operationLogEntry(log));
         }
-        for (Loan loan : loanMapper.selectList(new QueryWrapper<Loan>().isNotNull("approve_time").orderByDesc("approve_time"))) {
-            if (!inRange(loan.getApproveTime(), start, end)) {
+        for (OperationLogItem log : loanAdminQueryClient.listLoanApprovalLogs()) {
+            if (!inRange(log.createTime(), start, end)) {
                 continue;
             }
-            all.add(logEntry("LOAN", "贷款审批", loan.getOperatorId(), loan.getRejectReason(), loan.getApproveTime()));
+            all.add(operationLogEntry(log));
         }
-        for (RiskAssessment ra : riskAssessmentMapper.selectList(
-                new QueryWrapper<RiskAssessment>().isNotNull("approval_time").orderByDesc("approval_time"))) {
-            if (!inRange(ra.getApprovalTime(), start, end)) {
+        for (OperationLogItem log : riskAdminQueryClient.listRiskApprovalLogs()) {
+            if (!inRange(log.createTime(), start, end)) {
                 continue;
             }
-            all.add(logEntry("RISK", "风控终审", ra.getOperatorId(), ra.getAuditRemark(), ra.getApprovalTime()));
+            all.add(operationLogEntry(log));
         }
 
         if (module != null && !module.isBlank()) {
@@ -255,18 +247,21 @@ public class AdminSystemServiceImpl implements AdminSystemService {
         }
     }
 
-    private Map<String, Object> logEntry(String module, String action, Long operatorId, String detail, Date time) {
+    private Map<String, Object> operationLogEntry(OperationLogItem log) {
+        long time = log.createTime() != null ? log.createTime() : System.currentTimeMillis();
         Map<String, Object> item = new HashMap<>();
-        item.put("id", module + "-" + (time != null ? time.getTime() : UUID.randomUUID().toString()));
-        item.put("module", module);
-        item.put("action", action);
-        item.put("operatorId", operatorId);
-        Admin admin = operatorId != null && operatorId > 0 ? adminMapper.selectById(operatorId) : null;
-        item.put("operatorName", AdminEntityMapper.resolveOperatorLabel(
-                operatorId, admin != null ? admin.getUsername() : null));
-        item.put("detail", detail != null ? detail : "");
-        item.put("createTime", AdminDateHelper.formatDateTime(time));
+        item.put("id", log.module() + "-" + time);
+        item.put("module", log.module());
+        item.put("action", log.action());
+        item.put("operatorId", log.operatorId());
+        item.put("operatorName", log.operatorName() != null ? log.operatorName() : "System");
+        item.put("detail", log.detail() != null ? log.detail() : "");
+        item.put("createTime", AdminDateHelper.formatDateTime(new Date(time)));
         return item;
+    }
+
+    private boolean inRange(Long time, Date start, Date end) {
+        return time != null && inRange(new Date(time), start, end);
     }
 
     private boolean inRange(Date time, Date start, Date end) {

@@ -49,7 +49,8 @@ public class InternalRiskController implements RiskDecisionApi {
                 assessment.getSysDecision(),
                 assessment.getTotalScore(),
                 assessment.getCreditLimit(),
-                Boolean.TRUE.equals(assessment.getIsFinal())
+                Boolean.TRUE.equals(assessment.getIsFinal()),
+                assessment.getIdCard()
         );
     }
 

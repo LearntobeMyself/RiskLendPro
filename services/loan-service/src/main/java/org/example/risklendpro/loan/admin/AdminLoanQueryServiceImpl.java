@@ -2,19 +2,18 @@ package org.example.risklendpro.loan.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.example.risklendpro.user.entity.Admin;
+import org.example.risklendpro.api.dto.AdminProfile;
+import org.example.risklendpro.api.dto.RiskAssessmentSummary;
+import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
-import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
-import org.example.risklendpro.user.mapper.AdminMapper;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
+import org.example.risklendpro.loan.client.RiskServiceClient;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.loan.borrow.BatchLoanApproveRequest;
 import org.example.risklendpro.loan.borrow.LoanApproveRequest;
 import org.example.risklendpro.loan.admin.AdminLoanQueryService;
@@ -41,15 +40,13 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
     @Autowired
     private LoanMapper loanMapper;
     @Autowired
-    private UserMapper userMapper;
-    @Autowired
-    private AdminMapper adminMapper;
-    @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
     @Autowired
-    private RiskAssessmentMapper riskAssessmentMapper;
-    @Autowired
     private RepaymentPlanMapper repaymentPlanMapper;
+    @Autowired
+    private UserServiceClient userServiceClient;
+    @Autowired
+    private RiskServiceClient riskServiceClient;
     @Autowired
     private AdminLoanOpsService adminLoanOpsService;
     @Autowired
@@ -61,18 +58,18 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         if (loan == null) {
             throw new RuntimeException("贷款申请不存在");
         }
-        User user = userMapper.selectById(loan.getUserId());
+        UserSummary user = userServiceClient.getUser(loan.getUserId());
         UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
                 new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId()));
-        RiskAssessment assessment = AdminEntityMapper.findLatestFinalAssessment(riskAssessmentMapper, loan.getUserId());
+        RiskAssessmentSummary assessment = riskServiceClient.getLatestFinalAssessment(loan.getUserId());
 
         Map<String, Object> data = new HashMap<>();
         data.put("loanId", loan.getLoanId());
         data.put("userId", loan.getUserId());
         if (user != null) {
-            data.put("userName", user.getRealName());
-            data.put("phone", user.getPhoneNumber());
-            data.put("idCard", user.getIdCard());
+            data.put("userName", user.realName());
+            data.put("phone", user.phoneNumber());
+            data.put("idCard", user.idCard());
         }
         data.put("amount", loan.getAmount());
         data.put("termMonths", loan.getTermMonths());
@@ -82,8 +79,8 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         data.put("status", loan.getStatus());
         data.put("applyTime", AdminDateHelper.formatDateTime(loan.getApplyTime()));
         if (assessment != null) {
-            data.put("creditScore", assessment.getTotalScore());
-            data.put("riskReportId", assessment.getApplyId());
+            data.put("creditScore", assessment.totalScore());
+            data.put("riskReportId", assessment.assessmentId());
         }
         if (creditLimit != null) {
             data.put("currentLimit", creditLimit.getTotalLimit());
@@ -130,16 +127,16 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         Page<Loan> result = loanMapper.selectPage(pageInfo, qw);
         List<Map<String, Object>> list = new ArrayList<>();
         for (Loan loan : result.getRecords()) {
-            User user = userMapper.selectById(loan.getUserId());
-            Admin reviewer = loan.getOperatorId() != null ? adminMapper.selectById(loan.getOperatorId()) : null;
+            UserSummary user = userServiceClient.getUser(loan.getUserId());
+            AdminProfile reviewer = loan.getOperatorId() != null ? userServiceClient.getAdmin(loan.getOperatorId()) : null;
             String recordStatus = LoanStatusEnum.REJECTED.getCode().equals(loan.getStatus()) ? "REJECTED" : "APPROVED";
             Map<String, Object> item = new HashMap<>();
             item.put("id", loan.getLoanId() + "-" + AdminDateHelper.formatDateTime(loan.getApproveTime()).replaceAll("[^0-9]", ""));
             item.put("loanId", loan.getLoanId());
             item.put("userId", loan.getUserId());
             item.put("reviewerId", loan.getOperatorId() != null ? loan.getOperatorId() : 1L);
-            item.put("reviewerName", reviewer != null ? reviewer.getUsername() : "admin");
-            item.put("applicantName", user != null ? user.getRealName() : "未知");
+            item.put("reviewerName", reviewer != null ? reviewer.username() : "admin");
+            item.put("applicantName", user != null ? user.realName() : "未知");
             item.put("status", recordStatus);
             item.put("comment", loan.getRejectReason() != null ? loan.getRejectReason() : "审批通过");
             item.put("createTime", AdminDateHelper.formatDateTime(loan.getApproveTime()));
@@ -169,9 +166,9 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
             throw new RuntimeException("借款记录不存在");
         }
         Map<String, Object> item = buildRecordItem(loan);
-        User user = userMapper.selectById(loan.getUserId());
+        UserSummary user = userServiceClient.getUser(loan.getUserId());
         if (user != null) {
-            item.put("idCard", user.getIdCard());
+            item.put("idCard", user.idCard());
         }
         item.put("repaymentMethod", loan.getRepaymentMethod());
         RepaymentPlan plan = repaymentPlanMapper.selectOne(
@@ -261,12 +258,11 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
             qw.lt("disbursement_time", end);
         }
         if (userName != null && !userName.isBlank()) {
-            List<User> users = userMapper.selectList(
-                    new QueryWrapper<User>().like("real_name", userName));
-            if (users.isEmpty()) {
+            List<Long> userIds = userServiceClient.searchUserIdsByName(userName);
+            if (userIds.isEmpty()) {
                 qw.eq("user_id", -1);
             } else {
-                qw.in("user_id", users.stream().map(User::getId).toList());
+                qw.in("user_id", userIds);
             }
         }
         qw.orderByDesc("disbursement_time");
@@ -274,14 +270,14 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
     }
 
     private Map<String, Object> buildRecordItem(Loan loan) {
-        User user = userMapper.selectById(loan.getUserId());
+        UserSummary user = userServiceClient.getUser(loan.getUserId());
         RepaymentPlan plan = repaymentPlanMapper.selectOne(
                 new QueryWrapper<RepaymentPlan>().eq("loan_id", loan.getLoanId()).last("LIMIT 1"));
         Map<String, Object> item = new HashMap<>();
         item.put("loanId", loan.getLoanId());
         item.put("userId", loan.getUserId());
-        item.put("userName", user != null ? user.getRealName() : "未知");
-        item.put("phone", user != null ? user.getPhoneNumber() : "");
+        item.put("userName", user != null ? user.realName() : "未知");
+        item.put("phone", user != null ? user.phoneNumber() : "");
         item.put("loanAmount", loan.getAmount());
         item.put("loanTerm", loan.getTermMonths());
         item.put("interestRate", AdminEntityMapper.toInterestRatePercent(loan.getInterestRate()));

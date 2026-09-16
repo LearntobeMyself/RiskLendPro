@@ -13,6 +13,7 @@ public record CreditLimitSnapshot(
         BigDecimal overdueAmount,
         boolean hasOverdue,
         BigDecimal behaviorScore,
+        Long bScoreUpdatedAt,
         boolean bCardEnabled,
         Long lastUpdateTime
 ) {

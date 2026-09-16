@@ -2,6 +2,7 @@ package org.example.risklendpro.loan.client;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.risklendpro.api.contract.LoanApi;
+import org.example.risklendpro.api.dto.BCardRepaymentSnapshot;
 import org.example.risklendpro.api.dto.CreditBehaviorUpsertCommand;
 import org.example.risklendpro.api.dto.CreditLimitGrantCommand;
 import org.example.risklendpro.api.dto.CreditLimitSnapshot;
@@ -53,6 +54,31 @@ public class InternalLoanController implements LoanApi {
             return null;
         }
         return toSnapshot(limit);
+    }
+
+    @Override
+    public CreditLimitSnapshot ensureCreditLimit(Long userId) {
+        UserCreditLimit limit = findLimit(userId);
+        if (limit == null) {
+            limit = new UserCreditLimit();
+            limit.setUserId(userId);
+            limit.setTotalLimit(BigDecimal.ZERO);
+            limit.setUsedLimit(BigDecimal.ZERO);
+            limit.setRemainingLimit(BigDecimal.ZERO);
+            limit.setOverdueAmount(BigDecimal.ZERO);
+            limit.setHasOverdue(false);
+            limit.setBCardEnabled(false);
+            limit.setLastUpdateTime(new Date());
+            userCreditLimitMapper.insert(limit);
+        }
+        return toSnapshot(limit);
+    }
+
+    @Override
+    public List<CreditLimitSnapshot> listBCardLimits() {
+        return userCreditLimitMapper.selectList(
+                new QueryWrapper<UserCreditLimit>().eq("b_card_enabled", true)
+        ).stream().map(this::toSnapshot).toList();
     }
 
     @Override
@@ -188,8 +214,10 @@ public class InternalLoanController implements LoanApi {
 
     @Override
     public LoanUserSummaryItem getUserLoanSummary(Long userId) {
-        List<Loan> loans = loanMapper.selectList(
-                new QueryWrapper<Loan>().eq("user_id", userId));
+        List<Loan> loans = loanMapper.selectList(new QueryWrapper<Loan>()
+                .eq("user_id", userId)
+                .in("status", LoanStatusEnum.DISBURRSED.getCode(), LoanStatusEnum.REPAID.getCode(),
+                        LoanStatusEnum.OVERDUE.getCode()));
         BigDecimal totalAmount = loans.stream()
                 .map(l -> l.getAmount() == null ? BigDecimal.ZERO : l.getAmount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -198,6 +226,103 @@ public class InternalLoanController implements LoanApi {
                         || LoanStatusEnum.OVERDUE.getCode().equals(l.getStatus()))
                 .count();
         return new LoanUserSummaryItem(userId, loans.size(), totalAmount, (int) activeCount);
+    }
+
+    @Override
+    public BCardRepaymentSnapshot getBCardRepaymentMonitor(Long userId) {
+        List<RepaymentPlan> plans = repaymentPlanMapper.selectList(
+                new QueryWrapper<RepaymentPlan>().eq("user_id", userId));
+        LocalDate today = LocalDate.now();
+        int activePlanCount = 0;
+        RepaymentPlan bestPlan = null;
+        RepaymentRecord bestRecord = null;
+        Integer daysToDue = null;
+        int bestPriority = Integer.MAX_VALUE;
+        for (RepaymentPlan plan : plans) {
+            if ("COMPLETED".equals(plan.getStatus())) {
+                continue;
+            }
+            activePlanCount++;
+            RepaymentRecord record = resolveFocusRecord(plan.getPlanId(), plan.getCurrentPeriod());
+            if (record == null || record.getDueDate() == null) {
+                continue;
+            }
+            int d = (int) ChronoUnit.DAYS.between(today, toLocalDate(record.getDueDate()));
+            int priority = planUrgencyPriority(plan, record, d);
+            if (bestPlan == null
+                    || priority < bestPriority
+                    || (priority == bestPriority && (daysToDue == null || d < daysToDue))) {
+                bestPriority = priority;
+                daysToDue = d;
+                bestPlan = plan;
+                bestRecord = record;
+            }
+        }
+        return new BCardRepaymentSnapshot(
+                userId,
+                activePlanCount,
+                bestPlan != null ? bestPlan.getPlanId() : null,
+                bestPlan != null ? bestPlan.getStatus() : null,
+                bestPlan != null ? bestPlan.getOverdueLevel() : null,
+                bestPlan != null ? bestPlan.getOverdueDays() : null,
+                bestRecord != null && bestRecord.getDueDate() != null ? bestRecord.getDueDate().getTime() : null,
+                bestRecord != null ? bestRecord.getPeriod() : null,
+                bestRecord != null ? bestRecord.getStatus() : null,
+                daysToDue
+        );
+    }
+
+    /** 当期已还清时推进到首个未还期次，避免误报逾期。 */
+    private RepaymentRecord resolveFocusRecord(Long planId, Integer currentPeriod) {
+        if (planId == null || currentPeriod == null) {
+            return null;
+        }
+        RepaymentRecord current = repaymentRecordMapper.selectOne(
+                new QueryWrapper<RepaymentRecord>()
+                        .eq("plan_id", planId)
+                        .eq("period", currentPeriod));
+        if (current != null && !isRepaidRecord(current)) {
+            return current;
+        }
+        List<RepaymentRecord> records = repaymentRecordMapper.selectList(
+                new QueryWrapper<RepaymentRecord>()
+                        .eq("plan_id", planId)
+                        .orderByAsc("period"));
+        for (RepaymentRecord record : records) {
+            if (!isRepaidRecord(record)) {
+                return record;
+            }
+        }
+        return current;
+    }
+
+    private static boolean isRepaidRecord(RepaymentRecord record) {
+        String status = record.getStatus();
+        return "COMPLETED".equals(status) || "PAID".equals(status) || "SETTLED".equals(status);
+    }
+
+    /** 还款计划紧迫度：数值越小越优先展示。 */
+    private static int planUrgencyPriority(RepaymentPlan plan, RepaymentRecord record, int daysToDue) {
+        if (plan != null && "OVERDUE".equals(plan.getStatus())) {
+            return 0;
+        }
+        if (record != null && "OVERDUE".equals(record.getStatus())) {
+            return 0;
+        }
+        if (daysToDue < 0) {
+            return 0;
+        }
+        if (daysToDue == 0) {
+            return 1;
+        }
+        if (daysToDue <= 3) {
+            return 2;
+        }
+        return 3;
+    }
+
+    private static LocalDate toLocalDate(Date date) {
+        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
     }
 
     private UserCreditLimit findLimit(Long userId) {
@@ -214,6 +339,7 @@ public class InternalLoanController implements LoanApi {
                 limit.getOverdueAmount(),
                 Boolean.TRUE.equals(limit.getHasOverdue()),
                 limit.getBScore(),
+                limit.getBScoreUpdatedAt() == null ? null : limit.getBScoreUpdatedAt().getTime(),
                 Boolean.TRUE.equals(limit.getBCardEnabled()),
                 limit.getLastUpdateTime() == null ? null : limit.getLastUpdateTime().getTime()
         );

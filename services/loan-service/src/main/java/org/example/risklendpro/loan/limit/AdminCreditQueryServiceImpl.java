@@ -2,16 +2,16 @@ package org.example.risklendpro.loan.limit;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.dto.AdminProfile;
+import org.example.risklendpro.api.dto.CreditLimitSnapshot;
+import org.example.risklendpro.api.dto.RiskAssessmentSummary;
+import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.LimitAdjustLog;
-import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
-import org.example.risklendpro.user.entity.Admin;
 import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
-import org.example.risklendpro.user.mapper.AdminMapper;
+import org.example.risklendpro.loan.client.RiskServiceClient;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.loan.limit.BatchCreditAdjustRequest;
 import org.example.risklendpro.loan.limit.LimitAdjustRequest;
 import org.example.risklendpro.loan.limit.LimitAdjustResponse;
@@ -36,12 +36,9 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
     @Autowired
-    private UserMapper userMapper;
-
+    private RiskServiceClient riskServiceClient;
     @Autowired
-    private AdminMapper adminMapper;
-    @Autowired
-    private RiskAssessmentMapper riskAssessmentMapper;
+    private UserServiceClient userServiceClient;
     @Autowired
     private LimitAdjustLogMapper limitAdjustLogMapper;
     @Autowired
@@ -86,13 +83,13 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
             List<UserCreditLimit> allLimits = userCreditLimitMapper.selectList(qw);
             List<Map<String, Object>> filtered = new ArrayList<>();
             for (UserCreditLimit limit : allLimits) {
-                User user = userMapper.selectById(limit.getUserId());
-                if (!AdminEntityMapper.matchesCreditLimitStatus(status, user, limit)) {
+                UserSummary user = userServiceClient.getUser(limit.getUserId());
+                CreditLimitSnapshot snapshot = toSnapshot(limit);
+                if (!AdminEntityMapper.matchesCreditLimitStatus(status, user, snapshot)) {
                     continue;
                 }
-                RiskAssessment assessment = AdminEntityMapper.findLatestFinalAssessment(
-                        riskAssessmentMapper, limit.getUserId());
-                filtered.add(AdminEntityMapper.toCreditLimitItem(user, limit, assessment));
+                RiskAssessmentSummary assessment = riskServiceClient.getLatestFinalAssessment(limit.getUserId());
+                filtered.add(AdminEntityMapper.toCreditLimitItem(user, snapshot, assessment));
             }
             int from = Math.max(0, (page - 1) * size);
             int to = Math.min(filtered.size(), from + size);
@@ -104,10 +101,10 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
         Page<UserCreditLimit> result = userCreditLimitMapper.selectPage(pageInfo, qw);
         List<Map<String, Object>> list = new ArrayList<>();
         for (UserCreditLimit limit : result.getRecords()) {
-            User user = userMapper.selectById(limit.getUserId());
-            RiskAssessment assessment = AdminEntityMapper.findLatestFinalAssessment(
-                    riskAssessmentMapper, limit.getUserId());
-            list.add(AdminEntityMapper.toCreditLimitItem(user, limit, assessment));
+            UserSummary user = userServiceClient.getUser(limit.getUserId());
+            CreditLimitSnapshot snapshot = toSnapshot(limit);
+            RiskAssessmentSummary assessment = riskServiceClient.getLatestFinalAssessment(limit.getUserId());
+            list.add(AdminEntityMapper.toCreditLimitItem(user, snapshot, assessment));
         }
         return AdminPageHelper.toListPage(list, result.getTotal());
     }
@@ -118,14 +115,22 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
         if (!hasUserName && !hasPhone) {
             return null;
         }
-        QueryWrapper<User> userQw = new QueryWrapper<>();
-        if (hasUserName) {
-            userQw.like("real_name", userName);
-        }
-        if (hasPhone) {
-            userQw.like("phone_number", phone);
-        }
-        return userMapper.selectList(userQw).stream().map(User::getId).toList();
+        return userServiceClient.searchUserIds(userName, phone);
+    }
+
+    private CreditLimitSnapshot toSnapshot(UserCreditLimit limit) {
+        return new CreditLimitSnapshot(
+                limit.getUserId(),
+                limit.getTotalLimit(),
+                limit.getUsedLimit(),
+                limit.getRemainingLimit(),
+                limit.getOverdueAmount(),
+                Boolean.TRUE.equals(limit.getHasOverdue()),
+                limit.getBScore(),
+                limit.getBScoreUpdatedAt() == null ? null : limit.getBScoreUpdatedAt().getTime(),
+                Boolean.TRUE.equals(limit.getBCardEnabled()),
+                limit.getLastUpdateTime() == null ? null : limit.getLastUpdateTime().getTime()
+        );
     }
 
     @Override
@@ -180,10 +185,10 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
             item.put("newLimit", log.getNewLimit());
             item.put("reason", log.getReason());
             item.put("operatorId", log.getOperatorId());
-            Admin admin = log.getOperatorId() != null && log.getOperatorId() > 0
-                    ? adminMapper.selectById(log.getOperatorId()) : null;
+            AdminProfile admin = log.getOperatorId() != null && log.getOperatorId() > 0
+                    ? userServiceClient.getAdmin(log.getOperatorId()) : null;
             item.put("operatorName", AdminEntityMapper.resolveOperatorLabel(
-                    log.getOperatorId(), admin != null ? admin.getUsername() : null));
+                    log.getOperatorId(), admin != null ? admin.username() : null));
             item.put("adjustTime", AdminDateHelper.formatDateTime(log.getAdjustTime()));
             return item;
         }).toList();

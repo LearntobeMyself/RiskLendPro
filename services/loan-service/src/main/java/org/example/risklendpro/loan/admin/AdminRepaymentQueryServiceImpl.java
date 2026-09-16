@@ -2,14 +2,14 @@ package org.example.risklendpro.loan.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.loan.repay.RepaymentReminderRequest;
 import org.example.risklendpro.loan.repay.RepaymentReportRequest;
 import org.example.risklendpro.loan.admin.AdminRepaymentQueryService;
@@ -42,7 +42,7 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
     @Autowired
     private LoanMapper loanMapper;
     @Autowired
-    private UserMapper userMapper;
+    private UserServiceClient userServiceClient;
     @Autowired
     private EmailUtil emailUtil;
     @Autowired
@@ -90,11 +90,11 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
             qw.eq("status", status);
         }
         if (userName != null && !userName.isBlank()) {
-            List<User> users = userMapper.selectList(new QueryWrapper<User>().like("real_name", userName));
-            if (users.isEmpty()) {
+            List<Long> userIds = userServiceClient.searchUserIdsByName(userName);
+            if (userIds.isEmpty()) {
                 qw.eq("user_id", -1);
             } else {
-                qw.in("user_id", users.stream().map(User::getId).toList());
+                qw.in("user_id", userIds);
             }
         }
         qw.orderByDesc("create_time");
@@ -174,12 +174,12 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
             qw.lt("repayment_date", end);
         }
         if (userName != null && !userName.isBlank()) {
-            List<User> users = userMapper.selectList(new QueryWrapper<User>().like("real_name", userName));
-            if (users.isEmpty()) {
+            List<Long> userIds = userServiceClient.searchUserIdsByName(userName);
+            if (userIds.isEmpty()) {
                 return AdminPageHelper.toListPage(List.of(), 0);
             }
             List<Long> loanIds = loanMapper.selectList(new QueryWrapper<Loan>()
-                    .in("user_id", users.stream().map(User::getId).toList()))
+                    .in("user_id", userIds))
                     .stream().map(Loan::getLoanId).toList();
             if (loanIds.isEmpty()) {
                 return AdminPageHelper.toListPage(List.of(), 0);
@@ -191,11 +191,11 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
         List<Map<String, Object>> list = new ArrayList<>();
         for (RepaymentRecord record : result.getRecords()) {
             Loan loan = loanMapper.selectById(record.getLoanId());
-            User user = loan != null ? userMapper.selectById(loan.getUserId()) : null;
+            UserSummary user = loan != null ? userServiceClient.getUser(loan.getUserId()) : null;
             Map<String, Object> item = new HashMap<>();
             item.put("id", record.getRecordId());
             item.put("loanId", record.getLoanId());
-            item.put("userName", user != null ? user.getRealName() : "未知");
+            item.put("userName", user != null ? user.realName() : "未知");
             item.put("repayDate", AdminDateHelper.formatDate(record.getRepaymentDate()));
             item.put("repayAmount", record.getActualAmount());
             item.put("repayType", "银行卡");
@@ -213,11 +213,11 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
         Page<RepaymentPlan> result = repaymentPlanMapper.selectPage(pageInfo, qw);
         List<Map<String, Object>> list = new ArrayList<>();
         for (RepaymentPlan plan : result.getRecords()) {
-            User user = userMapper.selectById(plan.getUserId());
+            UserSummary user = userServiceClient.getUser(plan.getUserId());
             Map<String, Object> item = new HashMap<>();
             item.put("id", plan.getPlanId());
             item.put("loanId", plan.getLoanId());
-            item.put("userName", user != null ? user.getRealName() : "未知");
+            item.put("userName", user != null ? user.realName() : "未知");
             item.put("overdueAmount", plan.getRemainingAmount());
             item.put("overdueDays", plan.getOverdueDays());
             item.put("overdueDate", AdminDateHelper.formatDate(plan.getUpdateTime()));
@@ -231,13 +231,13 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
 
     @Override
     public Map<String, Object> sendReminder(RepaymentReminderRequest request) {
-        User user = userMapper.selectById(request.getUserId());
+        UserSummary user = userServiceClient.getUser(request.getUserId());
         if (user == null) {
             throw new RuntimeException("用户不存在");
         }
         String message = request.getMessage() != null ? request.getMessage() : "您有一笔还款即将到期，请及时处理";
-        if (user.getEmail() != null) {
-            emailUtil.sendSimpleEmail(user.getEmail(), "【RiskLendPro】还款提醒", message);
+        if (user.email() != null) {
+            emailUtil.sendSimpleEmail(user.email(), "【RiskLendPro】还款提醒", message);
         }
         return Map.of(
                 "reminderId", "REM" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
@@ -271,7 +271,7 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
     }
 
     private Map<String, Object> toPlanMap(RepaymentPlan plan) {
-        User user = userMapper.selectById(plan.getUserId());
+        UserSummary user = userServiceClient.getUser(plan.getUserId());
         Loan loan = loanMapper.selectById(plan.getLoanId());
         List<RepaymentRecord> planRecords = repaymentRecordMapper.selectList(
                 new QueryWrapper<RepaymentRecord>().eq("plan_id", plan.getPlanId()));
@@ -282,7 +282,7 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
         map.put("planId", plan.getPlanId());
         map.put("loanId", plan.getLoanId());
         map.put("userId", plan.getUserId());
-        map.put("userName", user != null ? user.getRealName() : "未知");
+        map.put("userName", user != null ? user.realName() : "未知");
         map.put("totalAmount", plan.getTotalAmount());
         map.put("principalAmount", AdminEntityMapper.sumPrincipal(planRecords));
         map.put("interestAmount", AdminEntityMapper.sumInterest(planRecords));

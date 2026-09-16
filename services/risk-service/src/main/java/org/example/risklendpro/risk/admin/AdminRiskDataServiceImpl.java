@@ -2,13 +2,13 @@ package org.example.risklendpro.risk.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.dto.CreditLimitSnapshot;
+import org.example.risklendpro.api.dto.UserSummary;
+import org.example.risklendpro.risk.client.LoanServiceClient;
+import org.example.risklendpro.risk.client.UserServiceClient;
 import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.user.entity.User;
-import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.risk.credit.UserExternalFeatures;
 import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.risk.credit.mapper.UserExternalFeaturesMapper;
 import org.example.risklendpro.risk.admin.AntiFraudHandleRequest;
 import org.example.risklendpro.risk.admin.AdminRiskDataService;
@@ -32,13 +32,13 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
     private final Map<String, Map<String, Object>> antiFraudHandleStore = new ConcurrentHashMap<>();
 
     @Autowired
-    private UserMapper userMapper;
-    @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
-    @Autowired
     private UserExternalFeaturesMapper userExternalFeaturesMapper;
+    @Autowired
+    private UserServiceClient userServiceClient;
+    @Autowired
+    private LoanServiceClient loanServiceClient;
     @Autowired
     private AdminExportHelper adminExportHelper;
     @Autowired
@@ -48,18 +48,17 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
 
     @Override
     public Map<String, Object> getOverview() {
-        long userCount = userMapper.selectCount(null);
+        long userCount = userServiceClient.countUsers();
         List<RiskAssessment> finals = riskAssessmentMapper.selectList(
                 new QueryWrapper<RiskAssessment>().eq("is_final", true));
         long scoreHigh = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() >= 80).count();
         long scoreMid = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() >= 60 && a.getTotalScore() < 80).count();
         long scoreLow = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() < 60).count();
 
-        List<UserCreditLimit> limits = userCreditLimitMapper.selectList(
-                new QueryWrapper<UserCreditLimit>().eq("b_card_enabled", true));
-        long bHigh = limits.stream().filter(l -> l.getBScore() != null && l.getBScore().doubleValue() >= 700).count();
-        long bMid = limits.stream().filter(l -> l.getBScore() != null && l.getBScore().doubleValue() >= 600 && l.getBScore().doubleValue() < 700).count();
-        long bLow = limits.stream().filter(l -> l.getBScore() == null || l.getBScore().doubleValue() < 600).count();
+        List<CreditLimitSnapshot> limits = loanServiceClient.listBCardLimits();
+        long bHigh = limits.stream().filter(l -> l.behaviorScore() != null && l.behaviorScore().doubleValue() >= 700).count();
+        long bMid = limits.stream().filter(l -> l.behaviorScore() != null && l.behaviorScore().doubleValue() >= 600 && l.behaviorScore().doubleValue() < 700).count();
+        long bLow = limits.stream().filter(l -> l.behaviorScore() == null || l.behaviorScore().doubleValue() < 600).count();
 
         Map<String, Object> data = new HashMap<>();
         data.put("totalUsers", userCount);
@@ -100,7 +99,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
 
     @Override
     public Map<String, Object> getUserRiskDetail(Long userId) {
-        User user = userMapper.selectById(userId);
+        UserSummary user = userServiceClient.getUser(userId);
         if (user == null) {
             throw new RuntimeException("用户不存在");
         }
@@ -108,7 +107,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
         if (assessment == null || assessment.getApplyId() == null) {
             Map<String, Object> data = new HashMap<>();
             data.put("userId", userId);
-            data.put("userName", user.getRealName());
+            data.put("userName", user.realName());
             data.put("hasRiskAssessment", false);
             appendExternalFeatures(data, user);
             return data;
@@ -116,7 +115,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
 
         Map<String, Object> data = new HashMap<>(adminRiskQueryService.getRiskReport(assessment.getApplyId()));
         data.put("userId", userId);
-        data.put("userName", user.getRealName());
+        data.put("userName", user.realName());
         appendExternalFeatures(data, user);
         data.put("reportDisplay", adminReportDisplayBuilder.build(data));
         return data;
@@ -139,11 +138,11 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
                         .last("LIMIT 1"));
     }
 
-    private void appendExternalFeatures(Map<String, Object> data, User user) {
-        if (user.getIdCard() == null) {
+    private void appendExternalFeatures(Map<String, Object> data, UserSummary user) {
+        if (user.idCard() == null) {
             return;
         }
-        UserExternalFeatures ext = userExternalFeaturesMapper.selectByIdCard(user.getIdCard());
+        UserExternalFeatures ext = userExternalFeaturesMapper.selectByIdCard(user.idCard());
         if (ext == null) {
             return;
         }
@@ -211,18 +210,18 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
     @Override
     public Map<String, Object> listMultiLoan(Integer page, Integer size, Integer minActiveLoans) {
         int threshold = minActiveLoans != null ? minActiveLoans : 2;
-        List<User> users = userMapper.selectList(null);
+        List<UserSummary> users = userServiceClient.listAllUsers();
         List<Map<String, Object>> matched = new ArrayList<>();
-        for (User user : users) {
-            if (user.getIdCard() == null) {
+        for (UserSummary user : users) {
+            if (user.idCard() == null) {
                 continue;
             }
-            UserExternalFeatures ext = userExternalFeaturesMapper.selectByIdCard(user.getIdCard());
+            UserExternalFeatures ext = userExternalFeaturesMapper.selectByIdCard(user.idCard());
             if (ext != null && ext.getActiveLoansCount() != null && ext.getActiveLoansCount() >= threshold) {
                 Map<String, Object> item = new HashMap<>();
-                item.put("userId", user.getId());
-                item.put("userName", user.getRealName());
-                item.put("idCard", user.getIdCard());
+                item.put("userId", user.id());
+                item.put("userName", user.realName());
+                item.put("idCard", user.idCard());
                 item.put("activeLoansCount", ext.getActiveLoansCount());
                 item.put("creditBureauMon", ext.getCreditBureauMon());
                 item.put("riskLevel", ext.getActiveLoansCount() >= 5 ? "HIGH" : "MEDIUM");

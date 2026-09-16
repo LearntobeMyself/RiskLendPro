@@ -26,6 +26,17 @@ public interface UserQueryApi {
     @GetMapping("/internal/users/search-by-name")
     List<Long> searchUserIdsByName(@RequestParam("name") String name);
 
+    /** 按姓名和/或手机号组合模糊查询用户 id（两个条件为空则返回空列表）。 */
+    @GetMapping("/internal/users/search")
+    List<Long> searchUserIds(@RequestParam(value = "name", required = false) String name,
+                             @RequestParam(value = "phone", required = false) String phone);
+
+    @GetMapping("/internal/users/count")
+    long countUsers();
+
+    @GetMapping("/internal/users/list")
+    List<UserSummary> listAllUsers();
+
     @GetMapping("/internal/admins/{adminId}")
     AdminProfile getAdmin(@PathVariable("adminId") Long adminId);
 

@@ -2,12 +2,12 @@ package org.example.risklendpro.risk.score;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.risklendpro.api.dto.CreditBehaviorUpsertCommand;
+import org.example.risklendpro.api.dto.CreditLimitSnapshot;
+import org.example.risklendpro.risk.client.LoanServiceClient;
 import org.example.risklendpro.risk.entity.UserBCardLog;
-import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.risk.credit.UserBehaviorFeatures;
 import org.example.risklendpro.risk.mapper.UserBCardLogMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.risk.credit.mapper.UserBehaviorFeaturesMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,10 +38,10 @@ public class BehaviorScoreService {
     private UserBehaviorFeaturesMapper userBehaviorFeaturesMapper;
 
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
+    private UserBCardLogMapper userBCardLogMapper;
 
     @Autowired
-    private UserBCardLogMapper userBCardLogMapper;
+    private LoanServiceClient loanServiceClient;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -50,11 +50,9 @@ public class BehaviorScoreService {
         if (userId == null) {
             return;
         }
-        UserCreditLimit limit = getOrCreateLimit(userId);
-        limit.setBCardEnabled(true);
-        recalculateInternal(userId, idCard, limit);
-        userCreditLimitMapper.updateById(limit);
-        log.info("B 卡已启动 userId={} finalBScore={}", userId, limit.getBScore());
+        loanServiceClient.ensureCreditLimit(userId);
+        recalculateInternal(userId, idCard, true);
+        log.info("B 卡已启动 userId={}", userId);
     }
 
     @Transactional
@@ -62,19 +60,16 @@ public class BehaviorScoreService {
         if (userId == null) {
             return;
         }
-        UserCreditLimit limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
-        if (limit == null || !Boolean.TRUE.equals(limit.getBCardEnabled())) {
+        CreditLimitSnapshot limit = loanServiceClient.getCreditLimit(userId);
+        if (limit == null || !limit.bCardEnabled()) {
             return;
         }
-        recalculateInternal(userId, null, limit);
-        userCreditLimitMapper.updateById(limit);
+        recalculateInternal(userId, null, null);
     }
 
     public boolean isBCardEnabled(Long userId) {
-        UserCreditLimit limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
-        return limit != null && Boolean.TRUE.equals(limit.getBCardEnabled());
+        CreditLimitSnapshot limit = loanServiceClient.getCreditLimit(userId);
+        return limit != null && limit.bCardEnabled();
     }
 
     public double resolveLimitMultiplier(double finalBScore) {
@@ -98,14 +93,14 @@ public class BehaviorScoreService {
         return 0.0;
     }
 
-    private void recalculateInternal(Long userId, String idCard, UserCreditLimit limit) {
+    private void recalculateInternal(Long userId, String idCard, Boolean bCardEnabled) {
         double base = computeBaseScore(idCard);
         BehaviorLiveFeatureService.LiveFeatures live = behaviorLiveFeatureService.aggregate(userId);
         double delta = live.computeDelta();
         double finalScore = clamp(base + delta);
 
-        limit.setBScore(BigDecimal.valueOf(finalScore));
-        limit.setBScoreUpdatedAt(new Date());
+        loanServiceClient.upsertBehaviorScore(
+                new CreditBehaviorUpsertCommand(userId, bCardEnabled, BigDecimal.valueOf(finalScore)));
 
         UserBCardLog cardLog = new UserBCardLog();
         cardLog.setUserId(userId);
@@ -145,24 +140,5 @@ public class BehaviorScoreService {
 
     private static double clamp(double score) {
         return Math.max(MIN_SCORE, Math.min(MAX_SCORE, Math.round(score * 10.0) / 10.0));
-    }
-
-    private UserCreditLimit getOrCreateLimit(Long userId) {
-        UserCreditLimit limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
-        if (limit != null) {
-            return limit;
-        }
-        limit = new UserCreditLimit();
-        limit.setUserId(userId);
-        limit.setTotalLimit(BigDecimal.ZERO);
-        limit.setUsedLimit(BigDecimal.ZERO);
-        limit.setRemainingLimit(BigDecimal.ZERO);
-        limit.setOverdueAmount(BigDecimal.ZERO);
-        limit.setHasOverdue(false);
-        limit.setBCardEnabled(false);
-        limit.setLastUpdateTime(new Date());
-        userCreditLimitMapper.insert(limit);
-        return limit;
     }
 }

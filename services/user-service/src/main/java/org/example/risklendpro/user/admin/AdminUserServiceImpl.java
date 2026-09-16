@@ -2,14 +2,12 @@ package org.example.risklendpro.user.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.example.risklendpro.loan.entity.Loan;
-import org.example.risklendpro.risk.entity.RiskAssessment;
+import org.example.risklendpro.api.dto.CreditLimitSnapshot;
+import org.example.risklendpro.api.dto.LoanUserSummaryItem;
+import org.example.risklendpro.api.dto.RiskAssessmentSummary;
+import org.example.risklendpro.user.client.LoanServiceClient;
+import org.example.risklendpro.user.client.RiskServiceClient;
 import org.example.risklendpro.user.entity.User;
-import org.example.risklendpro.loan.entity.UserCreditLimit;
-import org.example.risklendpro.loan.borrow.LoanStatusEnum;
-import org.example.risklendpro.loan.mapper.LoanMapper;
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.user.admin.AdminUserCreateRequest;
 import org.example.risklendpro.user.admin.AdminUserStatusRequest;
@@ -35,11 +33,9 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Autowired
     private UserMapper userMapper;
     @Autowired
-    private LoanMapper loanMapper;
+    private LoanServiceClient loanServiceClient;
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
-    @Autowired
-    private RiskAssessmentMapper riskAssessmentMapper;
+    private RiskServiceClient riskServiceClient;
     @Autowired
     private PasswordEncoder passwordEncoder;
     @Autowired
@@ -173,13 +169,9 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     private Map<String, Object> toUserListItem(User user) {
-        UserCreditLimit limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", user.getId()));
-        RiskAssessment assessment = AdminEntityMapper.findLatestFinalAssessment(riskAssessmentMapper, user.getId());
-        List<Loan> loans = loanMapper.selectList(new QueryWrapper<Loan>()
-                .eq("user_id", user.getId())
-                .in("status", LoanStatusEnum.DISBURRSED.getCode(), LoanStatusEnum.REPAID.getCode(),
-                        LoanStatusEnum.OVERDUE.getCode()));
+        CreditLimitSnapshot limit = loanServiceClient.getCreditLimit(user.getId());
+        RiskAssessmentSummary assessment = riskServiceClient.getLatestFinalAssessment(user.getId());
+        LoanUserSummaryItem loans = loanServiceClient.getUserLoanSummary(user.getId());
         return AdminEntityMapper.toUserListItem(user, limit, assessment, loans);
     }
 }

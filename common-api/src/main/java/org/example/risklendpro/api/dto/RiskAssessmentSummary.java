@@ -9,6 +9,7 @@ public record RiskAssessmentSummary(
         String systemDecision,
         Integer totalScore,
         BigDecimal approvedLimit,
-        boolean finalResult
+        boolean finalResult,
+        String idCard
 ) {
 }

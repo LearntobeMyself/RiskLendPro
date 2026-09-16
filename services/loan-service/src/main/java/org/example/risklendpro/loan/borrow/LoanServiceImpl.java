@@ -2,23 +2,22 @@ package org.example.risklendpro.loan.borrow;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.dto.RiskAssessmentSummary;
+import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.loan.borrow.LoanRequest;
 import org.example.risklendpro.loan.borrow.LoanResponse;
 import org.example.risklendpro.loan.borrow.LoanService;
 import org.example.risklendpro.loan.client.RiskServiceClient;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.repay.RepaymentCalculator;
 import org.springframework.beans.BeanUtils;
@@ -42,16 +41,10 @@ public class LoanServiceImpl implements LoanService {
     private UserCreditLimitMapper userCreditLimitMapper;
 
     @Autowired
-    private UserMapper userMapper;
-
-    @Autowired
     private RepaymentPlanMapper repaymentPlanMapper;
 
     @Autowired
     private RepaymentRecordMapper repaymentRecordMapper;
-
-    @Autowired
-    private RiskAssessmentMapper riskAssessmentMapper;
 
     @Autowired
     private EmailUtil emailUtil;
@@ -59,18 +52,15 @@ public class LoanServiceImpl implements LoanService {
     @Autowired
     private RiskServiceClient riskServiceClient;
 
+    @Autowired
+    private UserServiceClient userServiceClient;
+
     @Override
     @Transactional
     public LoanResponse requestLoan(Long userId, LoanRequest request) {
         // 1. 获取用户最新授信评估信息（用于获取身份证等必要信息）
-        RiskAssessment latestAssessment = riskAssessmentMapper.selectOne(
-            new QueryWrapper<RiskAssessment>()
-                .eq("user_id", userId)
-                .eq("is_final", true)
-                .orderByDesc("approval_time")
-                .last("LIMIT 1")
-        );
-        
+        RiskAssessmentSummary latestAssessment = riskServiceClient.getLatestFinalAssessment(userId);
+
         if (latestAssessment == null) {
             throw new RuntimeException("用户尚未完成授信评估，无法借款");
         }
@@ -132,7 +122,7 @@ public class LoanServiceImpl implements LoanService {
         // 6. 生成还款计划和还款记录（仅当自动审批通过时）
         if (loan.getAutoApproved()) {
             generateRepaymentPlan(loan, request.getRepaymentMethod());
-            riskServiceClient.activateBehaviorScore(userId, latestAssessment.getIdCard());
+            riskServiceClient.activateBehaviorScore(userId, latestAssessment.idCard());
         }
 
         // 7. 发送邮件通知
@@ -254,7 +244,7 @@ public class LoanServiceImpl implements LoanService {
      * 发送借款通知
      */
     private void sendLoanNotification(Long userId, LoanRequest request, BigDecimal remainingLimit, boolean autoApproved) {
-        User user = userMapper.selectById(userId);
+        UserSummary user = userServiceClient.getUser(userId);
         if (user == null) {
             return;
         }
@@ -262,15 +252,15 @@ public class LoanServiceImpl implements LoanService {
         if (autoApproved) {
             // 发送借款成功通知给用户
             emailUtil.sendLoanSuccessNotification(
-                    user.getEmail(),
-                    user.getRealName(),
+                    user.email(),
+                    user.realName(),
                     request.getAmount().toString()
             );
         } else {
             // 发送借款审批通知给用户
             emailUtil.sendLoanApprovalNotification(
-                    user.getEmail(),
-                    user.getRealName(),
+                    user.email(),
+                    user.realName(),
                     request.getAmount().toString(),
                     remainingLimit.toString()
             );

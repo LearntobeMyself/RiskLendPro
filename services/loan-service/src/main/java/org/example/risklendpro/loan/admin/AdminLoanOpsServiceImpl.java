@@ -2,6 +2,8 @@ package org.example.risklendpro.loan.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.dto.RiskOverviewCounts;
+import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.borrow.LoanApproveRequest;
 import org.example.risklendpro.loan.borrow.LoanApproveResponse;
@@ -17,11 +19,8 @@ import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.mapper.VintageDataMapper;
 import org.example.risklendpro.loan.repay.RepaymentCalculator;
-import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
-import org.example.risklendpro.user.entity.User;
-import org.example.risklendpro.user.mapper.UserMapper;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,13 +55,11 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     @Autowired
     private RepaymentRecordMapper repaymentRecordMapper;
     @Autowired
-    private UserMapper userMapper;
-    @Autowired
     private EmailUtil emailUtil;
     @Autowired
     private RiskServiceClient riskServiceClient;
     @Autowired
-    private RiskAssessmentMapper riskAssessmentMapper;
+    private UserServiceClient userServiceClient;
 
     public Map<String, Object> getVintageData() {
         List<VintageData> vintageDataList = vintageDataMapper.selectList(null);
@@ -165,10 +162,9 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     public Map<String, Object> getDashboardStats() {
         Map<String, Object> stats = new HashMap<>();
 
-        long totalApplications = riskAssessmentMapper.selectCount(null);
-        long pendingReview = riskAssessmentMapper.selectCount(
-                new QueryWrapper<RiskAssessment>().eq("status", "MANUAL_REVIEW")
-        );
+        RiskOverviewCounts riskOverview = riskServiceClient.getOverviewCounts();
+        long totalApplications = riskOverview.totalApplications();
+        long pendingReview = riskOverview.pendingReview();
 
         long totalDisbursedCount = loanMapper.selectCount(
                 new QueryWrapper<Loan>().eq("status", LoanStatusEnum.DISBURRSED.getCode())
@@ -211,11 +207,11 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             record.put("loanId", loan.getLoanId());
             record.put("userId", loan.getUserId());
 
-            User user = userMapper.selectById(loan.getUserId());
+            UserSummary user = userServiceClient.getUser(loan.getUserId());
             if (user != null) {
-                record.put("userName", user.getRealName());
-                record.put("phone", user.getPhoneNumber().replaceAll("(\\d{3})\\d{4}(\\d{4})", "$1****$2"));
-                record.put("idCard", user.getIdCard().replaceAll("(\\d{3})\\d{9}(\\d{4})", "$1*********$2"));
+                record.put("userName", user.realName());
+                record.put("phone", user.phoneNumber().replaceAll("(\\d{3})\\d{4}(\\d{4})", "$1****$2"));
+                record.put("idCard", user.idCard().replaceAll("(\\d{3})\\d{9}(\\d{4})", "$1*********$2"));
             } else {
                 record.put("userName", "未知用户");
                 record.put("phone", "未知");
@@ -252,7 +248,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             throw new RuntimeException("贷款申请不存在");
         }
 
-        User user = userMapper.selectById(loan.getUserId());
+        UserSummary user = userServiceClient.getUser(loan.getUserId());
 
         LoanApproveResponse response = new LoanApproveResponse();
         response.setLoanId(loan.getLoanId());
@@ -286,8 +282,8 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
 
             generateRepaymentPlan(loan, loan.getRepaymentMethod());
 
-            if (user != null && user.getIdCard() != null) {
-                riskServiceClient.activateBehaviorScore(loan.getUserId(), user.getIdCard());
+            if (user != null && user.idCard() != null) {
+                riskServiceClient.activateBehaviorScore(loan.getUserId(), user.idCard());
             }
 
             response.setStatus(LoanStatusEnum.DISBURRSED.getCode());
@@ -295,8 +291,8 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
 
             if (user != null) {
                 emailUtil.sendLoanSuccessNotification(
-                        user.getEmail(),
-                        user.getRealName(),
+                        user.email(),
+                        user.realName(),
                         loan.getAmount().toString()
                 );
             }
@@ -313,8 +309,8 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
 
             if (user != null) {
                 emailUtil.sendLoanRejectNotification(
-                        user.getEmail(),
-                        user.getRealName(),
+                        user.email(),
+                        user.realName(),
                         loan.getAmount().toString(),
                         request.getApproveRemark()
                 );

@@ -6,12 +6,12 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.risklendpro.common.cache.RedisCacheUtil;
 import org.example.risklendpro.common.mail.EmailUtil;
-import org.example.risklendpro.loan.entity.RepaymentPlan;
-import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.loan.entity.UserCreditLimit;
-import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
-import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
+import org.example.risklendpro.api.dto.BCardRepaymentSnapshot;
+import org.example.risklendpro.api.dto.CreditLimitGrantCommand;
+import org.example.risklendpro.api.dto.CreditLimitSnapshot;
+import org.example.risklendpro.api.dto.UserSummary;
+import org.example.risklendpro.risk.client.LoanServiceClient;
+import org.example.risklendpro.risk.client.UserServiceClient;
 import org.example.risklendpro.risk.assessment.RiskAssessmentRequest;
 import org.example.risklendpro.risk.assessment.StatusEnum;
 import org.example.risklendpro.risk.entity.RiskAssessment;
@@ -21,8 +21,6 @@ import org.example.risklendpro.risk.mapper.UserBCardLogMapper;
 import org.example.risklendpro.risk.score.BehaviorScoreService;
 import org.example.risklendpro.risk.score.CreditScoreEngine;
 import org.example.risklendpro.risk.supplement.SupplementMaterialService;
-import org.example.risklendpro.user.entity.User;
-import org.example.risklendpro.user.mapper.UserMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,9 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -51,9 +47,9 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
+    private UserServiceClient userServiceClient;
     @Autowired
-    private UserMapper userMapper;
+    private LoanServiceClient loanServiceClient;
     @Autowired
     private EmailUtil emailUtil;
     @Autowired
@@ -68,10 +64,6 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
     private BehaviorScoreService behaviorScoreService;
     @Autowired
     private UserBCardLogMapper userBCardLogMapper;
-    @Autowired
-    private RepaymentPlanMapper repaymentPlanMapper;
-    @Autowired
-    private RepaymentRecordMapper repaymentRecordMapper;
 
     public Page<Map<String, Object>> getRiskList(Integer page, Integer size, String status) {
         Page<RiskAssessment> pageInfo = new Page<>(page, size);
@@ -444,8 +436,11 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
             assessment.setStatus("FINAL_PASS");
             assessment.setCreditLimit(request.getCreditLimit());
 
-            // 创建或更新用户额度记录
-            createOrUpdateUserCreditLimit(assessment.getUserId(), request.getCreditLimit());
+            // 通过 loan-service 创建或更新用户额度记录
+            loanServiceClient.grantCreditLimit(new CreditLimitGrantCommand(
+                    assessment.getUserId(),
+                    assessment.getApplyId(),
+                    request.getCreditLimit()));
         } else {
             assessment.setStatus("FINAL_REJECT");
         }
@@ -463,95 +458,38 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         supplementMaterialService.clearSupplementOnFinalApproval(request.getApplyId());
     }
 
-    /**
-     * 创建或更新用户额度记录
-     */
-    private void createOrUpdateUserCreditLimit(Long userId, BigDecimal creditLimit) {
-        QueryWrapper<UserCreditLimit> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("user_id", userId);
-        UserCreditLimit existingLimit = userCreditLimitMapper.selectOne(queryWrapper);
-
-        if (existingLimit == null) {
-            // 创建新的额度记录
-            UserCreditLimit newLimit = new UserCreditLimit();
-            newLimit.setUserId(userId);
-            newLimit.setTotalLimit(creditLimit);
-            newLimit.setUsedLimit(BigDecimal.ZERO);
-            newLimit.setRemainingLimit(creditLimit);
-            newLimit.setOverdueAmount(BigDecimal.ZERO);
-            newLimit.setHasOverdue(false);
-            newLimit.setLastUpdateTime(new Date());
-            userCreditLimitMapper.insert(newLimit);
-        } else {
-            // 更新现有额度记录
-            existingLimit.setTotalLimit(creditLimit);
-            existingLimit.setRemainingLimit(creditLimit.subtract(existingLimit.getUsedLimit()));
-            existingLimit.setLastUpdateTime(new Date());
-            userCreditLimitMapper.updateById(existingLimit);
-        }
-    }
-
     public List<Map<String, Object>> getBCardMonitor() {
-        List<UserCreditLimit> limits = userCreditLimitMapper.selectList(
-                new QueryWrapper<UserCreditLimit>().eq("b_card_enabled", true));
+        List<CreditLimitSnapshot> limits = loanServiceClient.listBCardLimits();
         if (limits.isEmpty()) {
             return Collections.emptyList();
         }
 
-        LocalDate today = LocalDate.now();
         List<Map<String, Object>> rows = new ArrayList<>();
 
-        for (UserCreditLimit limit : limits) {
-            User user = userMapper.selectById(limit.getUserId());
+        for (CreditLimitSnapshot limit : limits) {
+            UserSummary user = userServiceClient.getUser(limit.userId());
             if (user == null) {
                 continue;
             }
 
             UserBCardLog latestLog = userBCardLogMapper.selectOne(
                     new QueryWrapper<UserBCardLog>()
-                            .eq("user_id", limit.getUserId())
+                            .eq("user_id", limit.userId())
                             .orderByDesc("id")
                             .last("LIMIT 1"));
 
-            RepaymentPlan bestPlan = null;
-            RepaymentRecord bestRecord = null;
-            Integer daysToDue = null;
-            int activePlanCount = 0;
-            int bestPriority = Integer.MAX_VALUE;
-
-            List<RepaymentPlan> plans = repaymentPlanMapper.selectList(
-                    new QueryWrapper<RepaymentPlan>().eq("user_id", limit.getUserId()));
-            for (RepaymentPlan plan : plans) {
-                if ("COMPLETED".equals(plan.getStatus())) {
-                    continue;
-                }
-                activePlanCount++;
-                RepaymentRecord record = resolveFocusRecord(plan.getPlanId(), plan.getCurrentPeriod());
-                if (record == null || record.getDueDate() == null) {
-                    continue;
-                }
-                int d = (int) ChronoUnit.DAYS.between(today, toLocalDate(record.getDueDate()));
-                int priority = planUrgencyPriority(plan, record, d);
-                if (bestPlan == null
-                        || priority < bestPriority
-                        || (priority == bestPriority && (daysToDue == null || d < daysToDue))) {
-                    bestPriority = priority;
-                    daysToDue = d;
-                    bestPlan = plan;
-                    bestRecord = record;
-                }
-            }
+            BCardRepaymentSnapshot snapshot = loanServiceClient.getBCardRepaymentMonitor(limit.userId());
 
             Map<String, Object> row = new HashMap<>();
-            row.put("userId", limit.getUserId());
-            row.put("userName", user.getRealName());
-            row.put("phone", maskPhone(user.getPhoneNumber()));
-            row.put("idCard", maskIdCard(user.getIdCard()));
-            row.put("bScore", limit.getBScore());
-            row.put("bScoreUpdatedAt", limit.getBScoreUpdatedAt());
-            row.put("totalLimit", limit.getTotalLimit());
-            row.put("hasOverdue", Boolean.TRUE.equals(limit.getHasOverdue()));
-            row.put("activePlanCount", activePlanCount);
+            row.put("userId", limit.userId());
+            row.put("userName", user.realName());
+            row.put("phone", maskPhone(user.phoneNumber()));
+            row.put("idCard", maskIdCard(user.idCard()));
+            row.put("bScore", limit.behaviorScore());
+            row.put("bScoreUpdatedAt", limit.bScoreUpdatedAt());
+            row.put("totalLimit", limit.totalLimit());
+            row.put("hasOverdue", limit.hasOverdue());
+            row.put("activePlanCount", snapshot.activePlanCount());
 
             if (latestLog != null) {
                 row.put("baseScore", latestLog.getBaseScore());
@@ -559,24 +497,24 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
                 row.put("liveFeatures", parseLiveFeaturesJson(latestLog.getLiveFeatures()));
             }
 
-            if (bestPlan != null) {
-                row.put("planId", bestPlan.getPlanId());
-                row.put("planStatus", bestPlan.getStatus());
-                row.put("overdueLevel", bestPlan.getOverdueLevel());
-                row.put("overdueDays", bestPlan.getOverdueDays());
+            if (snapshot.planId() != null) {
+                row.put("planId", snapshot.planId());
+                row.put("planStatus", snapshot.planStatus());
+                row.put("overdueLevel", snapshot.overdueLevel());
+                row.put("overdueDays", snapshot.overdueDays());
             }
-            if (bestRecord != null) {
-                row.put("dueDate", bestRecord.getDueDate());
-                row.put("currentPeriod", bestRecord.getPeriod());
-                row.put("recordStatus", bestRecord.getStatus());
+            if (snapshot.currentPeriod() != null) {
+                row.put("dueDate", snapshot.dueDate());
+                row.put("currentPeriod", snapshot.currentPeriod());
+                row.put("recordStatus", snapshot.recordStatus());
             }
-            row.put("daysToDue", daysToDue);
+            row.put("daysToDue", snapshot.daysToDue());
 
-            String watchLevel = resolveWatchLevel(bestPlan, bestRecord, daysToDue);
+            String watchLevel = resolveWatchLevel(snapshot);
             row.put("watchLevel", watchLevel);
 
-            double multiplier = limit.getBScore() != null
-                    ? behaviorScoreService.resolveLimitMultiplier(limit.getBScore().doubleValue())
+            double multiplier = limit.behaviorScore() != null
+                    ? behaviorScoreService.resolveLimitMultiplier(limit.behaviorScore().doubleValue())
                     : 1.0;
             row.put("limitMultiplier", multiplier);
 
@@ -593,22 +531,20 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         if (userId == null) {
             throw new RuntimeException("userId 不能为空");
         }
-        UserCreditLimit limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
-        if (limit == null || !Boolean.TRUE.equals(limit.getBCardEnabled())) {
+        CreditLimitSnapshot limit = loanServiceClient.getCreditLimit(userId);
+        if (limit == null || !limit.bCardEnabled()) {
             throw new RuntimeException("用户未启用 B 卡");
         }
         behaviorScoreService.recalculate(userId);
-        limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
+        limit = loanServiceClient.getCreditLimit(userId);
 
         Map<String, Object> result = new HashMap<>();
         result.put("userId", userId);
-        result.put("bScore", limit.getBScore());
-        result.put("bScoreUpdatedAt", limit.getBScoreUpdatedAt());
-        if (limit.getBScore() != null) {
+        result.put("bScore", limit.behaviorScore());
+        result.put("bScoreUpdatedAt", limit.bScoreUpdatedAt());
+        if (limit.behaviorScore() != null) {
             result.put("limitMultiplier",
-                    behaviorScoreService.resolveLimitMultiplier(limit.getBScore().doubleValue()));
+                    behaviorScoreService.resolveLimitMultiplier(limit.behaviorScore().doubleValue()));
         }
         return result;
     }
@@ -627,33 +563,14 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         }
     }
 
-    /** 还款计划紧迫度：数值越小越优先展示 */
-    private static int planUrgencyPriority(RepaymentPlan plan, RepaymentRecord record, int daysToDue) {
-        if (plan != null && "OVERDUE".equals(plan.getStatus())) {
-            return 0;
-        }
-        if (record != null && "OVERDUE".equals(record.getStatus())) {
-            return 0;
-        }
-        if (daysToDue < 0) {
-            return 0;
-        }
-        if (daysToDue == 0) {
-            return 1;
-        }
-        if (daysToDue <= 3) {
-            return 2;
-        }
-        return 3;
-    }
-
-    private static String resolveWatchLevel(RepaymentPlan plan, RepaymentRecord record, Integer daysToDue) {
-        if (plan != null && "OVERDUE".equals(plan.getStatus())) {
+    private static String resolveWatchLevel(BCardRepaymentSnapshot snapshot) {
+        if (snapshot.planId() != null && "OVERDUE".equals(snapshot.planStatus())) {
             return "OVERDUE";
         }
-        if (record != null && "OVERDUE".equals(record.getStatus())) {
+        if (snapshot.currentPeriod() != null && "OVERDUE".equals(snapshot.recordStatus())) {
             return "OVERDUE";
         }
+        Integer daysToDue = snapshot.daysToDue();
         if (daysToDue == null) {
             return "NORMAL";
         }
@@ -680,39 +597,6 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
             case "NORMAL" -> 3;
             default -> 99;
         };
-    }
-
-    private static LocalDate toLocalDate(Date date) {
-        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-    }
-
-    /** 监控展示用：当期已还清时推进到首个未还期次，避免误报逾期 */
-    private RepaymentRecord resolveFocusRecord(Long planId, Integer currentPeriod) {
-        if (planId == null || currentPeriod == null) {
-            return null;
-        }
-        RepaymentRecord current = repaymentRecordMapper.selectOne(
-                new QueryWrapper<RepaymentRecord>()
-                        .eq("plan_id", planId)
-                        .eq("period", currentPeriod));
-        if (current != null && !isRepaidRecord(current)) {
-            return current;
-        }
-        List<RepaymentRecord> records = repaymentRecordMapper.selectList(
-                new QueryWrapper<RepaymentRecord>()
-                        .eq("plan_id", planId)
-                        .orderByAsc("period"));
-        for (RepaymentRecord record : records) {
-            if (!isRepaidRecord(record)) {
-                return record;
-            }
-        }
-        return current;
-    }
-
-    private static boolean isRepaidRecord(RepaymentRecord record) {
-        String status = record.getStatus();
-        return "COMPLETED".equals(status) || "PAID".equals(status) || "SETTLED".equals(status);
     }
 
     private static String maskPhone(String phone) {

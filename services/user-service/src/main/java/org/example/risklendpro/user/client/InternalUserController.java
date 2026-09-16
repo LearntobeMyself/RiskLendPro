@@ -56,11 +56,34 @@ public class InternalUserController implements UserQueryApi {
 
     @Override
     public List<Long> searchUserIdsByName(String name) {
-        return userMapper.selectList(
-                        new QueryWrapper<User>().like("real_name", name)
-                ).stream()
-                .map(User::getId)
-                .toList();
+        return searchUserIds(name, null);
+    }
+
+    @Override
+    public List<Long> searchUserIds(String name, String phone) {
+        boolean hasName = name != null && !name.isBlank();
+        boolean hasPhone = phone != null && !phone.isBlank();
+        if (!hasName && !hasPhone) {
+            return List.of();
+        }
+        QueryWrapper<User> qw = new QueryWrapper<>();
+        if (hasName) {
+            qw.like("real_name", name);
+        }
+        if (hasPhone) {
+            qw.like("phone_number", phone);
+        }
+        return userMapper.selectList(qw).stream().map(User::getId).toList();
+    }
+
+    @Override
+    public long countUsers() {
+        return userMapper.selectCount(null);
+    }
+
+    @Override
+    public List<UserSummary> listAllUsers() {
+        return userMapper.selectList(null).stream().map(this::toSummary).toList();
     }
 
     @Override

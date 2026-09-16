@@ -1,16 +1,16 @@
 package org.example.risklendpro.loan.repay;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -30,9 +30,6 @@ public class RepaymentScheduleTask {
     private RepaymentRecordMapper repaymentRecordMapper;
 
     @Autowired
-    private UserMapper userMapper;
-
-    @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
 
     @Autowired
@@ -40,6 +37,9 @@ public class RepaymentScheduleTask {
 
     @Autowired
     private RiskServiceClient riskServiceClient;
+
+    @Autowired
+    private UserServiceClient userServiceClient;
 
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd");
 
@@ -87,7 +87,7 @@ public class RepaymentScheduleTask {
             return;
         }
 
-        User user = userMapper.selectById(plan.getUserId());
+        UserSummary user = userServiceClient.getUser(plan.getUserId());
         if (user == null) {
             return;
         }
@@ -151,26 +151,26 @@ public class RepaymentScheduleTask {
         return "COMPLETED".equals(status) || "PAID".equals(status) || "SETTLED".equals(status);
     }
 
-    private void sendReminderEmail(User user, RepaymentRecord record, Date dueDate) {
+    private void sendReminderEmail(UserSummary user, RepaymentRecord record, Date dueDate) {
         emailUtil.sendRepaymentReminderNotification(
-                user.getEmail(),
-                user.getRealName(),
+                user.email(),
+                user.realName(),
                 record.getPeriod(),
                 record.getAmount().toString(),
                 DATE_FORMAT.format(dueDate)
         );
     }
 
-    private void sendDueTodayEmail(User user, RepaymentRecord record) {
+    private void sendDueTodayEmail(UserSummary user, RepaymentRecord record) {
         emailUtil.sendRepaymentDueTodayNotification(
-                user.getEmail(),
-                user.getRealName(),
+                user.email(),
+                user.realName(),
                 record.getPeriod(),
                 record.getAmount().toString()
         );
     }
 
-    private void handleOverdue(RepaymentPlan plan, RepaymentRecord record, User user, int overdueDays, boolean isFirstOverdue) {
+    private void handleOverdue(RepaymentPlan plan, RepaymentRecord record, UserSummary user, int overdueDays, boolean isFirstOverdue) {
         if (!"OVERDUE".equals(record.getStatus())) {
             record.setStatus("OVERDUE");
             repaymentRecordMapper.updateById(record);
@@ -188,8 +188,8 @@ public class RepaymentScheduleTask {
 
         if (isFirstOverdue) {
             emailUtil.sendOverdueNotification(
-                    user.getEmail(),
-                    user.getRealName(),
+                    user.email(),
+                    user.realName(),
                     record.getPeriod(),
                     overdueDays,
                     record.getAmount().toString()

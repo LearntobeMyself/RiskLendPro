@@ -1,15 +1,16 @@
 package org.example.risklendpro.risk.assessment;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.risklendpro.api.dto.CreditLimitGrantCommand;
+import org.example.risklendpro.api.dto.UserAssessmentStatusCommand;
+import org.example.risklendpro.api.dto.UserSummary;
+import org.example.risklendpro.risk.client.LoanServiceClient;
+import org.example.risklendpro.risk.client.UserServiceClient;
 import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.user.entity.User;
-import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.risk.credit.ScoringRules;
 import org.example.risklendpro.risk.credit.UserExternalFeatures;
 import org.example.risklendpro.risk.assessment.StatusEnum;
 import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.risk.credit.mapper.ScoringRulesMapper;
 import org.example.risklendpro.risk.credit.mapper.UserExternalFeaturesMapper;
 import org.example.risklendpro.risk.assessment.RiskAssessmentRequest;
@@ -52,19 +53,19 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     private RiskAssessmentMapper riskAssessmentMapper;
 
     @Autowired
-    private UserMapper userMapper;
-
-    @Autowired
     private UserExternalFeaturesMapper userExternalFeaturesMapper;
 
     @Autowired
     private ScoringRulesMapper scoringRulesMapper;
 
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
+    private CreditScoreEngine creditScoreEngine;
 
     @Autowired
-    private CreditScoreEngine creditScoreEngine;
+    private UserServiceClient userServiceClient;
+
+    @Autowired
+    private LoanServiceClient loanServiceClient;
 
     @Autowired
     private EmailUtil emailUtil;
@@ -78,12 +79,12 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     @Override
     @Transactional
     public RiskAssessmentResponse submit(Long userId, RiskAssessmentRequest request) {
-        User user = userMapper.selectById(userId);
+        UserSummary user = userServiceClient.getUser(userId);
         if (user == null) {
             throw new RuntimeException("用户不存在");
         }
 
-        if (!user.getIdCard().equals(request.getIdCard())) {
+        if (!user.idCard().equals(request.getIdCard())) {
             throw new RuntimeException("身份信息不一致，请使用本人身份信息申请");
         }
 
@@ -135,8 +136,8 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                 riskAssessmentMapper.updateById(riskAssessment);
             }
 
-            user.setAssessmentStatus(StatusEnum.SYSTEM_REJECT.getValue());
-            userMapper.updateById(user);
+            userServiceClient.updateAssessmentStatus(
+                    new UserAssessmentStatusCommand(userId, StatusEnum.SYSTEM_REJECT.getValue()));
 
             RiskAssessmentResponse response = new RiskAssessmentResponse();
             response.setApplyId(applyId);
@@ -175,8 +176,8 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                 riskAssessmentMapper.updateById(riskAssessment);
             }
 
-            user.setAssessmentStatus(StatusEnum.SYSTEM_REJECT.getValue());
-            userMapper.updateById(user);
+            userServiceClient.updateAssessmentStatus(
+                    new UserAssessmentStatusCommand(userId, StatusEnum.SYSTEM_REJECT.getValue()));
 
             RiskAssessmentResponse response = new RiskAssessmentResponse();
             response.setApplyId(applyId);
@@ -345,32 +346,13 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         }
 
         if (StatusEnum.FINAL_PASS.getValue().equals(riskAssessment.getStatus()) && riskAssessment.getCreditLimit() != null) {
-            UserCreditLimit existingLimit = userCreditLimitMapper.selectOne(
-                    new QueryWrapper<UserCreditLimit>().eq("user_id", riskAssessment.getUserId())
-            );
+            loanServiceClient.grantCreditLimit(new CreditLimitGrantCommand(
+                    riskAssessment.getUserId(),
+                    riskAssessment.getApplyId(),
+                    riskAssessment.getCreditLimit()));
 
-            if (existingLimit == null) {
-                UserCreditLimit creditLimit = new UserCreditLimit();
-                creditLimit.setUserId(riskAssessment.getUserId());
-                creditLimit.setTotalLimit(riskAssessment.getCreditLimit());
-                creditLimit.setUsedLimit(BigDecimal.ZERO);
-                creditLimit.setRemainingLimit(riskAssessment.getCreditLimit());
-                creditLimit.setOverdueAmount(BigDecimal.ZERO);
-                creditLimit.setHasOverdue(false);
-                creditLimit.setLastUpdateTime(new Date());
-                userCreditLimitMapper.insert(creditLimit);
-            } else {
-                existingLimit.setTotalLimit(riskAssessment.getCreditLimit());
-                existingLimit.setRemainingLimit(riskAssessment.getCreditLimit().subtract(existingLimit.getUsedLimit()));
-                existingLimit.setLastUpdateTime(new Date());
-                userCreditLimitMapper.updateById(existingLimit);
-            }
-
-            User user = userMapper.selectById(riskAssessment.getUserId());
-            if (user != null) {
-                user.setAssessmentStatus("APPROVED");
-                userMapper.updateById(user);
-            }
+            userServiceClient.updateAssessmentStatus(
+                    new UserAssessmentStatusCommand(riskAssessment.getUserId(), "APPROVED"));
         }
 
         RiskAssessmentResultResponse response = new RiskAssessmentResultResponse();
@@ -679,21 +661,19 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     }
 
     private void syncUserAssessmentStatus(RiskAssessment riskAssessment) {
-        User user = userMapper.selectById(riskAssessment.getUserId());
-        if (user == null) {
-            return;
-        }
         String status = riskAssessment.getStatus();
+        String target;
         if (StatusEnum.FINAL_PASS.getValue().equals(status)) {
-            user.setAssessmentStatus(StatusEnum.FINAL_PASS.getValue());
+            target = StatusEnum.FINAL_PASS.getValue();
         } else if (StatusEnum.MANUAL_REVIEW.getValue().equals(status)) {
-            user.setAssessmentStatus(StatusEnum.MANUAL_REVIEW.getValue());
+            target = StatusEnum.MANUAL_REVIEW.getValue();
         } else if (StatusEnum.SYSTEM_REJECT.getValue().equals(status)) {
-            user.setAssessmentStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            target = StatusEnum.SYSTEM_REJECT.getValue();
         } else {
-            user.setAssessmentStatus(StatusEnum.WAITING.getValue());
+            target = StatusEnum.WAITING.getValue();
         }
-        userMapper.updateById(user);
+        userServiceClient.updateAssessmentStatus(
+                new UserAssessmentStatusCommand(riskAssessment.getUserId(), target));
     }
 
     /** 风控报告写入 Redis，TTL 见 {@link RedisCacheUtil#CACHE_EXPIRE_DAYS}（1 天）。 */
@@ -882,11 +862,11 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     }
 
     private void sendNotification(RiskAssessment riskAssessment, String status, String creditLimit) {
-        User user = userMapper.selectById(riskAssessment.getUserId());
+        UserSummary user = userServiceClient.getUser(riskAssessment.getUserId());
         if (user != null) {
             emailUtil.sendRiskAssessmentNotification(
-                    user.getEmail(),
-                    user.getRealName(),
+                    user.email(),
+                    user.realName(),
                     status,
                     creditLimit
             );
