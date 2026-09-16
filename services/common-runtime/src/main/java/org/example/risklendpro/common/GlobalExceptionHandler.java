@@ -21,24 +21,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RuntimeException.class)
     public CommonResponse<Void> handleRuntimeException(RuntimeException e) {
         log.error("RuntimeException: {}", e.getMessage(), e);
-        return CommonResponse.fail(400, formatErrorMessage(e));
+        // 业务异常信息直接返回给用户（可控、非敏感），仅取最外层 message
+        return CommonResponse.fail(400, e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)
     public CommonResponse<Void> handleException(Exception e) {
         log.error("Exception: {}", e.getMessage(), e);
-        return CommonResponse.fail(500, "服务器内部错误: " + formatErrorMessage(e));
-    }
-
-    private static String formatErrorMessage(Throwable e) {
-        String message = e.getMessage();
-        if (message == null || message.isBlank()) {
-            message = e.getClass().getSimpleName();
-        }
-        Throwable cause = e.getCause();
-        if (cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()) {
-            message = message + " (cause: " + cause.getMessage() + ")";
-        }
-        return message;
+        // 未预期异常：仅记录日志，对外返回固定文案，不泄漏内部细节
+        return CommonResponse.fail(500, "服务器内部错误");
     }
 }

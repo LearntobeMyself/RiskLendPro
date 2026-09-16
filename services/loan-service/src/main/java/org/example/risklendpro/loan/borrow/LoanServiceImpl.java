@@ -23,7 +23,9 @@ import org.example.risklendpro.loan.repay.RepaymentCalculator;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.Calendar;
@@ -55,29 +57,19 @@ public class LoanServiceImpl implements LoanService {
     @Autowired
     private UserServiceClient userServiceClient;
 
+    private final TransactionTemplate transactionTemplate;
+
+    public LoanServiceImpl(PlatformTransactionManager transactionManager) {
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
+
     @Override
-    @Transactional
     public LoanResponse requestLoan(Long userId, LoanRequest request) {
-        // 1. 获取用户最新授信评估信息（用于获取身份证等必要信息）
+        // 1. 获取用户最新授信评估信息（Feign 读取，放到事务外，避免持有 DB 连接）
         RiskAssessmentSummary latestAssessment = riskServiceClient.getLatestFinalAssessment(userId);
 
         if (latestAssessment == null) {
             throw new RuntimeException("用户尚未完成授信评估，无法借款");
-        }
-        
-        // 2. 检查用户是否有未处理逾期
-        checkOverdue(userId);
-
-        // 3. 检查用户是否有授信额度
-        UserCreditLimit creditLimit = getUserCreditLimit(userId);
-        if (creditLimit == null) {
-            throw new RuntimeException("用户尚未获得授信额度，无法借款");
-        }
-
-        // 7. 检查用户剩余额度
-        BigDecimal remainingLimit = creditLimit.getRemainingLimit();
-        if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("您的额度已用完，无法借款");
         }
 
         // 8. 检查借款金额是否有效
@@ -90,51 +82,77 @@ public class LoanServiceImpl implements LoanService {
             throw new RuntimeException("还款期限必须大于0");
         }
 
-        // 所有前置检查通过，开始创建贷款记录
-        // 6. 保存贷款记录
-        Loan loan = new Loan();
-        loan.setUserId(userId);
-        loan.setAmount(request.getAmount());
-        loan.setTermMonths(request.getTermMonths());
-        loan.setInterestRate(new BigDecimal("0.05"));
-        loan.setRepaymentMethod(request.getRepaymentMethod());
-        loan.setApplyTime(new Date());
-        loan.setCreateTime(new Date());
-        loan.setUpdateTime(new Date());
+        // DB 写操作统一放在一个事务内（含 FOR UPDATE 额度行锁）
+        final boolean[] autoApprovedRef = {false};
+        final BigDecimal[] remainingLimitRef = {BigDecimal.ZERO};
+        Loan loan = transactionTemplate.execute(status -> {
+            // 2. 检查用户是否有未处理逾期
+            checkOverdue(userId);
 
-        // 4. 根据额度判断处理方式
-        if (request.getAmount().compareTo(remainingLimit) <= 0) {
-            // 4.1 额度内借款，自动审批通过
-            loan.setStatus(LoanStatusEnum.DISBURRSED.getCode());
-            loan.setDisbursementTime(new Date());
-            loan.setAutoApproved(true);
-            
-            // 4.2 扣减额度
-            deductCreditLimit(creditLimit, request.getAmount());
-        } else {
-            // 4.3 额度外借款，需要审批
-            loan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
-            loan.setAutoApproved(false);
-        }
+            // 3. 检查用户是否有授信额度（FOR UPDATE 行锁）
+            UserCreditLimit creditLimit = getUserCreditLimit(userId);
+            if (creditLimit == null) {
+                throw new RuntimeException("用户尚未获得授信额度，无法借款");
+            }
 
-        loanMapper.insert(loan);
+            // 7. 检查用户剩余额度
+            BigDecimal remainingLimit = creditLimit.getRemainingLimit();
+            if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new RuntimeException("您的额度已用完，无法借款");
+            }
+            remainingLimitRef[0] = remainingLimit;
 
-        // 6. 生成还款计划和还款记录（仅当自动审批通过时）
-        if (loan.getAutoApproved()) {
-            generateRepaymentPlan(loan, request.getRepaymentMethod());
+            // 6. 保存贷款记录
+            Loan newLoan = new Loan();
+            newLoan.setUserId(userId);
+            newLoan.setAmount(request.getAmount());
+            newLoan.setTermMonths(request.getTermMonths());
+            newLoan.setInterestRate(new BigDecimal("0.05"));
+            newLoan.setRepaymentMethod(request.getRepaymentMethod());
+            newLoan.setApplyTime(new Date());
+            newLoan.setCreateTime(new Date());
+            newLoan.setUpdateTime(new Date());
+
+            // 4. 根据额度判断处理方式
+            if (request.getAmount().compareTo(remainingLimit) <= 0) {
+                // 4.1 额度内借款，自动审批通过
+                newLoan.setStatus(LoanStatusEnum.DISBURRSED.getCode());
+                newLoan.setDisbursementTime(new Date());
+                newLoan.setAutoApproved(true);
+
+                // 4.2 扣减额度
+                deductCreditLimit(creditLimit, request.getAmount());
+            } else {
+                // 4.3 额度外借款，需要审批
+                newLoan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
+                newLoan.setAutoApproved(false);
+            }
+
+            loanMapper.insert(newLoan);
+
+            // 6. 生成还款计划和还款记录（仅当自动审批通过时）
+            if (newLoan.getAutoApproved()) {
+                generateRepaymentPlan(newLoan, request.getRepaymentMethod());
+            }
+            autoApprovedRef[0] = Boolean.TRUE.equals(newLoan.getAutoApproved());
+            return newLoan;
+        });
+
+        // 事务已提交，再做外部副作用调用，避免持有 DB 连接跨 HTTP
+        if (autoApprovedRef[0]) {
             riskServiceClient.activateBehaviorScore(userId, latestAssessment.idCard());
         }
 
         // 7. 发送邮件通知
-        sendLoanNotification(userId, request, remainingLimit, loan.getAutoApproved());
+        sendLoanNotification(userId, request, remainingLimitRef[0], autoApprovedRef[0]);
 
         // 6. 构建响应
         LoanResponse response = new LoanResponse();
         BeanUtils.copyProperties(loan, response);
-        if (loan.getAutoApproved()) {
+        if (autoApprovedRef[0]) {
             response.setRemark("额度充足，自动审批通过");
         } else {
-            response.setRemark("借款金额超出剩余额度(" + remainingLimit + ")，请等待管理员审批");
+            response.setRemark("借款金额超出剩余额度(" + remainingLimitRef[0] + ")，请等待管理员审批");
         }
 
         return response;
@@ -216,11 +234,13 @@ public class LoanServiceImpl implements LoanService {
     }
 
     /**
-     * 获取用户信用额度
+     * 获取用户信用额度（FOR UPDATE 行锁，防止并发借款超额）
      */
     private UserCreditLimit getUserCreditLimit(Long userId) {
         return userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId)
+                new QueryWrapper<UserCreditLimit>()
+                        .eq("user_id", userId)
+                        .last("FOR UPDATE")
         );
     }
 
@@ -272,22 +292,7 @@ public class LoanServiceImpl implements LoanService {
      * 生成还款计划和还款记录
      */
     private void generateRepaymentPlan(Loan loan, String repaymentMethod) {
-        // 1. 创建还款计划
-        RepaymentPlan plan = new RepaymentPlan();
-        plan.setLoanId(loan.getLoanId());
-        plan.setUserId(loan.getUserId());
-        plan.setTotalAmount(loan.getAmount());
-        plan.setPaidAmount(BigDecimal.ZERO);
-        plan.setRemainingAmount(loan.getAmount());
-        plan.setTotalPeriods(loan.getTermMonths());
-        plan.setCurrentPeriod(1);
-        plan.setStatus("ACTIVE");
-        plan.setCreateTime(new Date());
-        plan.setUpdateTime(new Date());
-        
-        repaymentPlanMapper.insert(plan);
-        
-        // 2. 计算每期还款金额
+        // 1. 计算每期还款金额
         List<RepaymentCalculator.RepaymentDetail> details;
         switch (repaymentMethod) {
             case "等额本息":
@@ -305,8 +310,29 @@ public class LoanServiceImpl implements LoanService {
             default:
                 throw new RuntimeException("不支持的还款方式: " + repaymentMethod);
         }
-        
-        // 3. 创建还款记录
+
+        // 2. 总金额按【本金+利息】累计，避免本金/利息口径不一致
+        BigDecimal totalRepayable = BigDecimal.ZERO;
+        for (RepaymentCalculator.RepaymentDetail detail : details) {
+            totalRepayable = totalRepayable.add(detail.getAmount());
+        }
+
+        // 3. 创建还款计划
+        RepaymentPlan plan = new RepaymentPlan();
+        plan.setLoanId(loan.getLoanId());
+        plan.setUserId(loan.getUserId());
+        plan.setTotalAmount(totalRepayable);
+        plan.setPaidAmount(BigDecimal.ZERO);
+        plan.setRemainingAmount(totalRepayable);
+        plan.setTotalPeriods(loan.getTermMonths());
+        plan.setCurrentPeriod(1);
+        plan.setStatus("ACTIVE");
+        plan.setCreateTime(new Date());
+        plan.setUpdateTime(new Date());
+
+        repaymentPlanMapper.insert(plan);
+
+        // 4. 创建还款记录
         Date now = new Date();
         for (RepaymentCalculator.RepaymentDetail detail : details) {
             RepaymentRecord record = new RepaymentRecord();
@@ -317,16 +343,16 @@ public class LoanServiceImpl implements LoanService {
             record.setInterest(detail.getInterest());
             record.setAmount(detail.getAmount());
             record.setActualAmount(BigDecimal.ZERO);
-            
+
             // 计算到期日
             Calendar calendar = Calendar.getInstance();
             calendar.setTime(now);
             calendar.add(Calendar.MONTH, detail.getPeriod());
             record.setDueDate(calendar.getTime());
-            
+
             record.setStatus("PENDING");
             record.setCreateTime(now);
-            
+
             repaymentRecordMapper.insert(record);
         }
     }

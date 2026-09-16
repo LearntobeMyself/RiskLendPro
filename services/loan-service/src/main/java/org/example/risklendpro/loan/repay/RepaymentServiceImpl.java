@@ -57,11 +57,19 @@ public class RepaymentServiceImpl implements RepaymentService {
 
     @Override
     @Transactional
-    public RepaymentResponse executeRepayment(RepaymentExecuteRequest request) {
-        // 1. 查询还款计划
-        RepaymentPlan plan = repaymentPlanMapper.selectById(request.getPlanId());
+    public RepaymentResponse executeRepayment(Long userId, RepaymentExecuteRequest request) {
+        // 1. 查询还款计划（FOR UPDATE 行锁，防止并发重复还款）
+        RepaymentPlan plan = repaymentPlanMapper.selectOne(
+                new QueryWrapper<RepaymentPlan>()
+                        .eq("plan_id", request.getPlanId())
+                        .last("FOR UPDATE"));
         if (plan == null) {
             throw new RuntimeException("还款计划不存在");
+        }
+
+        // 1.1 越权校验：仅本人可操作自己的还款计划
+        if (!plan.getUserId().equals(userId)) {
+            throw new RuntimeException("无权操作该还款计划");
         }
 
         // 2. 查询该期还款记录
@@ -72,6 +80,18 @@ public class RepaymentServiceImpl implements RepaymentService {
 
         if (record == null) {
             throw new RuntimeException("还款记录不存在");
+        }
+
+        // 2.0 幂等保护：该期已结清则禁止重复操作
+        if ("COMPLETED".equals(record.getStatus())) {
+            throw new RuntimeException("该期已结清，请勿重复还款");
+        }
+
+        // 2.1 金额校验：仅允许足额还款，禁止部分/超额/零额
+        if (request.getAmount() == null
+                || request.getAmount().compareTo(BigDecimal.ZERO) <= 0
+                || request.getAmount().compareTo(record.getAmount()) != 0) {
+            throw new RuntimeException("还款金额必须等于当期应还金额，请一次性足额还款");
         }
 
         // 3. 执行还款
@@ -85,7 +105,8 @@ public class RepaymentServiceImpl implements RepaymentService {
         plan.setRemainingAmount(plan.getRemainingAmount().subtract(request.getAmount()));
         plan.setCurrentPeriod(plan.getCurrentPeriod() + 1);
 
-        if (plan.getRemainingAmount().compareTo(BigDecimal.ZERO) <= 0) {
+        if (plan.getRemainingAmount().compareTo(BigDecimal.ZERO) <= 0
+                && plan.getCurrentPeriod().compareTo(plan.getTotalPeriods()) >= 0) {
             plan.setStatus("COMPLETED");
         }
 
@@ -104,7 +125,16 @@ public class RepaymentServiceImpl implements RepaymentService {
     }
 
     @Override
-    public List<Object> getRepaymentRecords(Long planId, String status) {
+    public List<Object> getRepaymentRecords(Long userId, Long planId, String status) {
+        // 越权校验：仅本人可查看自己的还款记录
+        RepaymentPlan plan = repaymentPlanMapper.selectById(planId);
+        if (plan == null) {
+            throw new RuntimeException("还款计划不存在");
+        }
+        if (!plan.getUserId().equals(userId)) {
+            throw new RuntimeException("无权查看该还款记录");
+        }
+
         QueryWrapper<RepaymentRecord> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("plan_id", planId);
 

@@ -68,6 +68,9 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
         if (newRemainingLimit.compareTo(BigDecimal.ZERO) < 0) {
             throw new RuntimeException("新额度不能小于已用额度");
         }
+        if (newUsedLimit.compareTo(BigDecimal.ZERO) < 0) {
+            throw new RuntimeException("调整后的已用额度不能为负数");
+        }
 
         creditLimit.setTotalLimit(newLimit);
         creditLimit.setRemainingLimit(newRemainingLimit);

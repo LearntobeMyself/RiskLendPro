@@ -10,12 +10,16 @@ import org.example.risklendpro.user.auth.AuthService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Date;
 
 @Service
 public class AuthServiceImpl implements AuthService {
-    
+
+    private static final Logger log = LoggerFactory.getLogger(AuthServiceImpl.class);
+
     private final JwtConfig jwtConfig;
     private final PasswordEncoder passwordEncoder;
     private final UserMapper userMapper;
@@ -54,7 +58,7 @@ public class AuthServiceImpl implements AuthService {
         
         // 4. 保存用户到数据库
         userMapper.insert(user);
-        System.out.println("用户注册成功: " + request.getPhoneNumber());
+        log.info("用户注册成功，手机号: {}", maskPhone(request.getPhoneNumber()));
     }
     
     @Override
@@ -70,6 +74,11 @@ public class AuthServiceImpl implements AuthService {
             throw new RuntimeException("手机号或密码错误");
         }
         
+        // 2.1 校验账号状态
+        if (user.getAccountStatus() != null && !"ACTIVE".equals(user.getAccountStatus())) {
+            throw new RuntimeException("账号状态异常，已被禁用或冻结，请联系管理员");
+        }
+        
         // 3. 生成JWT令牌（包含角色信息）
         String token = jwtConfig.generateToken(user.getId().toString(), user.getRole());
         
@@ -81,5 +90,12 @@ public class AuthServiceImpl implements AuthService {
         response.setAssessmentStatus(user.getAssessmentStatus());
         
         return response;
+    }
+
+    private String maskPhone(String phone) {
+        if (phone == null || phone.length() < 7) {
+            return "***";
+        }
+        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
     }
 }

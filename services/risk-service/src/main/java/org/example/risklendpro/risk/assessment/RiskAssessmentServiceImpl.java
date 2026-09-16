@@ -49,6 +49,10 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
     private static final Logger log = LoggerFactory.getLogger(RiskAssessmentServiceImpl.class);
 
+    /** 信用分档位（须与 CreditScoreEngine 的 autoApprove/manualReview 阈值保持一致） */
+    private static final double AUTO_APPROVE_THRESHOLD = 720;
+    private static final double MANUAL_REVIEW_THRESHOLD = 580;
+
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
 
@@ -286,8 +290,8 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     }
 
     @Override
-    @Transactional
     public RiskAssessmentResultResponse getResultForUser(Long userId, String applyIdOptional) {
+        // 注意：本方法无本地写操作，且会触发跨服务 Feign 调用，因此不开事务，避免持有 DB 连接跨 HTTP。
         RiskAssessment riskAssessment = resolveAssessmentForUser(userId, applyIdOptional);
         return buildResultResponse(riskAssessment);
     }
@@ -420,7 +424,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                     if (!"NONE".equals(ruleGate)) {
                         report.put("ruleGate", ruleGate);
                     }
-                    report.put("outcomeSummary", "系统拒绝：虽命中规则闸，但信用分低于拒绝线（642），分数闸优先拒绝");
+                    report.put("outcomeSummary", "系统拒绝：虽命中规则闸，但信用分低于拒绝线（" + (int) MANUAL_REVIEW_THRESHOLD + "），分数闸优先拒绝");
                     riskAssessment.setSupplementStatus(SupplementMaterialService.STATUS_NONE);
                     riskAssessment.setSupplementRequirements(null);
                     notificationStatus = "评估拒绝";
@@ -442,11 +446,11 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                     report.put("finalStatus", StatusEnum.FINAL_PASS.getValue());
                 } else if ("MANUAL_REVIEW".equals(decision)) {
                     report.put("finalStatus", StatusEnum.MANUAL_REVIEW.getValue());
-                    report.put("outcomeSummary", "进入人工复核：信用分处于人工审核档（642–787），请结合评分明细审批");
+                    report.put("outcomeSummary", "进入人工复核：信用分处于人工审核档（" + (int) MANUAL_REVIEW_THRESHOLD + "–" + (int) AUTO_APPROVE_THRESHOLD + "），请结合评分明细审批");
                 } else if ("REJECT".equals(decision)) {
                     report.put("finalStatus", StatusEnum.SYSTEM_REJECT.getValue());
                     report.put("rejectGate", "SCORE_LOW");
-                    report.put("outcomeSummary", "系统拒绝：信用分低于拒绝线（642），评分卡自动拒绝");
+                    report.put("outcomeSummary", "系统拒绝：信用分低于拒绝线（" + (int) MANUAL_REVIEW_THRESHOLD + "），评分卡自动拒绝");
                 }
                 switch (decision) {
                     case "APPROVE":
@@ -954,14 +958,13 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     }
 
     private String getScoreTag(int score) {
-        if (score < 580) {
+        if (score < MANUAL_REVIEW_THRESHOLD) {
             return "SCORE_LOW: 信用分过低";
-        } else if (score >= 580 && score < 720) {
+        } else if (score < AUTO_APPROVE_THRESHOLD) {
             return "SCORE_MANUAL_REVIEW: 信用分区间需人工审核";
-        } else if (score >= 720) {
+        } else {
             return "SCORE_MEDIUM: 信用分中等";
         }
-        return "";
     }
 
     private static class DataVerificationResult {
