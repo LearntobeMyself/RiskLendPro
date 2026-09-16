@@ -85,8 +85,7 @@ public class BCardFeatureServiceImpl implements BCardFeatureService {
         BCardFeatureVector feature = new BCardFeatureVector();
         feature.setLoanCountTotal(effectiveLoans.size());
         feature.setActiveLoanCount(effectiveLoans.stream()
-                .filter(loan -> "DISBURRSED".equals(loan.getStatus())
-                        || "DISBURSED".equals(loan.getStatus())
+                .filter(loan -> "DISBURSED".equals(loan.getStatus())
                         || "OVERDUE".equals(loan.getStatus()))
                 .count());
         feature.setRepaidLoanCount(effectiveLoans.stream()
@@ -338,7 +337,7 @@ public class BCardFeatureServiceImpl implements BCardFeatureService {
             return false;
         }
         return switch (loan.getStatus()) {
-            case "DISBURRSED", "DISBURSED", "OVERDUE", "REPAID" -> true;
+            case "DISBURSED", "OVERDUE", "REPAID" -> true;
             default -> false;
         };
     }
