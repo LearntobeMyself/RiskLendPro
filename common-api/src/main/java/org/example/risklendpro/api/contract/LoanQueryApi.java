@@ -29,4 +29,8 @@ public interface LoanQueryApi {
     /** B 卡监控所需的还款计划/期次聚焦数据，由 loan-service 基于自身还款表聚合。 */
     @GetMapping("/internal/loans/users/{userId}/b-card-monitor")
     BCardRepaymentSnapshot getBCardRepaymentMonitor(@PathVariable("userId") Long userId);
+
+    /** 批量查询多用户的 B 卡还款监控快照（贷后监控列表批量填充，避免 N+1）。 */
+    @PostMapping("/internal/loans/users/b-card-monitor/batch")
+    Map<Long, BCardRepaymentSnapshot> listBCardRepaymentMonitors(@RequestBody List<Long> userIds);
 }

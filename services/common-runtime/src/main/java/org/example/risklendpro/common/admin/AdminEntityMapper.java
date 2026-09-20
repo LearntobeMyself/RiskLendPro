@@ -55,10 +55,6 @@ public final class AdminEntityMapper {
         if ("DISABLED".equals(accountStatus) || "FROZEN".equals(accountStatus)) {
             return "FROZEN";
         }
-        if (limit != null && limit.getUsedLimit() != null && limit.getTotalLimit() != null
-                && limit.getUsedLimit().compareTo(limit.getTotalLimit()) > 0) {
-            return "OVERLIMIT";
-        }
         return "NORMAL";
     }
 
@@ -155,10 +151,6 @@ public final class AdminEntityMapper {
         String accountStatus = resolveUserStatus(user);
         if ("DISABLED".equals(accountStatus) || "FROZEN".equals(accountStatus)) {
             return "FROZEN";
-        }
-        if (limit != null && limit.usedLimit() != null && limit.totalLimit() != null
-                && limit.usedLimit().compareTo(limit.totalLimit()) > 0) {
-            return "OVERLIMIT";
         }
         return "NORMAL";
     }

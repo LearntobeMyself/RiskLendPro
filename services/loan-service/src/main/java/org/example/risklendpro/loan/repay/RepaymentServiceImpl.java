@@ -3,8 +3,10 @@ package org.example.risklendpro.loan.repay;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
+import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
+import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.repay.RepaymentExecuteRequest;
 import org.example.risklendpro.loan.repay.RepaymentResponse;
 import org.example.risklendpro.loan.repay.RepaymentService;
@@ -27,6 +29,9 @@ public class RepaymentServiceImpl implements RepaymentService {
 
     @Autowired
     private RepaymentRecordMapper repaymentRecordMapper;
+
+    @Autowired
+    private UserCreditLimitMapper userCreditLimitMapper;
 
     @Override
     public List<Object> getRepaymentPlans(Long userId) {
@@ -112,7 +117,10 @@ public class RepaymentServiceImpl implements RepaymentService {
 
         repaymentPlanMapper.updateById(plan);
 
-        // 5. 构建响应
+        // 5. 恢复信用额度：按期归还本金后，对应本金部分释放回可用额度
+        restoreCreditLimit(plan.getUserId(), record.getPrincipal());
+
+        // 6. 构建响应
         RepaymentResponse response = new RepaymentResponse();
         response.setRecordId(record.getRecordId());
         response.setPlanId(record.getPlanId());
@@ -122,6 +130,30 @@ public class RepaymentServiceImpl implements RepaymentService {
         response.setStatus(record.getStatus());
 
         return response;
+    }
+
+    private void restoreCreditLimit(Long userId, BigDecimal principal) {
+        if (userId == null || principal == null || principal.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        UserCreditLimit limit = userCreditLimitMapper.selectOne(
+                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
+        if (limit == null) {
+            return;
+        }
+        BigDecimal used = limit.getUsedLimit() != null ? limit.getUsedLimit() : BigDecimal.ZERO;
+        BigDecimal remaining = limit.getRemainingLimit() != null ? limit.getRemainingLimit() : BigDecimal.ZERO;
+        BigDecimal total = limit.getTotalLimit() != null ? limit.getTotalLimit() : BigDecimal.ZERO;
+        BigDecimal release = principal.min(used); // 释放金额不会超过已用额度
+        BigDecimal newUsed = used.subtract(release);
+        BigDecimal newRemaining = total.subtract(newUsed); // 保持 total = used + remaining
+        if (newRemaining.compareTo(BigDecimal.ZERO) < 0) {
+            newRemaining = BigDecimal.ZERO;
+        }
+        limit.setUsedLimit(newUsed);
+        limit.setRemainingLimit(newRemaining);
+        limit.setLastUpdateTime(new Date());
+        userCreditLimitMapper.updateById(limit);
     }
 
     @Override

@@ -9,10 +9,12 @@ import org.example.risklendpro.api.dto.CreditLimitSnapshot;
 import org.example.risklendpro.api.dto.LoanBehaviorSnapshot;
 import org.example.risklendpro.api.dto.LoanUserSummaryItem;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
+import org.example.risklendpro.loan.entity.LimitAdjustLog;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
+import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
@@ -24,10 +26,13 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +43,9 @@ public class InternalLoanController implements LoanApi {
 
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
+
+    @Autowired
+    private LimitAdjustLogMapper limitAdjustLogMapper;
 
     @Autowired
     private LoanMapper loanMapper;
@@ -96,22 +104,38 @@ public class InternalLoanController implements LoanApi {
     @Override
     public CreditLimitSnapshot grantCreditLimit(CreditLimitGrantCommand command) {
         UserCreditLimit limit = findLimit(command.userId());
+        BigDecimal approvedLimit = command.approvedLimit() != null ? command.approvedLimit() : BigDecimal.ZERO;
         if (limit == null) {
             limit = new UserCreditLimit();
             limit.setUserId(command.userId());
-            limit.setTotalLimit(command.approvedLimit());
+            limit.setTotalLimit(approvedLimit);
             limit.setUsedLimit(BigDecimal.ZERO);
-            limit.setRemainingLimit(command.approvedLimit());
+            limit.setRemainingLimit(approvedLimit);
             limit.setOverdueAmount(BigDecimal.ZERO);
             limit.setHasOverdue(false);
             limit.setBCardEnabled(false);
             limit.setLastUpdateTime(new Date());
             userCreditLimitMapper.insert(limit);
         } else {
-            limit.setTotalLimit(command.approvedLimit());
-            limit.setRemainingLimit(command.approvedLimit().subtract(limit.getUsedLimit()));
+            // 新增授信：在原有额度基础上累加，保留已有的已用额度与还款记录
+            BigDecimal oldTotal = limit.getTotalLimit() != null ? limit.getTotalLimit() : BigDecimal.ZERO;
+            BigDecimal used = limit.getUsedLimit() != null ? limit.getUsedLimit() : BigDecimal.ZERO;
+            BigDecimal newTotal = oldTotal.add(approvedLimit);
+            BigDecimal newRemaining = newTotal.subtract(used).max(BigDecimal.ZERO);
+            limit.setTotalLimit(newTotal);
+            limit.setRemainingLimit(newRemaining);
             limit.setLastUpdateTime(new Date());
             userCreditLimitMapper.updateById(limit);
+
+            // 记录一次新增授信日志，便于审计追踪
+            LimitAdjustLog log = new LimitAdjustLog();
+            log.setUserId(command.userId());
+            log.setOldLimit(oldTotal);
+            log.setNewLimit(newTotal);
+            log.setReason("新增授信审批通过，获批额度：" + approvedLimit + "，原总额度：" + oldTotal);
+            log.setOperatorId(0L);
+            log.setAdjustTime(new Date());
+            limitAdjustLogMapper.insert(log);
         }
         return toSnapshot(limit);
     }
@@ -276,18 +300,77 @@ public class InternalLoanController implements LoanApi {
     public BCardRepaymentSnapshot getBCardRepaymentMonitor(Long userId) {
         List<RepaymentPlan> plans = repaymentPlanMapper.selectList(
                 new QueryWrapper<RepaymentPlan>().eq("user_id", userId));
+        return buildBCardRepaymentSnapshot(userId, plans);
+    }
+
+    /**
+     * 批量版本：一次性取回所有用户的还款计划再按用户分组，
+     * 把贷后监控列表的 N 次跨服务调用压缩成 1 次。
+     */
+    @Override
+    public Map<Long, BCardRepaymentSnapshot> listBCardRepaymentMonitors(List<Long> userIds) {
+        Map<Long, BCardRepaymentSnapshot> result = new HashMap<>();
+        if (userIds == null || userIds.isEmpty()) {
+            return result;
+        }
+        List<Long> ids = userIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return result;
+        }
+        Map<Long, List<RepaymentPlan>> plansByUser = new HashMap<>();
+        try {
+            List<RepaymentPlan> plans = repaymentPlanMapper.selectList(
+                    new QueryWrapper<RepaymentPlan>().in("user_id", ids));
+            if (plans != null) {
+                for (RepaymentPlan p : plans) {
+                    plansByUser.computeIfAbsent(p.getUserId(), k -> new ArrayList<>()).add(p);
+                }
+            }
+        } catch (Exception ignored) {
+            /* 批量查询异常时走下方逐用户兜底 */
+        }
+        for (Long userId : ids) {
+            List<RepaymentPlan> plans = plansByUser.get(userId);
+            if (plans == null) {
+                plans = repaymentPlanMapper.selectList(
+                        new QueryWrapper<RepaymentPlan>().eq("user_id", userId));
+            }
+            result.put(userId, buildBCardRepaymentSnapshot(userId, plans));
+        }
+        return result;
+    }
+
+    private BCardRepaymentSnapshot buildBCardRepaymentSnapshot(Long userId, List<RepaymentPlan> plans) {
+        List<RepaymentPlan> safePlans = plans == null ? Collections.emptyList() : plans;
+        // 一次取回本批计划的全部期次（已按 period 升序），避免每个计划各查 1~2 次造成的 N+1。
+        List<Long> planIds = safePlans.stream()
+                .filter(p -> !"COMPLETED".equals(p.getStatus()))
+                .map(RepaymentPlan::getPlanId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, List<RepaymentRecord>> recordsByPlan = new HashMap<>();
+        if (!planIds.isEmpty()) {
+            List<RepaymentRecord> records = repaymentRecordMapper.selectList(
+                    new QueryWrapper<RepaymentRecord>().in("plan_id", planIds).orderByAsc("period"));
+            if (records != null) {
+                for (RepaymentRecord r : records) {
+                    recordsByPlan.computeIfAbsent(r.getPlanId(), k -> new ArrayList<>()).add(r);
+                }
+            }
+        }
         LocalDate today = LocalDate.now();
         int activePlanCount = 0;
         RepaymentPlan bestPlan = null;
         RepaymentRecord bestRecord = null;
         Integer daysToDue = null;
         int bestPriority = Integer.MAX_VALUE;
-        for (RepaymentPlan plan : plans) {
+        for (RepaymentPlan plan : safePlans) {
             if ("COMPLETED".equals(plan.getStatus())) {
                 continue;
             }
             activePlanCount++;
-            RepaymentRecord record = resolveFocusRecord(plan.getPlanId(), plan.getCurrentPeriod());
+            RepaymentRecord record = resolveFocusRecord(plan.getPlanId(), plan.getCurrentPeriod(), recordsByPlan);
             if (record == null || record.getDueDate() == null) {
                 continue;
             }
@@ -316,22 +399,23 @@ public class InternalLoanController implements LoanApi {
         );
     }
 
-    /** 当期已还清时推进到首个未还期次，避免误报逾期。 */
-    private RepaymentRecord resolveFocusRecord(Long planId, Integer currentPeriod) {
+    /** 当期已还清时推进到首个未还期次，避免误报逾期。records 由调用方按 planId 预取并升序。 */
+    private RepaymentRecord resolveFocusRecord(Long planId, Integer currentPeriod,
+                                               Map<Long, List<RepaymentRecord>> recordsByPlan) {
         if (planId == null || currentPeriod == null) {
             return null;
         }
-        RepaymentRecord current = repaymentRecordMapper.selectOne(
-                new QueryWrapper<RepaymentRecord>()
-                        .eq("plan_id", planId)
-                        .eq("period", currentPeriod));
+        List<RepaymentRecord> records = recordsByPlan.getOrDefault(planId, Collections.emptyList());
+        RepaymentRecord current = null;
+        for (RepaymentRecord r : records) {
+            if (currentPeriod.equals(r.getPeriod())) {
+                current = r;
+                break;
+            }
+        }
         if (current != null && !isRepaidRecord(current)) {
             return current;
         }
-        List<RepaymentRecord> records = repaymentRecordMapper.selectList(
-                new QueryWrapper<RepaymentRecord>()
-                        .eq("plan_id", planId)
-                        .orderByAsc("period"));
         for (RepaymentRecord record : records) {
             if (!isRepaidRecord(record)) {
                 return record;

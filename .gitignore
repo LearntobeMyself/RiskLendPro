@@ -45,3 +45,15 @@ risk-assessment/data/cleaned/
 
 # 运行时用户上传与备份
 upload/
+
+# 本地记忆 / 会话产物
+.workbuddy/
+.ab/
+
+# 本地前端与同步检查目录
+web/
+
+# 微服务运行日志
+*.log
+*.run.log
+**/logs/

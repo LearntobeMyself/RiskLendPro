@@ -33,6 +33,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
@@ -84,9 +85,12 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         }
         if (creditLimit != null) {
             data.put("currentLimit", creditLimit.getTotalLimit());
-            data.put("exceedAmount", loan.getAmount().subtract(creditLimit.getTotalLimit()).max(BigDecimal.ZERO));
+            data.put("remainingLimit", creditLimit.getRemainingLimit());
+            // 是否超额以「剩余可用额度」为准，与借款请求/自动放款判断保持一致
+            data.put("exceedAmount", loan.getAmount().subtract(creditLimit.getRemainingLimit()).max(BigDecimal.ZERO));
         } else {
             data.put("currentLimit", BigDecimal.ZERO);
+            data.put("remainingLimit", BigDecimal.ZERO);
             data.put("exceedAmount", loan.getAmount());
         }
         data.put("materials", List.of());
@@ -152,11 +156,65 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         Page<Loan> pageInfo = new Page<>(page, size);
         QueryWrapper<Loan> qw = buildRecordQuery(status, userName, startDate, endDate);
         Page<Loan> result = loanMapper.selectPage(pageInfo, qw);
+        // 批量预取：原实现每行 1 次跨服务 + 1 次库查询（N+1），改为批量后显著降耗时
+        Map<Long, UserSummary> userCache = new HashMap<>();
+        Map<Long, RepaymentPlan> planCache = new HashMap<>();
+        prefetchRecords(result.getRecords(), userCache, planCache);
         List<Map<String, Object>> list = new ArrayList<>();
         for (Loan loan : result.getRecords()) {
-            list.add(buildRecordItem(loan));
+            list.add(buildRecordItem(loan, userCache.get(loan.getUserId()), planCache.get(loan.getLoanId())));
         }
         return AdminPageHelper.toListPage(list, result.getTotal());
+    }
+
+    /** 批量预取借款档案列表所需的用户与还款计划，避免逐行查询。 */
+    private void prefetchRecords(List<Loan> loans, Map<Long, UserSummary> userCache,
+                                 Map<Long, RepaymentPlan> planCache) {
+        if (loans == null || loans.isEmpty()) {
+            return;
+        }
+        List<Long> userIds = loans.stream().map(Loan::getUserId).filter(Objects::nonNull).distinct().toList();
+        List<Long> loanIds = loans.stream().map(Loan::getLoanId).filter(Objects::nonNull).distinct().toList();
+        if (!loanIds.isEmpty()) {
+            try {
+                List<RepaymentPlan> plans = repaymentPlanMapper.selectList(
+                        new QueryWrapper<RepaymentPlan>().in("loan_id", loanIds));
+                if (plans != null) {
+                    // 每个 loanId 只保留第一条（与原 selectOne LIMIT 1 语义一致）
+                    for (RepaymentPlan p : plans) {
+                        planCache.putIfAbsent(p.getLoanId(), p);
+                    }
+                }
+            } catch (Exception ignored) { }
+        }
+        if (!userIds.isEmpty()) {
+            try {
+                List<UserSummary> users = userServiceClient.listAllUsers();
+                if (users != null) {
+                    for (UserSummary u : users) {
+                        if (u != null && u.id() != null) {
+                            userCache.put(u.id(), u);
+                        }
+                    }
+                }
+            } catch (Exception ignored) { }
+            for (Long userId : userIds) {
+                if (userCache.containsKey(userId)) {
+                    continue;
+                }
+                try {
+                    UserSummary u = userServiceClient.getUser(userId);
+                    if (u != null) userCache.put(userId, u);
+                } catch (Exception ignored) { }
+            }
+        }
+    }
+
+    private Map<String, Object> buildRecordItem(Loan loan) {
+        UserSummary user = userServiceClient.getUser(loan.getUserId());
+        RepaymentPlan plan = repaymentPlanMapper.selectOne(
+                new QueryWrapper<RepaymentPlan>().eq("loan_id", loan.getLoanId()).last("LIMIT 1"));
+        return buildRecordItem(loan, user, plan);
     }
 
     @Override
@@ -269,10 +327,8 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         return qw;
     }
 
-    private Map<String, Object> buildRecordItem(Loan loan) {
-        UserSummary user = userServiceClient.getUser(loan.getUserId());
-        RepaymentPlan plan = repaymentPlanMapper.selectOne(
-                new QueryWrapper<RepaymentPlan>().eq("loan_id", loan.getLoanId()).last("LIMIT 1"));
+    /** 关联数据由调用方批量预取后传入（列表场景）；逐条版本见上方重载。 */
+    private Map<String, Object> buildRecordItem(Loan loan, UserSummary user, RepaymentPlan plan) {
         Map<String, Object> item = new HashMap<>();
         item.put("loanId", loan.getLoanId());
         item.put("userId", loan.getUserId());

@@ -143,10 +143,15 @@ public class OverdueLimitAdjustTask {
             return;
         }
 
-        creditLimit.setTotalLimit(newLimit);
-        BigDecimal difference = newLimit.subtract(oldLimit);
-        BigDecimal newRemainingLimit = creditLimit.getRemainingLimit().add(difference);
+        // 逾期降额不能使总额度低于已用额度（在贷余额），否则会出现 used > total 的数据矛盾；
+        // 若计算出的新额度低于已用额度，则至少保持为已用额度，剩余额度归零。
+        BigDecimal used = creditLimit.getUsedLimit() != null ? creditLimit.getUsedLimit() : BigDecimal.ZERO;
+        if (newLimit.compareTo(used) < 0) {
+            newLimit = used;
+        }
 
+        creditLimit.setTotalLimit(newLimit);
+        BigDecimal newRemainingLimit = newLimit.subtract(used);
         if (newRemainingLimit.compareTo(BigDecimal.ZERO) < 0) {
             newRemainingLimit = BigDecimal.ZERO;
         }

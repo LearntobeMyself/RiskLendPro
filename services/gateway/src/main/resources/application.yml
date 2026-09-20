@@ -5,6 +5,16 @@ spring:
     gateway:
       server:
         webflux:
+          # 浏览器跨域：前端静态页与网关不同源，需网关统一放行预检并去重下游 CORS 头
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOriginPatterns: "*"
+                allowedMethods: "*"
+                allowedHeaders: "*"
+                allowCredentials: true
+          default-filters:
+            - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin, RETAIN_FIRST
           routes:
             - id: user-service-health
               uri: ${USER_SERVICE_URL:http://localhost:8081}

@@ -8,11 +8,13 @@ import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.borrow.LoanApproveRequest;
 import org.example.risklendpro.loan.borrow.LoanApproveResponse;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
+import org.example.risklendpro.loan.entity.LimitAdjustLog;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.entity.VintageData;
+import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
@@ -48,6 +50,8 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     private LoanMapper loanMapper;
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
+    @Autowired
+    private LimitAdjustLogMapper limitAdjustLogMapper;
     @Autowired
     private VintageDataMapper vintageDataMapper;
     @Autowired
@@ -203,6 +207,17 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
 
         List<Map<String, Object>> records = new ArrayList<>();
         for (Loan loan : resultPage.getRecords()) {
+            UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
+                    new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId())
+            );
+            BigDecimal totalLimit = creditLimit != null ? creditLimit.getTotalLimit() : BigDecimal.ZERO;
+            BigDecimal remainingLimit = creditLimit != null ? creditLimit.getRemainingLimit() : BigDecimal.ZERO;
+            BigDecimal exceedAmount = loan.getAmount().subtract(remainingLimit).max(BigDecimal.ZERO);
+            // 额度内借款应由系统自动放款，不应出现在人工审批列表
+            if (exceedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+
             Map<String, Object> record = new HashMap<>();
             record.put("loanId", loan.getLoanId());
             record.put("userId", loan.getUserId());
@@ -218,17 +233,9 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
                 record.put("idCard", "未知");
             }
 
-            UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
-                    new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId())
-            );
-            if (creditLimit != null) {
-                record.put("currentLimit", creditLimit.getTotalLimit());
-                record.put("exceedAmount", loan.getAmount().subtract(creditLimit.getTotalLimit()));
-            } else {
-                record.put("currentLimit", BigDecimal.ZERO);
-                record.put("exceedAmount", loan.getAmount());
-            }
-
+            record.put("currentLimit", totalLimit);
+            record.put("remainingLimit", remainingLimit);
+            record.put("exceedAmount", exceedAmount);
             record.put("amount", loan.getAmount());
             record.put("termMonths", loan.getTermMonths());
             record.put("repaymentMethod", loan.getRepaymentMethod());
@@ -258,22 +265,50 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
             loan.setApproveTime(new Date());
             loan.setDisbursementTime(new Date());
-            loan.setAdditionalLimit(request.getAdditionalLimit());
 
             UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
                     new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId())
             );
 
             if (creditLimit != null) {
-                BigDecimal newTotalLimit = creditLimit.getTotalLimit().add(request.getAdditionalLimit());
+                BigDecimal oldTotalLimit = creditLimit.getTotalLimit() != null ? creditLimit.getTotalLimit() : BigDecimal.ZERO;
+                BigDecimal oldUsedLimit = creditLimit.getUsedLimit() != null ? creditLimit.getUsedLimit() : BigDecimal.ZERO;
+                BigDecimal oldRemainingLimit = creditLimit.getRemainingLimit() != null ? creditLimit.getRemainingLimit() : BigDecimal.ZERO;
+                BigDecimal additionalLimit = request.getAdditionalLimit() != null ? request.getAdditionalLimit() : BigDecimal.ZERO;
+
+                // 额度外借款审批：新增额度必须至少覆盖超出部分，否则新总额度会小于新已用额度
+                BigDecimal exceedAmount = loan.getAmount().subtract(oldRemainingLimit).max(BigDecimal.ZERO);
+                if (additionalLimit.compareTo(exceedAmount) < 0) {
+                    additionalLimit = exceedAmount;
+                }
+
+                BigDecimal newTotalLimit = oldTotalLimit.add(additionalLimit);
+                BigDecimal newUsedLimit = oldUsedLimit.add(loan.getAmount());
+                // 二次兜底：即使 additionalLimit 有异常，也保证总额度不低于已用额度
+                if (newTotalLimit.compareTo(newUsedLimit) < 0) {
+                    newTotalLimit = newUsedLimit;
+                }
+                BigDecimal newRemainingLimit = newTotalLimit.subtract(newUsedLimit);
+
                 creditLimit.setTotalLimit(newTotalLimit);
-                creditLimit.setUsedLimit(creditLimit.getUsedLimit().add(loan.getAmount()));
-                creditLimit.setRemainingLimit(newTotalLimit.subtract(creditLimit.getUsedLimit()));
+                creditLimit.setUsedLimit(newUsedLimit);
+                creditLimit.setRemainingLimit(newRemainingLimit);
                 creditLimit.setLastUpdateTime(new Date());
                 userCreditLimitMapper.updateById(creditLimit);
 
-                response.setOriginalLimit(creditLimit.getTotalLimit().subtract(request.getAdditionalLimit()));
-                response.setAdditionalLimit(request.getAdditionalLimit());
+                loan.setAdditionalLimit(additionalLimit);
+
+                LimitAdjustLog log = new LimitAdjustLog();
+                log.setUserId(loan.getUserId());
+                log.setOldLimit(oldTotalLimit);
+                log.setNewLimit(newTotalLimit);
+                log.setReason("审批放款：借款金额 " + loan.getAmount() + "，新增授信 " + additionalLimit + "，原额度 " + oldTotalLimit);
+                log.setOperatorId(0L);
+                log.setAdjustTime(new Date());
+                limitAdjustLogMapper.insert(log);
+
+                response.setOriginalLimit(oldTotalLimit);
+                response.setAdditionalLimit(additionalLimit);
                 response.setTotalLimit(newTotalLimit);
                 response.setActualDisbursedAmount(loan.getAmount());
             }
