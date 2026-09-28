@@ -1,8 +1,14 @@
 package org.example.risklendpro.loan.limit;
 
 import org.example.risklendpro.loan.entity.UserCreditLimit;
+import org.example.risklendpro.loan.client.RiskServiceClient;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
+import org.example.risklendpro.loan.mapper.LoanMapper;
+import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
+import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
+import org.example.risklendpro.common.mail.EmailUtil;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -31,6 +37,25 @@ class UserCreditLimitServiceImplTest {
 
     @Mock
     private LimitAdjustLogMapper limitAdjustLogMapper;
+
+    // 以下依赖 adjustLimit 的后续流程会用到的协作者，缺一个就会 NPE。
+    @Mock
+    private LoanMapper loanMapper;
+
+    @Mock
+    private RepaymentPlanMapper repaymentPlanMapper;
+
+    @Mock
+    private RepaymentRecordMapper repaymentRecordMapper;
+
+    @Mock
+    private EmailUtil emailUtil;
+
+    @Mock
+    private UserServiceClient userServiceClient;
+
+    @Mock
+    private RiskServiceClient riskServiceClient;
 
     private UserCreditLimit creditLimit(BigDecimal total, BigDecimal used, BigDecimal remaining) {
         UserCreditLimit cl = new UserCreditLimit();

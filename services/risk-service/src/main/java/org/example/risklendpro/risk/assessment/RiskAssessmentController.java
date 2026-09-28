@@ -11,6 +11,7 @@ import org.example.risklendpro.risk.assessment.RiskAssessmentSubmitEligibilityRe
 import org.example.risklendpro.risk.assessment.RiskAssessmentService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,6 +24,7 @@ import jakarta.servlet.http.HttpServletRequest;
 @Tag(name = "授信评估模块", description = "风控评估相关接口")
 @RestController
 @RequestMapping("/risk/assessment")
+@PreAuthorize("hasRole('USER')")
 public class RiskAssessmentController {
     
     @Autowired

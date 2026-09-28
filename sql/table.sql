@@ -8,7 +8,7 @@ CREATE TABLE `user` (
                         `email` VARCHAR(100) NOT NULL COMMENT '邮箱',
                         `id_card` VARCHAR(18) NOT NULL UNIQUE COMMENT '身份证号',
                         `password` VARCHAR(255) NOT NULL COMMENT '密码',
-                        `role` VARCHAR(20) DEFAULT 'USER' COMMENT '角色: USER/ADMIN',
+                        `role` VARCHAR(20) DEFAULT 'USER' COMMENT '角色固定 USER，运营身份在 admin.role',
                         `assessment_status` VARCHAR(30) DEFAULT 'NOT_ASSESSED' COMMENT '评估状态: NOT_ASSESSED/ASSESSING/APPROVED',
                         `account_status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/DISABLED/FROZEN',
                         `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -21,6 +21,7 @@ CREATE TABLE `admin` (
                          `password` VARCHAR(255) NOT NULL COMMENT '密码',
                          `phone_number` VARCHAR(20) NOT NULL COMMENT '手机号',
                          `email` VARCHAR(100) NOT NULL COMMENT '邮箱',
+                         `role` VARCHAR(32) NOT NULL DEFAULT 'SYS_ADMIN' COMMENT 'RISK_MANAGER/COLLECTOR/AUDITOR/CS_AGENT/SYS_ADMIN',
                          `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                          `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理员表';

@@ -24,6 +24,8 @@ public class SecurityConfig {
     
     @Autowired
     private JwtFilter jwtFilter;
+    @Autowired
+    private AdminAccessFilter adminAccessFilter;
     
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -32,8 +34,8 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 1. 放行登录注册接口、健康检查与内部契约调用
-                        .requestMatchers("/auth/**", "/admin/login", "/admin/register", "/actuator/health", "/internal/**").permitAll()
+                        // 1. 放行登录、健康检查与内部契约调用（管理员注册不再对公网开放）
+                        .requestMatchers("/auth/**", "/admin/login", "/actuator/health", "/internal/**").permitAll()
                         // 2. 彻底放行 Swagger 相关路径 (不带 /api/v1)
                         .requestMatchers(
                             "/v3/api-docs/**",
@@ -48,7 +50,8 @@ public class SecurityConfig {
                 )
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(adminAccessFilter, JwtFilter.class);
         
         return http.build();
     }

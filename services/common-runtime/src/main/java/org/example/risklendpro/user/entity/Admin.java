@@ -16,6 +16,7 @@ public class Admin {
     private String password;
     private String phoneNumber;
     private String email;
+    private String role;
     @TableField("create_time")
     private Date createTime;
     @TableField("update_time")

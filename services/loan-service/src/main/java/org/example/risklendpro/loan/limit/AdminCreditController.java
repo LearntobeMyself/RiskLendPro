@@ -8,6 +8,7 @@ import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.loan.limit.AdminCreditQueryService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,6 +22,7 @@ import java.util.Map;
 @Tag(name = "信用额度", description = "管理员额度管理与统计")
 @RestController
 @RequestMapping("/admin/credit")
+@PreAuthorize("hasAuthority('credit:adjust')")
 public class AdminCreditController {
 
     @Autowired
@@ -46,6 +48,7 @@ public class AdminCreditController {
     }
 
     @Operation(summary = "调整用户额度")
+    @PreAuthorize("hasAuthority('credit:adjust:write')")
     @PostMapping("/limits/{userId}/adjust")
     public CommonResponse<Map<String, Object>> adjust(
             @PathVariable Long userId, @RequestBody LimitAdjustRequest request) {
@@ -54,6 +57,7 @@ public class AdminCreditController {
     }
 
     @Operation(summary = "批量调整额度")
+    @PreAuthorize("hasAuthority('credit:adjust:write')")
     @PostMapping("/limits/batch-adjust")
     public CommonResponse<Map<String, Object>> batchAdjust(@RequestBody BatchCreditAdjustRequest request) {
         return CommonResponse.success("批量调整完成",

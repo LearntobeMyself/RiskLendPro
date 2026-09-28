@@ -7,6 +7,7 @@ import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.risk.admin.AdminRiskDataService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +21,7 @@ import java.util.Map;
 @Tag(name = "风控数据", description = "管理员风控数据查询与导出")
 @RestController
 @RequestMapping("/admin/risk")
+@PreAuthorize("hasAuthority('risk:approve')")
 public class AdminRiskDataController {
 
     @Autowired
@@ -58,6 +60,7 @@ public class AdminRiskDataController {
     }
 
     @Operation(summary = "处理反欺诈告警")
+    @PreAuthorize("hasAuthority('risk:fraud:write')")
     @PostMapping("/anti-fraud/{id}/handle")
     public CommonResponse<Map<String, Object>> handleAntiFraud(
             @PathVariable String id, @RequestBody AntiFraudHandleRequest request) {
@@ -92,6 +95,7 @@ public class AdminRiskDataController {
     }
 
     @Operation(summary = "风控数据导出")
+    @PreAuthorize("hasAuthority('risk:approve:write')")
     @GetMapping("/export")
     public CommonResponse<Map<String, Object>> export(
             @RequestParam(required = false) String status) {

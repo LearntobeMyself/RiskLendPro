@@ -7,6 +7,7 @@ import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.loan.admin.AdminLoanQueryService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +21,7 @@ import java.util.Map;
 @Tag(name = "贷款管理", description = "管理员贷款申请与借款记录")
 @RestController
 @RequestMapping("/admin/loan")
+@PreAuthorize("hasAuthority('loan:approve')")
 public class AdminLoanController {
 
     @Autowired
@@ -66,6 +68,7 @@ public class AdminLoanController {
     }
 
     @Operation(summary = "批量审批")
+    @PreAuthorize("hasAuthority('loan:approve:write')")
     @PostMapping("/batch-approve")
     public CommonResponse<Map<String, Object>> batchApprove(@RequestBody BatchLoanApproveRequest request) {
         return CommonResponse.success("批量审批完成",
@@ -73,6 +76,7 @@ public class AdminLoanController {
     }
 
     @Operation(summary = "借款记录导出")
+    @PreAuthorize("hasAuthority('loan:approve:write')")
     @GetMapping("/records/export")
     public CommonResponse<Map<String, Object>> exportRecords(
             @RequestParam(required = false) String status,

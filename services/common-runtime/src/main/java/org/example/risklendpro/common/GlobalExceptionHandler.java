@@ -4,6 +4,9 @@ import org.example.risklendpro.common.DuplicateApplyException;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -16,6 +19,13 @@ public class GlobalExceptionHandler {
     public CommonResponse<Void> handleDuplicateApplyException(DuplicateApplyException e) {
         log.warn("DuplicateApplyException: {}", e.getMessage());
         return CommonResponse.fail(400, e.getMessage());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<CommonResponse<Void>> handleAccessDenied(AccessDeniedException e) {
+        log.warn("AccessDeniedException: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(CommonResponse.fail(403, "无权限访问该接口"));
     }
 
     @ExceptionHandler(RuntimeException.class)

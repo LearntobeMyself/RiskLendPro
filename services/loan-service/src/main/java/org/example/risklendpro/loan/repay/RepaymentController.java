@@ -28,6 +28,7 @@ public class RepaymentController {
     private RepaymentService repaymentService;
     
     @Operation(summary = "查看还款计划", description = "用户查看自己的还款计划表，显示每期还款金额、是否逾期")
+    @PreAuthorize("hasRole('USER')")
     @GetMapping("/plans")
     public CommonResponse<Object> plans(HttpServletRequest request) {
         Long userId = SecurityUtils.getUserIdFromRequest(request);
@@ -35,6 +36,7 @@ public class RepaymentController {
     }
     
     @Operation(summary = "执行还款", description = "用户点击\"还款\"，执行单期还款操作")
+    @PreAuthorize("hasRole('USER')")
     @PostMapping("/execute")
     public CommonResponse<RepaymentResponse> execute(HttpServletRequest request, @RequestBody RepaymentExecuteRequest req) {
         Long userId = SecurityUtils.getUserIdFromRequest(request);
@@ -43,6 +45,7 @@ public class RepaymentController {
     }
     
     @Operation(summary = "获取还款记录详情", description = "获取指定还款计划的全部还款记录")
+    @PreAuthorize("hasRole('USER')")
     @GetMapping("/record/{planId}")
     public CommonResponse<Object> record(
             HttpServletRequest request,
@@ -54,14 +57,14 @@ public class RepaymentController {
     
     @Operation(summary = "获取还款统计", description = "获取所有用户的还款成功统计（总数和已还款数）")
     @GetMapping("/statistics")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('collection:case')")
     public CommonResponse<Object> statistics() {
         return CommonResponse.success("获取还款统计成功", repaymentService.getRepaymentStatistics());
     }
     
     @Operation(summary = "获取逾期统计", description = "获取所有还款计划的逾期统计（总数和逾期数）")
     @GetMapping("/overdue")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('collection:case')")
     public CommonResponse<Object> overdue() {
         return CommonResponse.success("获取逾期统计成功", repaymentService.getOverdueStatistics());
     }

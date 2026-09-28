@@ -8,6 +8,7 @@ import org.example.risklendpro.loan.borrow.LoanResponse;
 import org.example.risklendpro.loan.borrow.LoanService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,6 +21,7 @@ import jakarta.servlet.http.HttpServletRequest;
 @Tag(name = "借款/支用模块", description = "借款相关接口")
 @RestController
 @RequestMapping("/loan")
+@PreAuthorize("hasRole('USER')")
 public class LoanController {
     
     @Autowired

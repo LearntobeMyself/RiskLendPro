@@ -9,6 +9,7 @@ import org.example.risklendpro.user.admin.AdminLoginResponse;
 import org.example.risklendpro.user.admin.AdminAuthService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,7 +30,8 @@ public class AdminAuthController {
         this.adminAuthService = adminAuthService;
     }
     
-    @Operation(summary = "管理员注册", description = "管理员注册接口")
+    @Operation(summary = "管理员注册", description = "仅系统管理员可创建运营账号；公网不可匿名注册")
+    @PreAuthorize("hasAuthority('sys:admin:write')")
     @PostMapping("/register")
     public CommonResponse<Void> register(@RequestBody AdminRegisterRequest request) {
         adminAuthService.register(request);

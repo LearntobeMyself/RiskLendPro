@@ -10,4 +10,6 @@ public class AdminCreateRequest {
     private String password;
     private String phoneNumber;
     private String email;
+    @Schema(description = "角色码 RISK_MANAGER/COLLECTOR/AUDITOR/CS_AGENT/SYS_ADMIN")
+    private String role;
 }

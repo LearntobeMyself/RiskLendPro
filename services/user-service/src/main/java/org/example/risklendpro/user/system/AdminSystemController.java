@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,6 +33,7 @@ public class AdminSystemController {
     private AdminSystemService adminSystemService;
 
     @Operation(summary = "管理员列表")
+    @PreAuthorize("hasAuthority('sys:admin')")
     @GetMapping("/admins")
     public CommonResponse<Map<String, Object>> listAdmins(
             @RequestParam(defaultValue = "1") Integer page,
@@ -40,12 +42,14 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "新增管理员")
+    @PreAuthorize("hasAuthority('sys:admin:write')")
     @PostMapping("/admins")
     public CommonResponse<Map<String, Object>> createAdmin(@RequestBody AdminCreateRequest request) {
         return CommonResponse.success("创建成功", adminSystemService.createAdmin(request));
     }
 
     @Operation(summary = "更新管理员")
+    @PreAuthorize("hasAuthority('sys:admin:write')")
     @PutMapping("/admins/{adminId}")
     public CommonResponse<Map<String, Object>> updateAdmin(
             @PathVariable Long adminId, @RequestBody AdminUpdateRequest request) {
@@ -53,6 +57,7 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "删除管理员")
+    @PreAuthorize("hasAuthority('sys:admin:write')")
     @DeleteMapping("/admins/{adminId}")
     public CommonResponse<Void> deleteAdmin(@PathVariable Long adminId) {
         adminSystemService.deleteAdmin(adminId);
@@ -60,6 +65,7 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "操作日志")
+    @PreAuthorize("hasAuthority('audit:read')")
     @GetMapping("/operation-logs")
     public CommonResponse<Map<String, Object>> operationLogs(
             @RequestParam(defaultValue = "1") Integer page,
@@ -72,18 +78,21 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "系统配置")
+    @PreAuthorize("hasAuthority('sys:config')")
     @GetMapping("/config")
     public CommonResponse<Map<String, Object>> getConfig() {
         return CommonResponse.success("查询成功", adminSystemService.getConfig());
     }
 
     @Operation(summary = "更新系统配置")
+    @PreAuthorize("hasAuthority('sys:config:write')")
     @PutMapping("/config")
     public CommonResponse<Map<String, Object>> updateConfig(@RequestBody SystemConfigUpdateRequest request) {
         return CommonResponse.success("更新成功", adminSystemService.updateConfig(request));
     }
 
     @Operation(summary = "备份列表")
+    @PreAuthorize("hasAuthority('sys:config')")
     @GetMapping("/backups")
     public CommonResponse<Map<String, Object>> listBackups(
             @RequestParam(defaultValue = "1") Integer page,
@@ -92,18 +101,21 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "创建备份")
+    @PreAuthorize("hasAuthority('sys:config:write')")
     @PostMapping("/backups")
     public CommonResponse<Map<String, Object>> createBackup() {
         return CommonResponse.success("备份创建成功", adminSystemService.createBackup());
     }
 
     @Operation(summary = "恢复备份")
+    @PreAuthorize("hasAuthority('sys:config:write')")
     @PostMapping("/backups/{backupId}/restore")
     public CommonResponse<Map<String, Object>> restoreBackup(@PathVariable String backupId) {
         return CommonResponse.success("恢复成功", adminSystemService.restoreBackup(backupId));
     }
 
     @Operation(summary = "下载备份")
+    @PreAuthorize("hasAuthority('sys:config:write')")
     @GetMapping("/backups/{backupId}/download")
     public ResponseEntity<byte[]> downloadBackup(@PathVariable String backupId) {
         byte[] content = adminSystemService.downloadBackup(backupId);

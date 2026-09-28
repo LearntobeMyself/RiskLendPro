@@ -7,6 +7,7 @@ import org.example.risklendpro.api.dto.CreditLimitSnapshot;
 import org.example.risklendpro.user.client.LoanServiceClient;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,6 +17,7 @@ import jakarta.servlet.http.HttpServletRequest;
 @Tag(name = "贷后监控与额度管理模块", description = "额度管理相关接口")
 @RestController
 @RequestMapping("/user")
+@PreAuthorize("hasRole('USER')")
 public class UserController {
 
     @Autowired

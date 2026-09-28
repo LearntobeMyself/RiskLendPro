@@ -3,6 +3,7 @@ package org.example.risklendpro.user.system;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.risklendpro.api.dto.OperationLogItem;
+import org.example.risklendpro.api.security.StaffRoles;
 import org.example.risklendpro.user.client.LoanAdminQueryClient;
 import org.example.risklendpro.user.client.RiskAdminQueryClient;
 import org.example.risklendpro.user.entity.Admin;
@@ -64,7 +65,8 @@ public class AdminSystemServiceImpl implements AdminSystemService {
             item.put("username", admin.getUsername());
             item.put("phoneNumber", admin.getPhoneNumber());
             item.put("email", admin.getEmail());
-            item.put("role", "SUPER_ADMIN");
+            String role = admin.getRole();
+            item.put("role", StaffRoles.isStaff(role) ? StaffRoles.normalize(role) : StaffRoles.SYS_ADMIN);
             item.put("createTime", AdminDateHelper.formatDateTime(admin.getCreateTime()));
             return item;
         }).toList();
@@ -82,6 +84,7 @@ public class AdminSystemServiceImpl implements AdminSystemService {
         admin.setPassword(passwordEncoder.encode(request.getPassword()));
         admin.setPhoneNumber(request.getPhoneNumber());
         admin.setEmail(request.getEmail());
+        admin.setRole(resolveStaffRole(request.getRole()));
         admin.setCreateTime(new Date());
         admin.setUpdateTime(new Date());
         adminMapper.insert(admin);
@@ -105,6 +108,9 @@ public class AdminSystemServiceImpl implements AdminSystemService {
         }
         if (request.getEmail() != null) {
             admin.setEmail(request.getEmail());
+        }
+        if (request.getRole() != null && !request.getRole().isBlank()) {
+            admin.setRole(resolveStaffRole(request.getRole()));
         }
         admin.setUpdateTime(new Date());
         adminMapper.updateById(admin);
@@ -272,5 +278,16 @@ public class AdminSystemServiceImpl implements AdminSystemService {
             return false;
         }
         return end == null || time.before(end);
+    }
+
+    private String resolveStaffRole(String requested) {
+        if (requested == null || requested.isBlank()) {
+            return StaffRoles.SYS_ADMIN;
+        }
+        String role = StaffRoles.normalize(requested);
+        if (!StaffRoles.isStaff(role)) {
+            throw new RuntimeException("无效的管理员角色");
+        }
+        return role;
     }
 }

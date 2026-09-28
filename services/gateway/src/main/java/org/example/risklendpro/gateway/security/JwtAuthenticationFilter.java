@@ -1,5 +1,7 @@
 package org.example.risklendpro.gateway.security;
 
+import org.example.risklendpro.api.security.AdminPathAccess;
+import org.example.risklendpro.api.security.StaffRoles;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -47,9 +49,14 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                     .parseSignedClaims(authorization.substring(7))
                     .getPayload();
             String role = claims.get("role", String.class);
-
-            if (path.startsWith("/api/v1/admin/") && !"ADMIN".equals(role)) {
-                return writeError(exchange, HttpStatus.FORBIDDEN, "无管理端访问权限");
+            String method = exchange.getRequest().getMethod() == null
+                    ? "GET"
+                    : exchange.getRequest().getMethod().name();
+            if (!AdminPathAccess.allows(path, method, role)) {
+                String message = StaffRoles.isBorrower(role) && path.contains("/admin/")
+                        ? "无管理端访问权限"
+                        : "无权限访问该接口";
+                return writeError(exchange, HttpStatus.FORBIDDEN, message);
             }
 
             // 下游服务各自校验 JWT 并从 SecurityContext 获取登录主体，网关无需转发身份头。
@@ -63,7 +70,6 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         return method == HttpMethod.OPTIONS
                 || path.startsWith("/api/v1/auth/")
                 || path.equals("/api/v1/admin/login")
-                || path.equals("/api/v1/admin/register")
                 || path.equals("/api/v1/sync/blacklist")
                 || path.startsWith("/platform/");
     }

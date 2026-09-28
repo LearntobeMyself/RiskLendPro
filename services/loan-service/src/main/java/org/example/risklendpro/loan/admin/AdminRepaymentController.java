@@ -7,6 +7,7 @@ import org.example.risklendpro.loan.repay.RepaymentReportRequest;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.loan.admin.AdminRepaymentQueryService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,12 +27,14 @@ public class AdminRepaymentController {
     private AdminRepaymentQueryService adminRepaymentQueryService;
 
     @Operation(summary = "还款统计汇总")
+    @PreAuthorize("hasAuthority('collection:action')")
     @GetMapping("/summary")
     public CommonResponse<Map<String, Object>> summary() {
         return CommonResponse.success("查询成功", adminRepaymentQueryService.getSummary());
     }
 
     @Operation(summary = "还款计划列表")
+    @PreAuthorize("hasAuthority('collection:action')")
     @GetMapping("/plans")
     public CommonResponse<Map<String, Object>> plans(
             @RequestParam(defaultValue = "1") Integer page,
@@ -44,18 +47,21 @@ public class AdminRepaymentController {
     }
 
     @Operation(summary = "还款计划详情")
+    @PreAuthorize("hasAuthority('collection:action')")
     @GetMapping("/plans/{planId}")
     public CommonResponse<Map<String, Object>> planDetail(@PathVariable Long planId) {
         return CommonResponse.success("查询成功", adminRepaymentQueryService.getPlanDetail(planId));
     }
 
     @Operation(summary = "逾期统计")
+    @PreAuthorize("hasAuthority('collection:case')")
     @GetMapping("/overdue-stats")
     public CommonResponse<Map<String, Object>> overdueStats() {
         return CommonResponse.success("查询成功", adminRepaymentQueryService.getOverdueStats());
     }
 
     @Operation(summary = "计划还款记录列表")
+    @PreAuthorize("hasAuthority('collection:action')")
     @GetMapping("/plans/{planId}/records")
     public CommonResponse<Map<String, Object>> planRecords(
             @PathVariable Long planId,
@@ -67,6 +73,7 @@ public class AdminRepaymentController {
     }
 
     @Operation(summary = "还款记录统计")
+    @PreAuthorize("hasAuthority('collection:action')")
     @GetMapping("/records/stats")
     public CommonResponse<Map<String, Object>> recordsStats(
             @RequestParam(required = false) Long planId) {
@@ -74,6 +81,7 @@ public class AdminRepaymentController {
     }
 
     @Operation(summary = "实际还款记录")
+    @PreAuthorize("hasAuthority('collection:action')")
     @GetMapping("/actual-records")
     public CommonResponse<Map<String, Object>> actualRecords(
             @RequestParam(defaultValue = "1") Integer page,
@@ -87,6 +95,7 @@ public class AdminRepaymentController {
     }
 
     @Operation(summary = "逾期记录列表")
+    @PreAuthorize("hasAuthority('collection:case')")
     @GetMapping("/overdue-records")
     public CommonResponse<Map<String, Object>> overdueRecords(
             @RequestParam(defaultValue = "1") Integer page,
@@ -96,12 +105,14 @@ public class AdminRepaymentController {
     }
 
     @Operation(summary = "发送还款提醒")
+    @PreAuthorize("hasAuthority('collection:action:write')")
     @PostMapping("/reminders")
     public CommonResponse<Map<String, Object>> reminders(@RequestBody RepaymentReminderRequest request) {
         return CommonResponse.success("提醒发送成功", adminRepaymentQueryService.sendReminder(request));
     }
 
     @Operation(summary = "生成还款报表")
+    @PreAuthorize("hasAuthority('collection:action:write')")
     @PostMapping("/report")
     public CommonResponse<Map<String, Object>> report(@RequestBody RepaymentReportRequest request) {
         return CommonResponse.success("报表生成成功", adminRepaymentQueryService.generateReport(request));

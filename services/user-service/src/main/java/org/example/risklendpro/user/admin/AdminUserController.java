@@ -8,6 +8,7 @@ import org.example.risklendpro.user.admin.AdminUserUpdateRequest;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.user.admin.AdminUserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +24,7 @@ import java.util.Map;
 @Tag(name = "用户管理", description = "管理员用户 CRUD")
 @RestController
 @RequestMapping("/admin/users")
+@PreAuthorize("hasAuthority('sys:user')")
 public class AdminUserController {
 
     @Autowired
@@ -47,6 +49,7 @@ public class AdminUserController {
     }
 
     @Operation(summary = "用户导出")
+    @PreAuthorize("hasAuthority('sys:user:write')")
     @GetMapping("/export")
     public CommonResponse<Map<String, Object>> export(
             @RequestParam(required = false) String status,
@@ -69,12 +72,14 @@ public class AdminUserController {
     }
 
     @Operation(summary = "新增用户")
+    @PreAuthorize("hasAuthority('sys:user:write')")
     @PostMapping
     public CommonResponse<Map<String, Object>> create(@RequestBody AdminUserCreateRequest request) {
         return CommonResponse.success("创建成功", adminUserService.createUser(request));
     }
 
     @Operation(summary = "编辑用户")
+    @PreAuthorize("hasAuthority('sys:user:write')")
     @PutMapping("/{userId}")
     public CommonResponse<Map<String, Object>> update(
             @PathVariable Long userId, @RequestBody AdminUserUpdateRequest request) {
@@ -82,6 +87,7 @@ public class AdminUserController {
     }
 
     @Operation(summary = "更新用户状态")
+    @PreAuthorize("hasAuthority('sys:user:write')")
     @PatchMapping("/{userId}/status")
     public CommonResponse<Map<String, Object>> updateStatus(
             @PathVariable Long userId, @RequestBody AdminUserStatusRequest request) {

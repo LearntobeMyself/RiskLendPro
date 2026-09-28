@@ -1,5 +1,6 @@
 package org.example.risklendpro.user.auth;
 
+import org.example.risklendpro.api.security.StaffRoles;
 import org.example.risklendpro.common.security.JwtConfig;
 import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.user.mapper.UserMapper;
@@ -80,13 +81,13 @@ public class AuthServiceImpl implements AuthService {
         }
         
         // 3. 生成JWT令牌（包含角色信息）
-        String token = jwtConfig.generateToken(user.getId().toString(), user.getRole());
+        String token = jwtConfig.generateToken(user.getId().toString(), StaffRoles.USER);
         
         // 4. 构建响应
         UserLoginResponse response = new UserLoginResponse();
         response.setId(user.getId());
         response.setToken(token);
-        response.setRole(user.getRole());
+        response.setRole(StaffRoles.USER);
         response.setAssessmentStatus(user.getAssessmentStatus());
         
         return response;

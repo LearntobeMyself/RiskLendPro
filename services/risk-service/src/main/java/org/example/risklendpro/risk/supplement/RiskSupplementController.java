@@ -6,6 +6,7 @@ import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.risk.supplement.SupplementMaterialService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,6 +20,7 @@ import java.util.Map;
 @Tag(name = "补充材料模块", description = "人工复核补充材料上传与查询")
 @RestController
 @RequestMapping("/risk/assessment/supplement")
+@PreAuthorize("hasRole('USER')")
 public class RiskSupplementController {
 
     @Autowired

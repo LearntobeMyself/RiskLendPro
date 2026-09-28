@@ -12,10 +12,16 @@
 - **Swagger 文档**：`http://localhost:8080/api/v1/swagger-ui.html`（本机若用 18081，把端口换成 18081）
 - 若 8080 被占用，命令行执行：`set SERVER_PORT=18081` 再运行 `start.bat`
 
-| | 账号 | 密码 |
-|---|---|---|
-| 管理端 | `admin` | `Admin123456` |
-| 用户端 | `13800138001` | `Test123456` |
+| | 账号 | 密码 | 角色 |
+|---|---|---|---|
+| 系统管理员 | `admin` | `Admin123456` | `SYS_ADMIN` |
+| 风控 | `risk_mgr` | `Admin123456` | `RISK_MANAGER` |
+| 催收 | `collector` | `Admin123456` | `COLLECTOR` |
+| 审计 | `auditor` | `Admin123456` | `AUDITOR` |
+| 客服 | `cs_agent` | `Admin123456` | `CS_AGENT` |
+| 用户端 | `13800138001` | `Test123456` | `USER` |
+
+首次启动 user-service 会给 `admin` 表补 `role` 列，并自动创建上面四个演示账号（已存在则跳过）。身份规格见 `docs/报告结构内容说明/综设III身份与权限对照.md`。
 
 Swagger：`http://localhost:8080/api/v1/swagger-ui.html`  
 当前测试实例：`http://localhost:18081/api/v1/swagger-ui.html`

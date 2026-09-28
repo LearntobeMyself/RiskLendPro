@@ -10,4 +10,8 @@ public class AdminLoginResponse {
     private Long id;
     @Schema(description = "JWT令牌")
     private String token;
+    @Schema(description = "角色码 RISK_MANAGER/COLLECTOR/AUDITOR/CS_AGENT/SYS_ADMIN")
+    private String role;
+    @Schema(description = "权限码列表，供管理端裁菜单")
+    private java.util.List<String> permissions;
 }

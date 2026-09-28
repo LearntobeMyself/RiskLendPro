@@ -1,5 +1,7 @@
 package org.example.risklendpro.config;
 
+import org.example.risklendpro.api.security.RolePermissions;
+import org.example.risklendpro.api.security.StaffRoles;
 import org.example.risklendpro.common.security.JwtConfig;
 import org.example.risklendpro.risk.blacklist.BlacklistSyncProperties;
 import io.jsonwebtoken.Claims;
@@ -74,20 +76,17 @@ public class JwtFilter extends OncePerRequestFilter {
             String role = claims.get("role", String.class);
 
             if (userId != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                UsernamePasswordAuthenticationToken authentication;
-                if (role != null) {
-                    authentication = new UsernamePasswordAuthenticationToken(
-                            userId, null, java.util.Collections.singletonList(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role)));
-                } else {
-                    authentication = new UsernamePasswordAuthenticationToken(
-                            userId, null, java.util.Collections.emptyList());
-                }
-
+                java.util.List<org.springframework.security.core.authority.SimpleGrantedAuthority> authorities =
+                        RolePermissions.authorities(role).stream()
+                                .map(org.springframework.security.core.authority.SimpleGrantedAuthority::new)
+                                .toList();
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(userId, null, authorities);
                 authentication.setDetails(new org.springframework.security.web.authentication.WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
 
-            String attributeKey = "ADMIN".equals(role) ? "managerId" : "userId";
+            String attributeKey = StaffRoles.isStaff(role) ? "managerId" : "userId";
             request.setAttribute(attributeKey, userId);
             chain.doFilter(request, response);
         } catch (ExpiredJwtException e) {
@@ -127,7 +126,6 @@ public class JwtFilter extends OncePerRequestFilter {
                 || requestURI.startsWith("/internal/")
                 || requestURI.contains("/internal/")
                 || requestURI.contains("/admin/login")
-                || requestURI.contains("/admin/register")
                 || requestURI.contains("/swagger-ui")
                 || requestURI.contains("/v3/api-docs")
                 || requestURI.contains("/swagger-resources/")

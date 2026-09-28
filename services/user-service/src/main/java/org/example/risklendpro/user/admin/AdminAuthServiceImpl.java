@@ -1,5 +1,7 @@
 package org.example.risklendpro.user.admin;
 
+import org.example.risklendpro.api.security.RolePermissions;
+import org.example.risklendpro.api.security.StaffRoles;
 import org.example.risklendpro.common.security.JwtConfig;
 import org.example.risklendpro.user.entity.Admin;
 import org.example.risklendpro.user.mapper.AdminMapper;
@@ -50,6 +52,7 @@ public class AdminAuthServiceImpl implements AdminAuthService {
         admin.setPassword(passwordEncoder.encode(request.getPassword()));
         admin.setPhoneNumber(request.getPhoneNumber());
         admin.setEmail(request.getEmail());
+        admin.setRole(StaffRoles.SYS_ADMIN);
         admin.setCreateTime(new Date());
         admin.setUpdateTime(new Date());
         
@@ -72,12 +75,15 @@ public class AdminAuthServiceImpl implements AdminAuthService {
         }
         
         // 3. 生成JWT令牌（包含角色信息）
-        String token = jwtConfig.generateToken(admin.getId().toString(), "ADMIN");
+        String role = resolveRole(admin);
+        String token = jwtConfig.generateToken(admin.getId().toString(), role);
         
         // 4. 构建响应
         AdminLoginResponse response = new AdminLoginResponse();
         response.setId(admin.getId());
         response.setToken(token);
+        response.setRole(role);
+        response.setPermissions(RolePermissions.authorities(role));
         
         return response;
     }
@@ -94,9 +100,16 @@ public class AdminAuthServiceImpl implements AdminAuthService {
         profile.put("name", admin.getUsername());
         profile.put("phoneNumber", admin.getPhoneNumber());
         profile.put("email", admin.getEmail());
-        profile.put("role", "SUPER_ADMIN");
+        String role = resolveRole(admin);
+        profile.put("role", role);
+        profile.put("permissions", RolePermissions.authorities(role));
         profile.put("avatar", "");
         profile.put("lastLoginTime", AdminDateHelper.formatDateTime(admin.getUpdateTime()));
         return profile;
+    }
+
+    private String resolveRole(Admin admin) {
+        String role = StaffRoles.normalize(admin.getRole());
+        return StaffRoles.isStaff(role) ? role : StaffRoles.SYS_ADMIN;
     }
 }

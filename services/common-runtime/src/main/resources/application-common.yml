@@ -84,6 +84,7 @@ security:
 risk:
   schema:
     auto-migrate-account-status: true
+    auto-migrate-admin-role: true
   blacklist-sync:
     api-token: "bl-sync-a3f8c2e1-7b4d-4f9a-9e6c-1d2b5a8f3c7e"
   coze:
