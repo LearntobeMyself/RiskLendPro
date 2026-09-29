@@ -90,8 +90,9 @@ risk:
   coze:
     enabled: true
     api-url: https://api.coze.cn/v1/workflow/run
-    workflow-id: "7647934026113089570"
-    workflow-version: "v0.0.3"
+    workflow-id: "7690804879720710159"
+    workflow-version: "v0.0.1"
+    # PAT 不写在本文件。填写 config/local/application-local.yml 的 risk.coze.token（该目录已 gitignore）
     # 每周日 02:00
     cron: "0 0 2 ? * SUN"
     read-timeout-ms: 300000

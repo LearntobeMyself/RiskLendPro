@@ -72,7 +72,8 @@ public class CozeWorkflowService {
 
     private void validateConfig() {
         if (properties.getToken() == null || properties.getToken().isBlank()) {
-            throw new IllegalStateException("risk.coze.token 未配置，请设置 COZE_API_TOKEN 环境变量");
+            throw new IllegalStateException(
+                    "risk.coze.token 未配置，请在 config/local/application-local.yml 填写 PAT");
         }
         if (properties.getWorkflowId() == null || properties.getWorkflowId().isBlank()) {
             throw new IllegalStateException("risk.coze.workflow-id 未配置");
