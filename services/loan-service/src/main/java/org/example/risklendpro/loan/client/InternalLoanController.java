@@ -20,6 +20,7 @@ import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
@@ -102,9 +103,18 @@ public class InternalLoanController implements LoanApi {
     }
 
     @Override
+    @Transactional
     public CreditLimitSnapshot grantCreditLimit(CreditLimitGrantCommand command) {
-        UserCreditLimit limit = findLimit(command.userId());
+        UserCreditLimit limit = findLimitForUpdate(command.userId());
         BigDecimal approvedLimit = command.approvedLimit() != null ? command.approvedLimit() : BigDecimal.ZERO;
+        String grantKey = grantReasonKey(command.assessmentId());
+        if (grantKey != null && hasExistingGrant(command.userId(), grantKey)) {
+            return limit == null ? null : toSnapshot(limit);
+        }
+
+        BigDecimal oldTotal = limit == null || limit.getTotalLimit() == null
+                ? BigDecimal.ZERO
+                : limit.getTotalLimit();
         if (limit == null) {
             limit = new UserCreditLimit();
             limit.setUserId(command.userId());
@@ -117,8 +127,6 @@ public class InternalLoanController implements LoanApi {
             limit.setLastUpdateTime(new Date());
             userCreditLimitMapper.insert(limit);
         } else {
-            // 新增授信：在原有额度基础上累加，保留已有的已用额度与还款记录
-            BigDecimal oldTotal = limit.getTotalLimit() != null ? limit.getTotalLimit() : BigDecimal.ZERO;
             BigDecimal used = limit.getUsedLimit() != null ? limit.getUsedLimit() : BigDecimal.ZERO;
             BigDecimal newTotal = oldTotal.add(approvedLimit);
             BigDecimal newRemaining = newTotal.subtract(used).max(BigDecimal.ZERO);
@@ -126,17 +134,16 @@ public class InternalLoanController implements LoanApi {
             limit.setRemainingLimit(newRemaining);
             limit.setLastUpdateTime(new Date());
             userCreditLimitMapper.updateById(limit);
-
-            // 记录一次新增授信日志，便于审计追踪
-            LimitAdjustLog log = new LimitAdjustLog();
-            log.setUserId(command.userId());
-            log.setOldLimit(oldTotal);
-            log.setNewLimit(newTotal);
-            log.setReason("新增授信审批通过，获批额度：" + approvedLimit + "，原总额度：" + oldTotal);
-            log.setOperatorId(0L);
-            log.setAdjustTime(new Date());
-            limitAdjustLogMapper.insert(log);
         }
+
+        LimitAdjustLog log = new LimitAdjustLog();
+        log.setUserId(command.userId());
+        log.setOldLimit(oldTotal);
+        log.setNewLimit(limit.getTotalLimit());
+        log.setReason(buildGrantReason(grantKey, approvedLimit, oldTotal));
+        log.setOperatorId(0L);
+        log.setAdjustTime(new Date());
+        limitAdjustLogMapper.insert(log);
         return toSnapshot(limit);
     }
 
@@ -456,6 +463,31 @@ public class InternalLoanController implements LoanApi {
     private UserCreditLimit findLimit(Long userId) {
         return userCreditLimitMapper.selectOne(
                 new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
+    }
+
+    private UserCreditLimit findLimitForUpdate(Long userId) {
+        return userCreditLimitMapper.selectOne(
+                new QueryWrapper<UserCreditLimit>().eq("user_id", userId).last("FOR UPDATE"));
+    }
+
+    private boolean hasExistingGrant(Long userId, String grantKey) {
+        Long count = limitAdjustLogMapper.selectCount(
+                new QueryWrapper<LimitAdjustLog>()
+                        .eq("user_id", userId)
+                        .likeRight("reason", grantKey));
+        return count != null && count > 0;
+    }
+
+    private static String grantReasonKey(String assessmentId) {
+        if (assessmentId == null || assessmentId.isBlank()) {
+            return null;
+        }
+        return "GRANT_ASSESSMENT:[" + assessmentId + "]";
+    }
+
+    private static String buildGrantReason(String grantKey, BigDecimal approvedLimit, BigDecimal oldTotal) {
+        String prefix = grantKey != null ? grantKey : "GRANT_ASSESSMENT";
+        return prefix + "：新增授信审批通过，获批额度：" + approvedLimit + "，原总额度：" + oldTotal;
     }
 
     private CreditLimitSnapshot toSnapshot(UserCreditLimit limit) {

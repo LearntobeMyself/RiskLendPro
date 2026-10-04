@@ -291,7 +291,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
     @Override
     public RiskAssessmentResultResponse getResultForUser(Long userId, String applyIdOptional) {
-        // 注意：本方法无本地写操作，且会触发跨服务 Feign 调用，因此不开事务，避免持有 DB 连接跨 HTTP。
+        // 查询结果只读：授信在终审写路径发放，避免轮询 GET 重复累加额度。
         RiskAssessment riskAssessment = resolveAssessmentForUser(userId, applyIdOptional);
         return buildResultResponse(riskAssessment);
     }
@@ -350,11 +350,6 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         }
 
         if (StatusEnum.FINAL_PASS.getValue().equals(riskAssessment.getStatus()) && riskAssessment.getCreditLimit() != null) {
-            loanServiceClient.grantCreditLimit(new CreditLimitGrantCommand(
-                    riskAssessment.getUserId(),
-                    riskAssessment.getApplyId(),
-                    riskAssessment.getCreditLimit()));
-
             userServiceClient.updateAssessmentStatus(
                     new UserAssessmentStatusCommand(riskAssessment.getUserId(), "APPROVED"));
         }
@@ -490,6 +485,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
             riskAssessmentMapper.updateById(riskAssessment);
             syncUserAssessmentStatus(riskAssessment);
+            grantCreditLimitIfPassed(riskAssessment);
 
             warnIfScoreDetailsEmpty(riskAssessment.getApplyId(), report);
             safeCacheRiskReport(riskAssessment.getApplyId(), report);
@@ -662,6 +658,17 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             log.warn("Failed to resolve active model version: {}", e.getMessage());
         }
         return "unknown";
+    }
+
+    private void grantCreditLimitIfPassed(RiskAssessment riskAssessment) {
+        if (!StatusEnum.FINAL_PASS.getValue().equals(riskAssessment.getStatus())
+                || riskAssessment.getCreditLimit() == null) {
+            return;
+        }
+        loanServiceClient.grantCreditLimit(new CreditLimitGrantCommand(
+                riskAssessment.getUserId(),
+                riskAssessment.getApplyId(),
+                riskAssessment.getCreditLimit()));
     }
 
     private void syncUserAssessmentStatus(RiskAssessment riskAssessment) {
