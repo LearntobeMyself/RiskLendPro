@@ -81,7 +81,10 @@ public class AuthServiceImpl implements AuthService {
         }
         
         // 3. 生成JWT令牌（包含角色信息）
-        String token = jwtConfig.generateToken(user.getId().toString(), StaffRoles.USER);
+        String token = jwtConfig.generateToken(
+                user.getId().toString(),
+                StaffRoles.USER,
+                user.getAccountStatus() == null ? "ACTIVE" : user.getAccountStatus());
         
         // 4. 构建响应
         UserLoginResponse response = new UserLoginResponse();

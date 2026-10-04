@@ -89,6 +89,14 @@ public class JwtFilter extends OncePerRequestFilter {
             Claims claims = jwtConfig.parseToken(token);
             String userId = claims.getSubject();
             String role = claims.get("role", String.class);
+            String accountStatus = claims.get("accountStatus", String.class);
+            if (accountStatus != null
+                    && !accountStatus.isBlank()
+                    && !"ACTIVE".equalsIgnoreCase(accountStatus)
+                    && !StaffRoles.isStaff(role)) {
+                sendError(response, 403, "账号已被禁用或冻结");
+                return;
+            }
 
             if (userId != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 java.util.List<org.springframework.security.core.authority.SimpleGrantedAuthority> authorities =

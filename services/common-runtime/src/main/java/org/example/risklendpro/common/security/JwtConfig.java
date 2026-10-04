@@ -36,16 +36,22 @@ public class JwtConfig {
     }
 
     public String generateToken(String id, String role) {
+        return generateToken(id, role, null);
+    }
+
+    public String generateToken(String id, String role, String accountStatus) {
         Date now = new Date();
         Date expireDate = new Date(now.getTime() + EXPIRE * 1000);
 
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(id)
                 .claim(ROLE_CLAIM, role)
                 .issuedAt(now)
-                .expiration(expireDate)
-                .signWith(getSigningKey())
-                .compact();
+                .expiration(expireDate);
+        if (accountStatus != null && !accountStatus.isBlank()) {
+            builder.claim("accountStatus", accountStatus);
+        }
+        return builder.signWith(getSigningKey()).compact();
     }
 
     public Claims parseToken(String token) {
