@@ -25,6 +25,7 @@ public class BehaviorScoreEngineImpl implements BehaviorScoreEngine {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private volatile JsonNode cachedRuleRoot;
+    private volatile String cachedRuleVersion;
     private volatile double cachedWatch = DEFAULT_WATCH;
     private volatile double cachedReduce = DEFAULT_REDUCE;
 
@@ -68,20 +69,24 @@ public class BehaviorScoreEngineImpl implements BehaviorScoreEngine {
     }
 
     private JsonNode loadRuleRoot() {
-        if (cachedRuleRoot != null) {
-            return cachedRuleRoot;
-        }
-        synchronized (this) {
-            if (cachedRuleRoot != null) {
+        try {
+            BehaviorScoringRules rules = behaviorScoringRulesMapper.selectActiveRule();
+            String version = rules != null ? rules.getVersion() : null;
+            if (cachedRuleRoot != null && java.util.Objects.equals(cachedRuleVersion, version)) {
                 return cachedRuleRoot;
             }
-            try {
-                BehaviorScoringRules rules = behaviorScoringRulesMapper.selectActiveRule();
+            synchronized (this) {
+                if (cachedRuleRoot != null && java.util.Objects.equals(cachedRuleVersion, version)) {
+                    return cachedRuleRoot;
+                }
                 if (rules == null || rules.getRuleContent() == null) {
                     log.warn("未找到激活的 B 卡规则 behavior_scoring_rules");
+                    cachedRuleRoot = null;
+                    cachedRuleVersion = version;
                     return null;
                 }
                 cachedRuleRoot = objectMapper.readTree(rules.getRuleContent());
+                cachedRuleVersion = version;
                 if (rules.getThresholdWatch() != null) {
                     cachedWatch = rules.getThresholdWatch().doubleValue();
                 }
@@ -89,10 +94,10 @@ public class BehaviorScoreEngineImpl implements BehaviorScoreEngine {
                     cachedReduce = rules.getThresholdReduceLimit().doubleValue();
                 }
                 return cachedRuleRoot;
-            } catch (Exception e) {
-                log.error("加载 B 卡规则失败", e);
-                return null;
             }
+        } catch (Exception e) {
+            log.error("加载 B 卡规则失败", e);
+            return cachedRuleRoot;
         }
     }
 
