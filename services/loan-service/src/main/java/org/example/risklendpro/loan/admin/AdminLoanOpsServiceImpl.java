@@ -446,20 +446,6 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     }
 
     private void generateRepaymentPlan(Loan loan, String repaymentMethod) {
-        RepaymentPlan plan = new RepaymentPlan();
-        plan.setLoanId(loan.getLoanId());
-        plan.setUserId(loan.getUserId());
-        plan.setTotalAmount(loan.getAmount());
-        plan.setPaidAmount(BigDecimal.ZERO);
-        plan.setRemainingAmount(loan.getAmount());
-        plan.setTotalPeriods(loan.getTermMonths());
-        plan.setCurrentPeriod(1);
-        plan.setStatus("ACTIVE");
-        plan.setCreateTime(new Date());
-        plan.setUpdateTime(new Date());
-
-        repaymentPlanMapper.insert(plan);
-
         List<RepaymentCalculator.RepaymentDetail> details;
         switch (repaymentMethod) {
             case "等额本息":
@@ -477,6 +463,25 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             default:
                 throw new RuntimeException("不支持的还款方式: " + repaymentMethod);
         }
+
+        BigDecimal totalRepayable = BigDecimal.ZERO;
+        for (RepaymentCalculator.RepaymentDetail detail : details) {
+            totalRepayable = totalRepayable.add(detail.getAmount());
+        }
+
+        RepaymentPlan plan = new RepaymentPlan();
+        plan.setLoanId(loan.getLoanId());
+        plan.setUserId(loan.getUserId());
+        plan.setTotalAmount(totalRepayable);
+        plan.setPaidAmount(BigDecimal.ZERO);
+        plan.setRemainingAmount(totalRepayable);
+        plan.setTotalPeriods(loan.getTermMonths());
+        plan.setCurrentPeriod(1);
+        plan.setStatus("ACTIVE");
+        plan.setCreateTime(new Date());
+        plan.setUpdateTime(new Date());
+
+        repaymentPlanMapper.insert(plan);
 
         Date now = new Date();
         for (RepaymentCalculator.RepaymentDetail detail : details) {
