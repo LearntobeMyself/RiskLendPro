@@ -132,6 +132,9 @@ public class CatalogAssembler {
         detail.put("materials", CatalogJson.readStringList(product.getMaterials()));
         detail.put("others", others);
         detail.put("meta", meta);
+        if (!admin) {
+            detail.put("inPlatformApply", ProductApplySupport.inPlatformApply(product));
+        }
         if (admin) {
             detail.put("status", product.getStatus());
             detail.put("everOnShelf", product.getEverOnShelf());

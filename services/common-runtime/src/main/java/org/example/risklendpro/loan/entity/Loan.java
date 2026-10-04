@@ -38,6 +38,12 @@ public class Loan {
     private BigDecimal additionalLimit;
     @TableField("operator_id")
     private Long operatorId;
+    @TableField("product_id")
+    private Long productId;
+    @TableField("product_name")
+    private String productName;
+    @TableField("apply_channel")
+    private String applyChannel;
     @TableField("create_time")
     private Date createTime;
     @TableField("update_time")

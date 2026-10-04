@@ -3,6 +3,7 @@ package org.example.risklendpro.risk.client;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.risklendpro.api.contract.RiskDecisionApi;
 import org.example.risklendpro.api.dto.BehaviorScoreSnapshot;
+import org.example.risklendpro.api.dto.BorrowGateResult;
 import org.example.risklendpro.api.dto.RiskAssessmentSummary;
 import org.example.risklendpro.api.dto.RiskOverviewCounts;
 import org.example.risklendpro.risk.entity.RiskAssessment;
@@ -10,6 +11,7 @@ import org.example.risklendpro.risk.entity.UserBCardLog;
 import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.risk.mapper.UserBCardLogMapper;
 import org.example.risklendpro.risk.score.BehaviorScoreService;
+import org.example.risklendpro.risk.score.CreditScoreEngine;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -32,6 +34,9 @@ public class InternalRiskController implements RiskDecisionApi {
 
     @Autowired
     private BehaviorScoreService behaviorScoreService;
+
+    @Autowired
+    private CreditScoreEngine creditScoreEngine;
 
     @Override
     public RiskAssessmentSummary getLatestFinalAssessment(Long userId) {
@@ -105,6 +110,42 @@ public class InternalRiskController implements RiskDecisionApi {
     @Override
     public double getLimitMultiplier(double score) {
         return behaviorScoreService.resolveLimitMultiplier(score);
+    }
+
+    @Override
+    public BorrowGateResult getBorrowGate(Long userId) {
+        RiskAssessment assessment = riskAssessmentMapper.selectOne(
+                new QueryWrapper<RiskAssessment>()
+                        .eq("user_id", userId)
+                        .eq("is_final", true)
+                        .orderByDesc("approval_time")
+                        .last("LIMIT 1")
+        );
+        if (assessment == null) {
+            return BorrowGateResult.deny("NO_CREDIT", "用户尚未完成授信评估，无法借款", null, null);
+        }
+        String status = assessment.getStatus();
+        if ("SYSTEM_REJECT".equals(status) || "FINAL_REJECT".equals(status)
+                || !"FINAL_PASS".equals(status)) {
+            return BorrowGateResult.deny(
+                    "ASSESSMENT_REJECTED",
+                    "授信评估未通过，无法借款",
+                    assessment.getApplyId(),
+                    assessment.getIdCard());
+        }
+        if (assessment.getName() != null && !assessment.getName().isBlank()
+                && assessment.getIdCard() != null && !assessment.getIdCard().isBlank()) {
+            CreditScoreEngine.BlacklistMatchResult hit =
+                    creditScoreEngine.checkBlacklist(assessment.getName(), assessment.getIdCard());
+            if (hit != null && hit.isReject()) {
+                return BorrowGateResult.deny(
+                        "BLACKLIST_HIT",
+                        "当前命中黑名单，无法借款",
+                        assessment.getApplyId(),
+                        assessment.getIdCard());
+            }
+        }
+        return BorrowGateResult.allow(assessment.getApplyId(), assessment.getIdCard());
     }
 
     private BehaviorScoreSnapshot loadLatestSnapshot(Long userId) {

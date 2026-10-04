@@ -2,7 +2,7 @@ package org.example.risklendpro.loan.borrow;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.example.risklendpro.api.dto.RiskAssessmentSummary;
+import org.example.risklendpro.api.dto.BorrowGateResult;
 import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
@@ -16,6 +16,7 @@ import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.borrow.LoanRequest;
 import org.example.risklendpro.loan.borrow.LoanResponse;
 import org.example.risklendpro.loan.borrow.LoanService;
+import org.example.risklendpro.loan.catalog.ProductApplySupport;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.common.mail.EmailUtil;
@@ -57,6 +58,9 @@ public class LoanServiceImpl implements LoanService {
     @Autowired
     private UserServiceClient userServiceClient;
 
+    @Autowired
+    private ProductApplySupport productApplySupport;
+
     private final TransactionTemplate transactionTemplate;
 
     public LoanServiceImpl(PlatformTransactionManager transactionManager) {
@@ -65,88 +69,77 @@ public class LoanServiceImpl implements LoanService {
 
     @Override
     public LoanResponse requestLoan(Long userId, LoanRequest request) {
-        // 1. 获取用户最新授信评估信息（Feign 读取，放到事务外，避免持有 DB 连接）
-        RiskAssessmentSummary latestAssessment = riskServiceClient.getLatestFinalAssessment(userId);
-
-        if (latestAssessment == null) {
-            throw new RuntimeException("用户尚未完成授信评估，无法借款");
+        BorrowGateResult gate = riskServiceClient.getBorrowGate(userId);
+        if (gate == null || !gate.allowed()) {
+            String message = gate == null || gate.reasonMessage() == null || gate.reasonMessage().isBlank()
+                    ? "当前无法借款"
+                    : gate.reasonMessage();
+            throw new RuntimeException(message);
         }
 
-        // 8. 检查借款金额是否有效
         if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new RuntimeException("借款金额必须大于0");
         }
-
-        // 9. 检查还款期限是否有效
         if (request.getTermMonths() == null || request.getTermMonths() < 1) {
             throw new RuntimeException("还款期限必须大于0");
         }
 
-        // DB 写操作统一放在一个事务内（含 FOR UPDATE 额度行锁）
+        ProductApplySupport.ResolvedApply apply = resolveApply(request);
+
         final boolean[] autoApprovedRef = {false};
         final BigDecimal[] remainingLimitRef = {BigDecimal.ZERO};
         Loan loan = transactionTemplate.execute(status -> {
-            // 2. 检查用户是否有未处理逾期
             checkOverdue(userId);
 
-            // 3. 检查用户是否有授信额度（FOR UPDATE 行锁）
             UserCreditLimit creditLimit = getUserCreditLimit(userId);
             if (creditLimit == null) {
                 throw new RuntimeException("用户尚未获得授信额度，无法借款");
             }
 
-            // 7. 检查用户剩余额度
             BigDecimal remainingLimit = creditLimit.getRemainingLimit();
             if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new RuntimeException("您的额度已用完，无法借款");
             }
             remainingLimitRef[0] = remainingLimit;
 
-            // 6. 保存贷款记录
             Loan newLoan = new Loan();
             newLoan.setUserId(userId);
             newLoan.setAmount(request.getAmount());
             newLoan.setTermMonths(request.getTermMonths());
-            newLoan.setInterestRate(new BigDecimal("0.05"));
-            newLoan.setRepaymentMethod(request.getRepaymentMethod());
+            newLoan.setInterestRate(apply.interestRate());
+            newLoan.setRepaymentMethod(apply.repaymentMethod());
+            newLoan.setProductId(apply.productId());
+            newLoan.setProductName(apply.productName());
+            newLoan.setApplyChannel(apply.applyChannel());
             newLoan.setApplyTime(new Date());
             newLoan.setCreateTime(new Date());
             newLoan.setUpdateTime(new Date());
 
-            // 4. 根据额度判断处理方式
             if (request.getAmount().compareTo(remainingLimit) <= 0) {
-                // 4.1 额度内借款，自动审批通过
                 newLoan.setStatus(LoanStatusEnum.DISBURSED.getCode());
                 newLoan.setDisbursementTime(new Date());
                 newLoan.setAutoApproved(true);
-
-                // 4.2 扣减额度
                 deductCreditLimit(creditLimit, request.getAmount());
             } else {
-                // 4.3 额度外借款，需要审批
                 newLoan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
                 newLoan.setAutoApproved(false);
             }
 
             loanMapper.insert(newLoan);
 
-            // 6. 生成还款计划和还款记录（仅当自动审批通过时）
             if (newLoan.getAutoApproved()) {
-                generateRepaymentPlan(newLoan, request.getRepaymentMethod());
+                generateRepaymentPlan(newLoan, apply.repaymentMethod());
             }
             autoApprovedRef[0] = Boolean.TRUE.equals(newLoan.getAutoApproved());
             return newLoan;
         });
 
-        // 事务已提交，再做外部副作用调用，避免持有 DB 连接跨 HTTP
         if (autoApprovedRef[0]) {
-            riskServiceClient.activateBehaviorScore(userId, latestAssessment.idCard());
+            riskServiceClient.activateBehaviorScore(userId, gate.idCard());
         }
 
-        // 7. 发送邮件通知
         sendLoanNotification(userId, request, remainingLimitRef[0], autoApprovedRef[0]);
 
-        // 6. 构建响应
         LoanResponse response = new LoanResponse();
         BeanUtils.copyProperties(loan, response);
         if (autoApprovedRef[0]) {
@@ -156,6 +149,22 @@ public class LoanServiceImpl implements LoanService {
         }
 
         return response;
+    }
+
+    private ProductApplySupport.ResolvedApply resolveApply(LoanRequest request) {
+        if (request.getProductId() == null) {
+            return new ProductApplySupport.ResolvedApply(
+                    null,
+                    null,
+                    ProductApplySupport.CHANNEL_DIRECT,
+                    ProductApplySupport.DIRECT_RATE,
+                    ProductApplySupport.normalizeRepaymentMethod(request.getRepaymentMethod()));
+        }
+        return productApplySupport.resolve(
+                request.getProductId(),
+                request.getAmount(),
+                request.getTermMonths(),
+                request.getRepaymentMethod());
     }
 
     @Override

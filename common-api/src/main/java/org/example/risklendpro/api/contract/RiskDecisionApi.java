@@ -1,6 +1,7 @@
 package org.example.risklendpro.api.contract;
 
 import org.example.risklendpro.api.dto.BehaviorScoreSnapshot;
+import org.example.risklendpro.api.dto.BorrowGateResult;
 import org.example.risklendpro.api.dto.RiskAssessmentSummary;
 import org.example.risklendpro.api.dto.RiskOverviewCounts;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,4 +40,10 @@ public interface RiskDecisionApi {
 
     @GetMapping("/internal/behavior-scores/limit-multiplier")
     double getLimitMultiplier(@RequestParam("score") double score);
+
+    /**
+     * 借款前授信/黑名单门禁。实现可随风控升级替换，调用方只消费 allowed。
+     */
+    @GetMapping("/internal/risk-assessments/users/{userId}/borrow-gate")
+    BorrowGateResult getBorrowGate(@PathVariable("userId") Long userId);
 }

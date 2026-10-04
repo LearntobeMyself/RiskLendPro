@@ -30,4 +30,10 @@ public class LoanResponse {
     private Boolean autoApproved;
     @Schema(description = "备注")
     private String remark;
+    @Schema(description = "目录产品ID，直接借款为空")
+    private Long productId;
+    @Schema(description = "申请时产品名称快照")
+    private String productName;
+    @Schema(description = "申请通路 DIRECT/PRODUCT")
+    private String applyChannel;
 }
