@@ -84,7 +84,7 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
     @Transactional
     public LimitAdjustResponse adjustLimit(LimitAdjustRequest request, Long operatorId) {
         QueryWrapper<UserCreditLimit> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("user_id", request.getUserId());
+        queryWrapper.eq("user_id", request.getUserId()).last("FOR UPDATE");
         UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(queryWrapper);
 
         if (creditLimit == null) {

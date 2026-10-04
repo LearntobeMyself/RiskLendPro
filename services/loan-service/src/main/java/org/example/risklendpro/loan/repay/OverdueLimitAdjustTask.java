@@ -56,13 +56,27 @@ public class OverdueLimitAdjustTask {
         for (UserCreditLimit creditLimit : overdueUsers) {
             if (Boolean.TRUE.equals(creditLimit.getBCardEnabled())) {
                 riskServiceClient.recalculateBehaviorScore(creditLimit.getUserId());
-                creditLimit = userCreditLimitMapper.selectById(creditLimit.getId());
+                creditLimit = userCreditLimitMapper.selectOne(
+                        new QueryWrapper<UserCreditLimit>()
+                                .eq("id", creditLimit.getId())
+                                .last("FOR UPDATE"));
             }
             adjustUserLimitByOverdue(creditLimit);
         }
     }
 
     private void adjustUserLimitByOverdue(UserCreditLimit creditLimit) {
+        if (creditLimit == null || creditLimit.getUserId() == null) {
+            return;
+        }
+        creditLimit = userCreditLimitMapper.selectOne(
+                new QueryWrapper<UserCreditLimit>()
+                        .eq("user_id", creditLimit.getUserId())
+                        .last("FOR UPDATE"));
+        if (creditLimit == null || creditLimit.getTotalLimit() == null) {
+            return;
+        }
+
         QueryWrapper<RepaymentPlan> planQuery = new QueryWrapper<>();
         planQuery.eq("user_id", creditLimit.getUserId());
         planQuery.eq("status", "OVERDUE");

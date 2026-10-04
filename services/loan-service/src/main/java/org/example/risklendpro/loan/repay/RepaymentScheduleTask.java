@@ -262,7 +262,7 @@ public class RepaymentScheduleTask {
 
     private void updateUserCreditLimit(Long userId, java.math.BigDecimal overdueAmount, boolean hasOverdue) {
         UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId)
+                new QueryWrapper<UserCreditLimit>().eq("user_id", userId).last("FOR UPDATE")
         );
 
         if (creditLimit != null) {
