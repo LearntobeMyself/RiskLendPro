@@ -25,13 +25,11 @@ class RepaymentCalculatorTest {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         assertEquals(PRINCIPAL.stripTrailingZeros(), principalSum.stripTrailingZeros());
 
-        // 每月还款额固定且为正
-        BigDecimal first = details.get(0).getAmount();
         details.forEach(d -> {
             assertTrue(d.getAmount().compareTo(BigDecimal.ZERO) > 0);
+            assertTrue(d.getInterest().compareTo(BigDecimal.ZERO) >= 0);
             assertEquals(d.getAmount().setScale(2), d.getAmount());
         });
-        assertEquals(first, details.get(11).getAmount());
     }
 
     @Test

@@ -38,13 +38,15 @@ public class RepaymentCalculator {
             // 每月本金 = 每月还款额 - 每月利息
             BigDecimal principalPayment = monthlyPayment.subtract(interest).setScale(2, RoundingMode.HALF_UP);
             
-            // 处理最后一期可能的尾差
             if (i == months) {
                 principalPayment = remainingPrincipal;
-                interest = monthlyPayment.subtract(principalPayment).setScale(2, RoundingMode.HALF_UP);
+                interest = remainingPrincipal.multiply(monthlyRate).setScale(2, RoundingMode.HALF_UP);
+                BigDecimal lastPayment = principalPayment.add(interest).setScale(2, RoundingMode.HALF_UP);
+                details.add(new RepaymentDetail(i, principalPayment, interest, lastPayment));
+            } else {
+                details.add(new RepaymentDetail(i, principalPayment, interest, monthlyPayment));
             }
-            
-            details.add(new RepaymentDetail(i, principalPayment, interest, monthlyPayment));
+
             remainingPrincipal = remainingPrincipal.subtract(principalPayment);
         }
         
