@@ -12,6 +12,6 @@ public class UserLoginResponse {
     private String token;
     @Schema(description = "用户角色")
     private String role;
-    @Schema(description = "评估状态：NOT_ASSESSED=未评估, ASSESSING=评估中, APPROVED=已获额度")
+    @Schema(description = "评估状态：NOT_ASSESSED=未评估, WAITING/MANUAL_REVIEW=评估中, FINAL_PASS=已通过, SYSTEM_REJECT/FINAL_REJECT=已拒绝")
     private String assessmentStatus;
 }

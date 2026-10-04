@@ -349,11 +349,6 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
             throw new RuntimeException("评估尚未完成");
         }
 
-        if (StatusEnum.FINAL_PASS.getValue().equals(riskAssessment.getStatus()) && riskAssessment.getCreditLimit() != null) {
-            userServiceClient.updateAssessmentStatus(
-                    new UserAssessmentStatusCommand(riskAssessment.getUserId(), "APPROVED"));
-        }
-
         RiskAssessmentResultResponse response = new RiskAssessmentResultResponse();
         response.setApplyId(riskAssessment.getApplyId());
         response.setTotalScore(riskAssessment.getTotalScore());
