@@ -250,9 +250,13 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     @Override
     @Transactional
     public LoanApproveResponse approveLoan(LoanApproveRequest request) {
-        Loan loan = loanMapper.selectById(request.getLoanId());
+        Loan loan = loanMapper.selectOne(
+                new QueryWrapper<Loan>().eq("loan_id", request.getLoanId()).last("FOR UPDATE"));
         if (loan == null) {
             throw new RuntimeException("贷款申请不存在");
+        }
+        if (!LoanStatusEnum.PENDING_APPROVAL.getCode().equals(loan.getStatus())) {
+            throw new RuntimeException("该贷款申请已处理，无法重复审批");
         }
 
         UserSummary user = userServiceClient.getUser(loan.getUserId());
@@ -262,12 +266,18 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
         response.setUserId(loan.getUserId());
 
         if ("APPROVE".equals(request.getApproveResult())) {
+            long existingPlans = repaymentPlanMapper.selectCount(
+                    new QueryWrapper<RepaymentPlan>().eq("loan_id", loan.getLoanId()));
+            if (existingPlans > 0) {
+                throw new RuntimeException("该贷款已生成还款计划，无法重复放款");
+            }
+
             loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
             loan.setApproveTime(new Date());
             loan.setDisbursementTime(new Date());
 
             UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
-                    new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId())
+                    new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId()).last("FOR UPDATE")
             );
 
             if (creditLimit != null) {

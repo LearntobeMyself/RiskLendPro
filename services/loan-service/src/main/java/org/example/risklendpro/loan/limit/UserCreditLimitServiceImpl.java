@@ -147,7 +147,12 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
         }
 
         UserSummary user = userServiceClient.getUser(userId);
-        for (Loan loan : pendingLoans) {
+        for (Loan pending : pendingLoans) {
+            Loan loan = loanMapper.selectOne(
+                    new QueryWrapper<Loan>().eq("loan_id", pending.getLoanId()).last("FOR UPDATE"));
+            if (loan == null || !LoanStatusEnum.PENDING_APPROVAL.getCode().equals(loan.getStatus())) {
+                continue;
+            }
             BigDecimal remainingLimit = creditLimit.getRemainingLimit();
             if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
                 break;
