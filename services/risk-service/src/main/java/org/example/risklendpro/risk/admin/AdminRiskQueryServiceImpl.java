@@ -9,6 +9,7 @@ import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.api.dto.BCardRepaymentSnapshot;
 import org.example.risklendpro.api.dto.CreditLimitGrantCommand;
 import org.example.risklendpro.api.dto.CreditLimitSnapshot;
+import org.example.risklendpro.api.dto.UserAssessmentStatusCommand;
 import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.risk.client.LoanServiceClient;
 import org.example.risklendpro.risk.client.UserServiceClient;
@@ -427,17 +428,23 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
     @Transactional
     public void approveRisk(RiskApproveRequest request) {
         RiskAssessment assessment = riskAssessmentMapper.selectOne(
-                new QueryWrapper<RiskAssessment>().eq("apply_id", request.getApplyId())
+                new QueryWrapper<RiskAssessment>().eq("apply_id", request.getApplyId()).last("FOR UPDATE")
         );
         if (assessment == null) {
             throw new RuntimeException("评估申请不存在");
+        }
+        if (Boolean.TRUE.equals(assessment.getIsFinal())
+                || StatusEnum.FINAL_PASS.getValue().equals(assessment.getStatus())
+                || StatusEnum.FINAL_REJECT.getValue().equals(assessment.getStatus())
+                || StatusEnum.SYSTEM_REJECT.getValue().equals(assessment.getStatus())) {
+            throw new RuntimeException("该评估已终审，无法重复审批");
         }
 
         if ("PASS".equals(request.getAuditResult())) {
             assessment.setStatus("FINAL_PASS");
             assessment.setCreditLimit(request.getCreditLimit());
 
-            // 通过 loan-service 创建或更新用户额度记录
+            // 通过 loan-service 创建或更新用户额度记录（按 applyId 幂等）
             loanServiceClient.grantCreditLimit(new CreditLimitGrantCommand(
                     assessment.getUserId(),
                     assessment.getApplyId(),
@@ -449,6 +456,8 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         assessment.setAuditRemark(request.getAuditRemark());
         assessment.setApprovalTime(new Date());
         riskAssessmentMapper.updateById(assessment);
+        userServiceClient.updateAssessmentStatus(
+                new UserAssessmentStatusCommand(assessment.getUserId(), assessment.getStatus()));
 
         emailUtil.sendRiskAssessmentNotification(
                 assessment.getEmail(),
