@@ -141,7 +141,7 @@ public class InternalRiskController implements RiskDecisionApi {
                 && assessment.getIdCard() != null && !assessment.getIdCard().isBlank()) {
             CreditScoreEngine.BlacklistMatchResult hit =
                     creditScoreEngine.checkBlacklist(assessment.getName(), assessment.getIdCard());
-            if (hit != null && hit.isReject()) {
+        if (hit != null && (hit.isReject() || hit.isNeedManualReview())) {
                 return BorrowGateResult.deny(
                         "BLACKLIST_HIT",
                         "当前命中黑名单，无法借款",
