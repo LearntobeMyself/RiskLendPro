@@ -15,6 +15,12 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(CatalogBusinessException.class)
+    public CommonResponse<Object> handleCatalogBusinessException(CatalogBusinessException e) {
+        log.warn("CatalogBusinessException {}: {}", e.getCode(), e.getMessage());
+        return CommonResponse.fail(e.getCode(), e.getMessage(), e.getData());
+    }
+
     @ExceptionHandler(DuplicateApplyException.class)
     public CommonResponse<Void> handleDuplicateApplyException(DuplicateApplyException e) {
         log.warn("DuplicateApplyException: {}", e.getMessage());

@@ -67,4 +67,19 @@ class AdminPathAccessTest {
         assertTrue(AdminPathAccess.allows("/api/v1/admin/system/operation-logs", "GET", StaffRoles.SYS_ADMIN));
         assertTrue(RolePermissions.authorities(StaffRoles.SYS_ADMIN).contains(Permissions.AUDIT_READ));
     }
+
+    @Test
+    void productCatalogAdminAccess() {
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.SYS_ADMIN));
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "POST", StaffRoles.SYS_ADMIN));
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/products/knowledge/export", "GET", StaffRoles.SYS_ADMIN));
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.RISK_MANAGER));
+        assertFalse(AdminPathAccess.allows("/api/v1/admin/products", "POST", StaffRoles.RISK_MANAGER));
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.CS_AGENT));
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.AUDITOR));
+        assertFalse(AdminPathAccess.allows("/api/v1/admin/products/knowledge/export", "GET", StaffRoles.AUDITOR));
+        assertTrue(AdminPathAccess.allows("/api/v1/loan/products", "GET", StaffRoles.USER));
+        assertFalse(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.USER));
+        assertFalse(AdminPathAccess.allows("/api/v1/loan/products", "GET", StaffRoles.SYS_ADMIN));
+    }
 }

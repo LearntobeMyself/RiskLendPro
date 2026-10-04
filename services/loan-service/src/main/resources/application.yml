@@ -2,7 +2,10 @@ spring:
   application:
     name: loan-service
   config:
-    import: classpath:application-common.yml
+    import:
+      - classpath:application-common.yml
+      - optional:file:./config/local/application-local.yml
+      - optional:file:../../config/local/application-local.yml
 
 server:
   port: ${LOAN_SERVICE_PORT:8083}

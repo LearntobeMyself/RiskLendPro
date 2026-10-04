@@ -55,7 +55,7 @@ spring:
             - id: loan-service
               uri: ${LOAN_SERVICE_URL:http://localhost:8083}
               predicates:
-                - Path=/api/v1/loan/**,/api/v1/repayment/**,/api/v1/admin/loan/**,/api/v1/admin/credit/**,/api/v1/admin/repayment/**,/api/v1/admin/bi/**,/api/v1/admin/dashboard/**
+                - Path=/api/v1/loan/**,/api/v1/repayment/**,/api/v1/admin/loan/**,/api/v1/admin/credit/**,/api/v1/admin/repayment/**,/api/v1/admin/bi/**,/api/v1/admin/dashboard/**,/api/v1/admin/products/**
               filters:
                 - StripPrefix=2
             - id: cs-service

@@ -41,4 +41,13 @@ public class CommonResponse<T> {
         response.setData(null);
         return response;
     }
+
+    public static <T> CommonResponse<T> fail(int code, String message, T data) {
+        CommonResponse<T> response = new CommonResponse<>();
+        response.setCode(code);
+        response.setMessage(message);
+        response.setSuccess(false);
+        response.setData(data);
+        return response;
+    }
 }

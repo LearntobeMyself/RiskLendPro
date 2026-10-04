@@ -35,6 +35,17 @@ public class RedisCacheUtil {
         redisTemplate.opsForValue().set(key, value, Duration.ofDays(days));
     }
 
+    public void set(String key, Object value, Duration ttl) {
+        redisTemplate.opsForValue().set(key, value, ttl);
+    }
+
+    public void deleteByPattern(String pattern) {
+        var keys = redisTemplate.keys(pattern);
+        if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+        }
+    }
+
     /**
      * 获取缓存
      */
