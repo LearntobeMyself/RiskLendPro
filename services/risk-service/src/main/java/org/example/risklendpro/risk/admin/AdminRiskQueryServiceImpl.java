@@ -234,7 +234,10 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
             }
             Object score = report.get("totalScore");
             if (score != null) {
-                return "进入人工复核：信用分处于人工审核档（642–787），请结合评分明细审批";
+                return "进入人工复核：信用分处于人工审核档（"
+                        + (int) creditScoreEngine.getManualReviewThreshold() + "–"
+                        + ((int) creditScoreEngine.getAutoApproveThreshold() - 1)
+                        + "），请结合评分明细审批";
             }
             return "进入人工复核，请查看风控原因与外部特征";
         }
@@ -242,7 +245,8 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
             return switch (rejectGate != null ? rejectGate : "") {
                 case "BLACKLIST_L3" -> "系统拒绝：三级黑名单命中（姓名+地域+出生年），未进入正式算分流程";
                 case "INCOME_VERIFICATION" -> "系统拒绝：自填收入与后台数据偏差过大（>50%），收入验真未通过";
-                case "SCORE_LOW" -> "系统拒绝：信用分低于拒绝线（642），评分卡自动拒绝";
+                case "SCORE_LOW" -> "系统拒绝：信用分低于拒绝线（"
+                        + (int) creditScoreEngine.getManualReviewThreshold() + "），评分卡自动拒绝";
                 case "RULE_AND_SCORE_LOW" -> "系统拒绝：虽命中规则闸，但信用分低于拒绝线，分数闸优先拒绝";
                 default -> "系统拒绝，请查看 auditRemark 与风控标签";
             };
@@ -276,10 +280,10 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
     }
 
     private String resolveScoreZone(int totalScore) {
-        if (totalScore < 642) {
+        if (totalScore < creditScoreEngine.getManualReviewThreshold()) {
             return "REJECT";
         }
-        if (totalScore < 788) {
+        if (totalScore < creditScoreEngine.getAutoApproveThreshold()) {
             return "MANUAL";
         }
         return "APPROVE";
@@ -309,8 +313,8 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
             }
             if (!report.containsKey("scoreThresholds")) {
                 Map<String, Object> thresholds = new LinkedHashMap<>();
-                thresholds.put("rejectBelow", 642);
-                thresholds.put("approveFrom", 788);
+                thresholds.put("rejectBelow", (int) creditScoreEngine.getManualReviewThreshold());
+                thresholds.put("approveFrom", (int) creditScoreEngine.getAutoApproveThreshold());
                 thresholds.put("min", 350);
                 thresholds.put("max", 950);
                 report.put("scoreThresholds", thresholds);
@@ -347,8 +351,7 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         request.setEmail(assessment.getEmail());
         request.setGender(assessment.getGender());
         if (assessment.getBirthday() != null) {
-            request.setBirthday(assessment.getBirthday().toInstant()
-                    .atZone(ZoneId.systemDefault()).toLocalDate().toString());
+            request.setBirthday(formatBirthday(assessment.getBirthday()));
         }
         request.setEducation(assessment.getEducation());
         request.setMarriage(assessment.getMarriage());
@@ -358,6 +361,13 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         request.setHasCar(assessment.getHasCar());
         request.setContactPhone(assessment.getContactPhone());
         return request;
+    }
+
+    private static String formatBirthday(Date birthday) {
+        if (birthday instanceof java.sql.Date sqlDate) {
+            return sqlDate.toLocalDate().toString();
+        }
+        return birthday.toInstant().atZone(ZoneId.systemDefault()).toLocalDate().toString();
     }
 
     private boolean isScoreDetailsEmpty(Map<String, Object> report) {
