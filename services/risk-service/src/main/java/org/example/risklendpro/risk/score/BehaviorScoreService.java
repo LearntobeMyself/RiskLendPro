@@ -159,8 +159,13 @@ public class BehaviorScoreService {
         boolean scoreReliable = baseResult.resolved && live.isHistoryAvailable();
         String dataStatus = resolveDataStatus(baseResult, live);
 
-        loanServiceClient.upsertBehaviorScore(
-                new CreditBehaviorUpsertCommand(userId, bCardEnabled, BigDecimal.valueOf(finalScore)));
+        if (scoreReliable) {
+            loanServiceClient.upsertBehaviorScore(
+                    new CreditBehaviorUpsertCommand(userId, bCardEnabled, BigDecimal.valueOf(finalScore)));
+        } else {
+            log.warn("B 卡结果不可用于额度决策，跳过回写额度分 userId={} dataStatus={} baseScore={} delta={}",
+                    userId, dataStatus, baseResult.score, delta);
+        }
 
         UserBCardLog cardLog = new UserBCardLog();
         cardLog.setUserId(userId);
@@ -182,11 +187,6 @@ public class BehaviorScoreService {
         }
         cardLog.setCreatedAt(new Date());
         userBCardLogMapper.insert(cardLog);
-
-        if (!scoreReliable) {
-            log.warn("B 卡结果不可用于额度决策 userId={} dataStatus={} baseScore={} delta={}",
-                    userId, dataStatus, baseResult.score, delta);
-        }
     }
 
     private BaseScoreResult computeBaseScore(Long userId, String idCard) {

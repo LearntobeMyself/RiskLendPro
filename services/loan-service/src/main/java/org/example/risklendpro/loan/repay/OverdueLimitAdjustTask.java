@@ -98,7 +98,8 @@ public class OverdueLimitAdjustTask {
                 return;
             }
 
-            double multiplier = riskServiceClient.getLimitMultiplier(creditLimit.getBScore().doubleValue());
+            double multiplier = riskServiceClient.getLimitMultiplier(
+                    creditLimit.getBScore().doubleValue(), creditLimit.getUserId());
             multiplier = Math.max(MIN_SINGLE_ADJUST_MULTIPLIER, Math.min(1.0, multiplier));
             BigDecimal newLimit = oldLimit.multiply(BigDecimal.valueOf(multiplier));
             applyLimitChange(creditLimit, oldLimit, newLimit,

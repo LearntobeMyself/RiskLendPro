@@ -39,7 +39,8 @@ public interface RiskDecisionApi {
     RiskOverviewCounts getOverviewCounts();
 
     @GetMapping("/internal/behavior-scores/limit-multiplier")
-    double getLimitMultiplier(@RequestParam("score") double score);
+    double getLimitMultiplier(@RequestParam("score") double score,
+                              @RequestParam(value = "userId", required = false) Long userId);
 
     /**
      * 借款前授信/黑名单门禁。实现可随风控升级替换，调用方只消费 allowed。

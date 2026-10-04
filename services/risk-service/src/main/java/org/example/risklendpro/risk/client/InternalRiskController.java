@@ -108,7 +108,11 @@ public class InternalRiskController implements RiskDecisionApi {
     }
 
     @Override
-    public double getLimitMultiplier(double score) {
+    public double getLimitMultiplier(double score, Long userId) {
+        if (userId != null) {
+            Double reliable = behaviorScoreService.resolveLimitMultiplierForUser(userId, score);
+            return reliable == null ? 1.0 : reliable;
+        }
         return behaviorScoreService.resolveLimitMultiplier(score);
     }
 
