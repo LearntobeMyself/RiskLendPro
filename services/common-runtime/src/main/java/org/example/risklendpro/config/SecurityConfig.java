@@ -42,8 +42,7 @@ public class SecurityConfig {
                             "/swagger-ui/**",
                             "/swagger-ui.html",
                             "/swagger-resources/**",
-                            "/webjars/**",
-                            "/upload/**"
+                            "/webjars/**"
                         ).permitAll()
                         // 3. 其他所有接口都需要认证
                         .anyRequest().authenticated()
