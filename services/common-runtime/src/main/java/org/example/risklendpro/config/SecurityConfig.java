@@ -35,7 +35,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // 1. 放行登录、健康检查与内部契约调用（管理员注册不再对公网开放）
-                        .requestMatchers("/auth/**", "/admin/login", "/actuator/health", "/internal/**").permitAll()
+                        .requestMatchers("/auth/**", "/admin/login", "/actuator/health").permitAll()
                         // 2. 彻底放行 Swagger 相关路径 (不带 /api/v1)
                         .requestMatchers(
                             "/v3/api-docs/**",

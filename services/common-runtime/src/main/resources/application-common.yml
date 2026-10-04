@@ -80,6 +80,8 @@ security:
   jwt:
     # Override in every non-local environment.
     secret: ${JWT_SECRET:MySecretKeyForJWT2024VeryLongAndSafe12345678}
+  internal:
+    api-token: ${INTERNAL_API_TOKEN:dev-internal-token-change-me}
 
 risk:
   schema:

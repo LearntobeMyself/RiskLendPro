@@ -35,7 +35,7 @@ public class AdminAccessFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        if (hasAuthority(authentication, "ROLE_SYNC")) {
+        if (hasAuthority(authentication, "ROLE_SYNC") || hasAuthority(authentication, "ROLE_INTERNAL")) {
             chain.doFilter(request, response);
             return;
         }

@@ -2,6 +2,7 @@ package org.example.risklendpro.config;
 
 import org.example.risklendpro.api.security.RolePermissions;
 import org.example.risklendpro.api.security.StaffRoles;
+import org.example.risklendpro.common.security.InternalApiProperties;
 import org.example.risklendpro.common.security.JwtConfig;
 import org.example.risklendpro.risk.blacklist.BlacklistSyncProperties;
 import io.jsonwebtoken.Claims;
@@ -30,11 +31,15 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtConfig jwtConfig;
     private final BlacklistSyncProperties blacklistSyncProperties;
+    private final InternalApiProperties internalApiProperties;
 
     @Autowired
-    public JwtFilter(JwtConfig jwtConfig, BlacklistSyncProperties blacklistSyncProperties) {
+    public JwtFilter(JwtConfig jwtConfig,
+                     BlacklistSyncProperties blacklistSyncProperties,
+                     InternalApiProperties internalApiProperties) {
         this.jwtConfig = jwtConfig;
         this.blacklistSyncProperties = blacklistSyncProperties;
+        this.internalApiProperties = internalApiProperties;
     }
 
     @Override
@@ -57,6 +62,16 @@ public class JwtFilter extends OncePerRequestFilter {
         String token = extractToken(request);
         if (token == null) {
             sendError(response, 401, "请先登录");
+            return;
+        }
+
+        if (isInternalRequest(requestURI)) {
+            if (isValidInternalToken(token)) {
+                setInternalAuthentication(request);
+                chain.doFilter(request, response);
+                return;
+            }
+            sendError(response, 401, "内部调用 Token 无效");
             return;
         }
 
@@ -123,13 +138,34 @@ public class JwtFilter extends OncePerRequestFilter {
     private boolean isWhitelisted(String requestURI) {
         return requestURI.contains("/auth/")
                 || requestURI.contains("/actuator/health")
-                || requestURI.startsWith("/internal/")
-                || requestURI.contains("/internal/")
                 || requestURI.contains("/admin/login")
                 || requestURI.contains("/swagger-ui")
                 || requestURI.contains("/v3/api-docs")
                 || requestURI.contains("/swagger-resources/")
                 || requestURI.contains("/webjars/");
+    }
+
+    private boolean isInternalRequest(String requestURI) {
+        return requestURI != null && (requestURI.startsWith("/internal/") || requestURI.contains("/internal/"));
+    }
+
+    private boolean isValidInternalToken(String token) {
+        String configuredToken = internalApiProperties.getApiToken();
+        if (configuredToken == null || configuredToken.isBlank() || token == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                configuredToken.getBytes(StandardCharsets.UTF_8),
+                token.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void setInternalAuthentication(HttpServletRequest request) {
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                "internal", null,
+                java.util.Collections.singletonList(
+                        new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_INTERNAL")));
+        authentication.setDetails(new org.springframework.security.web.authentication.WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
     }
 
     private String extractToken(HttpServletRequest request) {
