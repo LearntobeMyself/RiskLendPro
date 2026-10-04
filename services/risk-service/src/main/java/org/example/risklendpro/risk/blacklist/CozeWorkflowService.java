@@ -82,22 +82,20 @@ public class CozeWorkflowService {
 
     private CozeWorkflowResult parseResponse(int httpStatus, String body) {
         if (body == null || body.isBlank()) {
-            return httpStatus >= 200 && httpStatus < 300
-                    ? CozeWorkflowResult.success(null, "empty body")
-                    : CozeWorkflowResult.failure("empty response body");
+            return CozeWorkflowResult.failure("empty response body");
         }
         try {
             JsonNode root = objectMapper.readTree(body);
-            int code = root.path("code").asInt(-1);
+            int code = root.path("code").asInt(Integer.MIN_VALUE);
             String msg = root.path("msg").asText("");
-            if (code == 0 || (code == -1 && httpStatus >= 200 && httpStatus < 300)) {
+            if (code == 0) {
                 return CozeWorkflowResult.success(body, msg.isBlank() ? "ok" : msg);
+            }
+            if (code == Integer.MIN_VALUE) {
+                return CozeWorkflowResult.failure("missing business code");
             }
             return CozeWorkflowResult.failure("code=" + code + ", msg=" + msg);
         } catch (Exception e) {
-            if (httpStatus >= 200 && httpStatus < 300) {
-                return CozeWorkflowResult.success(body, "non-json response");
-            }
             return CozeWorkflowResult.failure("parse error: " + e.getMessage());
         }
     }
