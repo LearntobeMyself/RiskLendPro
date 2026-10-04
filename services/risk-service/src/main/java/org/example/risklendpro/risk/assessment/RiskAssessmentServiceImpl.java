@@ -942,6 +942,16 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                             String.format("收入偏差在15%%以内 (自填区间: %s, 后台: %.2f, 已取后台值)", 
                                     request.getMonthlyIncome(), backendIncome));
                 }
+            } else {
+                double ratio = (backendIncome - upperBound) / Math.max(backendIncome, 1);
+                if (ratio > 0.5) {
+                    return new DataVerificationResult(false, true,
+                            String.format("自填收入明显低于征信 (自填区间: %s, 后台: %.2f, 偏差: %.1f%%)",
+                                    request.getMonthlyIncome(), backendIncome, ratio * 100));
+                }
+                return new DataVerificationResult(false, false,
+                        String.format("自填收入低于征信但偏差可控 (自填: %s, 后台: %.2f)",
+                                request.getMonthlyIncome(), backendIncome));
             }
         }
 
