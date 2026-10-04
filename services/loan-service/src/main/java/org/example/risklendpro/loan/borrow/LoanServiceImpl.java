@@ -235,9 +235,20 @@ public class LoanServiceImpl implements LoanService {
         QueryWrapper<Loan> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("user_id", userId);
         queryWrapper.eq("status", LoanStatusEnum.OVERDUE.getCode());
-        
-        long overdueCount = loanMapper.selectCount(queryWrapper);
-        if (overdueCount > 0) {
+        long overdueLoanCount = loanMapper.selectCount(queryWrapper);
+        if (overdueLoanCount > 0) {
+            throw new RuntimeException("存在未处理逾期记录，无法发起新借款");
+        }
+
+        UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
+                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
+        if (creditLimit != null && Boolean.TRUE.equals(creditLimit.getHasOverdue())) {
+            throw new RuntimeException("存在未处理逾期记录，无法发起新借款");
+        }
+
+        long overduePlanCount = repaymentPlanMapper.selectCount(
+                new QueryWrapper<RepaymentPlan>().eq("user_id", userId).eq("status", "OVERDUE"));
+        if (overduePlanCount > 0) {
             throw new RuntimeException("存在未处理逾期记录，无法发起新借款");
         }
     }

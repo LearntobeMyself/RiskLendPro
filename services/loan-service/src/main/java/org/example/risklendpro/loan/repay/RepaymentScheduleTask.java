@@ -3,9 +3,12 @@ package org.example.risklendpro.loan.repay;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.common.mail.EmailUtil;
+import org.example.risklendpro.loan.borrow.LoanStatusEnum;
+import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
+import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
@@ -32,6 +35,9 @@ public class RepaymentScheduleTask {
 
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
+
+    @Autowired
+    private LoanMapper loanMapper;
 
     @Autowired
     private EmailUtil emailUtil;
@@ -133,6 +139,7 @@ public class RepaymentScheduleTask {
 
         if (diffDays >= 1) {
             updateOverdueLevel(plan, (int) diffDays);
+            markLoanOverdue(plan.getLoanId());
             riskServiceClient.recalculateBehaviorScore(plan.getUserId());
         }
     }
@@ -183,6 +190,7 @@ public class RepaymentScheduleTask {
         plan.setOverdueLevel(calculateOverdueLevel(overdueDays));
         plan.setUpdateTime(new Date());
         repaymentPlanMapper.updateById(plan);
+        markLoanOverdue(plan.getLoanId());
 
         updateUserCreditLimit(plan.getUserId(), record.getAmount(), true);
 
@@ -231,6 +239,25 @@ public class RepaymentScheduleTask {
         } else {
             return "M4";
         }
+    }
+
+    private void markLoanOverdue(Long loanId) {
+        if (loanId == null) {
+            return;
+        }
+        Loan loan = loanMapper.selectById(loanId);
+        if (loan == null) {
+            return;
+        }
+        String status = loan.getStatus();
+        if (LoanStatusEnum.OVERDUE.getCode().equals(status)
+                || LoanStatusEnum.REPAID.getCode().equals(status)
+                || LoanStatusEnum.REJECTED.getCode().equals(status)) {
+            return;
+        }
+        loan.setStatus(LoanStatusEnum.OVERDUE.getCode());
+        loan.setUpdateTime(new Date());
+        loanMapper.updateById(loan);
     }
 
     private void updateUserCreditLimit(Long userId, java.math.BigDecimal overdueAmount, boolean hasOverdue) {
