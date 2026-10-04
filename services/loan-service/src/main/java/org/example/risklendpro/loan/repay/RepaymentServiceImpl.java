@@ -1,9 +1,12 @@
 package org.example.risklendpro.loan.repay;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.risklendpro.loan.borrow.LoanStatusEnum;
+import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
+import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
@@ -32,6 +35,9 @@ public class RepaymentServiceImpl implements RepaymentService {
 
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
+
+    @Autowired
+    private LoanMapper loanMapper;
 
     @Override
     public List<Object> getRepaymentPlans(Long userId) {
@@ -77,6 +83,15 @@ public class RepaymentServiceImpl implements RepaymentService {
             throw new RuntimeException("无权操作该还款计划");
         }
 
+        if ("COMPLETED".equals(plan.getStatus())) {
+            throw new RuntimeException("还款计划已结清");
+        }
+
+        Integer payablePeriod = plan.getCurrentPeriod();
+        if (payablePeriod == null || !payablePeriod.equals(request.getPeriod())) {
+            throw new RuntimeException("请按当前应付期次还款，当前应还第" + payablePeriod + "期");
+        }
+
         // 2. 查询该期还款记录
         QueryWrapper<RepaymentRecord> recordQuery = new QueryWrapper<>();
         recordQuery.eq("plan_id", request.getPlanId());
@@ -108,11 +123,19 @@ public class RepaymentServiceImpl implements RepaymentService {
         // 4. 更新还款计划
         plan.setPaidAmount(plan.getPaidAmount().add(request.getAmount()));
         plan.setRemainingAmount(plan.getRemainingAmount().subtract(request.getAmount()));
-        plan.setCurrentPeriod(plan.getCurrentPeriod() + 1);
+        plan.setUpdateTime(new Date());
 
-        if (plan.getRemainingAmount().compareTo(BigDecimal.ZERO) <= 0
-                && plan.getCurrentPeriod().compareTo(plan.getTotalPeriods()) >= 0) {
+        boolean lastPeriod = plan.getTotalPeriods() != null
+                && request.getPeriod().compareTo(plan.getTotalPeriods()) >= 0;
+        boolean remainingCleared = plan.getRemainingAmount().compareTo(BigDecimal.ZERO) <= 0;
+        if (lastPeriod || remainingCleared) {
             plan.setStatus("COMPLETED");
+            if (plan.getTotalPeriods() != null) {
+                plan.setCurrentPeriod(plan.getTotalPeriods());
+            }
+            markLoanRepaid(plan.getLoanId());
+        } else {
+            plan.setCurrentPeriod(request.getPeriod() + 1);
         }
 
         repaymentPlanMapper.updateById(plan);
@@ -130,6 +153,23 @@ public class RepaymentServiceImpl implements RepaymentService {
         response.setStatus(record.getStatus());
 
         return response;
+    }
+
+    private void markLoanRepaid(Long loanId) {
+        if (loanId == null) {
+            return;
+        }
+        Loan loan = loanMapper.selectById(loanId);
+        if (loan == null) {
+            return;
+        }
+        if (LoanStatusEnum.REPAID.getCode().equals(loan.getStatus())
+                || LoanStatusEnum.REJECTED.getCode().equals(loan.getStatus())) {
+            return;
+        }
+        loan.setStatus(LoanStatusEnum.REPAID.getCode());
+        loan.setUpdateTime(new Date());
+        loanMapper.updateById(loan);
     }
 
     private void restoreCreditLimit(Long userId, BigDecimal principal) {

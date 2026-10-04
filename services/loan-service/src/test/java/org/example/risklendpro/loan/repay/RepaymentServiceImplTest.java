@@ -2,8 +2,10 @@ package org.example.risklendpro.loan.repay;
 
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
+import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
+import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -34,6 +36,12 @@ class RepaymentServiceImplTest {
 
     @Mock
     private RepaymentRecordMapper repaymentRecordMapper;
+
+    @Mock
+    private UserCreditLimitMapper userCreditLimitMapper;
+
+    @Mock
+    private LoanMapper loanMapper;
 
     private RepaymentPlan plan(Long ownerId) {
         RepaymentPlan p = new RepaymentPlan();
@@ -110,6 +118,19 @@ class RepaymentServiceImplTest {
         RepaymentExecuteRequest req = request();
         req.setAmount(BigDecimal.ZERO);
         assertThrows(RuntimeException.class, () -> service.executeRepayment(10L, req));
+        verify(repaymentRecordMapper, never()).updateById(any());
+    }
+
+    @Test
+    void executeRepayment_skipPeriod_rejected() {
+        RepaymentPlan plan = plan(10L);
+        when(repaymentPlanMapper.selectOne(any())).thenReturn(plan);
+
+        RepaymentExecuteRequest req = request();
+        req.setPeriod(12);
+
+        assertThrows(RuntimeException.class, () -> service.executeRepayment(10L, req));
+        verify(repaymentRecordMapper, never()).selectOne(any());
         verify(repaymentRecordMapper, never()).updateById(any());
     }
 
