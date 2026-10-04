@@ -10,6 +10,7 @@ import org.example.risklendpro.risk.client.UserServiceClient;
 import org.example.risklendpro.risk.credit.UserBehaviorFeatures;
 import org.example.risklendpro.risk.credit.mapper.UserBehaviorFeaturesMapper;
 import org.example.risklendpro.risk.entity.UserBCardLog;
+import org.example.risklendpro.risk.mapper.BCardFeatureSnapshotMapper;
 import org.example.risklendpro.risk.mapper.UserBCardLogMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +46,9 @@ class BehaviorScoreServiceTest {
 
     @Mock
     private UserBehaviorFeaturesMapper userBehaviorFeaturesMapper;
+
+    @Mock
+    private BCardFeatureSnapshotMapper bCardFeatureSnapshotMapper;
 
     @Mock
     private UserBCardLogMapper userBCardLogMapper;

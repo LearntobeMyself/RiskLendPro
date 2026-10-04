@@ -10,7 +10,9 @@ import org.example.risklendpro.risk.client.LoanServiceClient;
 import org.example.risklendpro.risk.client.UserServiceClient;
 import org.example.risklendpro.risk.credit.UserBehaviorFeatures;
 import org.example.risklendpro.risk.credit.mapper.UserBehaviorFeaturesMapper;
+import org.example.risklendpro.risk.entity.BCardFeatureSnapshot;
 import org.example.risklendpro.risk.entity.UserBCardLog;
+import org.example.risklendpro.risk.mapper.BCardFeatureSnapshotMapper;
 import org.example.risklendpro.risk.mapper.UserBCardLogMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +47,9 @@ public class BehaviorScoreService {
 
     @Autowired
     private UserBehaviorFeaturesMapper userBehaviorFeaturesMapper;
+
+    @Autowired
+    private BCardFeatureSnapshotMapper bCardFeatureSnapshotMapper;
 
     @Autowired
     private UserBCardLogMapper userBCardLogMapper;
@@ -190,6 +195,14 @@ public class BehaviorScoreService {
     }
 
     private BaseScoreResult computeBaseScore(Long userId, String idCard) {
+        Map<String, Double> liveFeatures = loadLiveBfFeatures(userId);
+        if (liveFeatures != null && !liveFeatures.isEmpty()) {
+            try {
+                return BaseScoreResult.resolved(behaviorScoreEngine.calculateBaseScore(liveFeatures));
+            } catch (Exception e) {
+                log.warn("解析 BF_V2.1 特征失败 userId={}", userId, e);
+            }
+        }
         if (idCard == null || idCard.isBlank()) {
             log.warn("B 卡基础分回退为中性分：缺少身份证 userId={}", userId);
             return BaseScoreResult.unresolved(NEUTRAL_BASE, STATUS_MISSING_ID_CARD);
@@ -206,6 +219,37 @@ public class BehaviorScoreService {
         } catch (Exception e) {
             log.warn("解析 B 卡特征失败 userId={}", userId, e);
             return BaseScoreResult.unresolved(NEUTRAL_BASE, STATUS_FEATURE_PARSE_ERROR);
+        }
+    }
+
+    private Map<String, Double> loadLiveBfFeatures(Long userId) {
+        if (userId == null || bCardFeatureSnapshotMapper == null) {
+            return null;
+        }
+        BCardFeatureSnapshot snapshot = bCardFeatureSnapshotMapper.selectOne(
+                new QueryWrapper<BCardFeatureSnapshot>()
+                        .eq("user_id", userId)
+                        .eq("feature_version", "BF_V2.1")
+                        .orderByDesc("as_of_date")
+                        .last("LIMIT 1"));
+        if (snapshot == null || snapshot.getFeatureJson() == null || snapshot.getFeatureJson().isBlank()) {
+            return null;
+        }
+        try {
+            Map<String, Object> raw = objectMapper.readValue(
+                    snapshot.getFeatureJson(), new TypeReference<Map<String, Object>>() {});
+            Map<String, Double> features = new HashMap<>();
+            for (Map.Entry<String, Object> entry : raw.entrySet()) {
+                if (entry.getValue() instanceof Number number) {
+                    features.put(entry.getKey(), number.doubleValue());
+                } else if (entry.getValue() instanceof Boolean bool) {
+                    features.put(entry.getKey(), bool ? 1.0 : 0.0);
+                }
+            }
+            return features.isEmpty() ? null : features;
+        } catch (Exception e) {
+            log.warn("读取 BF_V2.1 快照失败 userId={}", userId, e);
+            return null;
         }
     }
 
