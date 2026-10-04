@@ -142,6 +142,7 @@ public class RepaymentServiceImpl implements RepaymentService {
 
         // 5. 恢复信用额度：按期归还本金后，对应本金部分释放回可用额度
         restoreCreditLimit(plan.getUserId(), record.getPrincipal());
+        refreshOverdueState(plan);
 
         // 6. 构建响应
         RepaymentResponse response = new RepaymentResponse();
@@ -172,12 +173,66 @@ public class RepaymentServiceImpl implements RepaymentService {
         loanMapper.updateById(loan);
     }
 
+    private void refreshOverdueState(RepaymentPlan plan) {
+        if (!"COMPLETED".equals(plan.getStatus())) {
+            long overdueOnPlan = nvlCount(repaymentRecordMapper.selectCount(
+                    new QueryWrapper<RepaymentRecord>()
+                            .eq("plan_id", plan.getPlanId())
+                            .eq("status", "OVERDUE")));
+            if (overdueOnPlan == 0 && "OVERDUE".equals(plan.getStatus())) {
+                plan.setStatus("ACTIVE");
+                plan.setOverdueDays(0);
+                plan.setOverdueLevel("N");
+                plan.setUpdateTime(new Date());
+                repaymentPlanMapper.updateById(plan);
+            }
+            if (overdueOnPlan == 0) {
+                restoreLoanFromOverdue(plan.getLoanId());
+            }
+        }
+
+        long overduePlans = nvlCount(repaymentPlanMapper.selectCount(
+                new QueryWrapper<RepaymentPlan>()
+                        .eq("user_id", plan.getUserId())
+                        .eq("status", "OVERDUE")));
+        UserCreditLimit limit = userCreditLimitMapper.selectOne(
+                new QueryWrapper<UserCreditLimit>().eq("user_id", plan.getUserId()).last("FOR UPDATE"));
+        if (limit == null) {
+            return;
+        }
+        if (overduePlans == 0) {
+            limit.setHasOverdue(false);
+            limit.setOverdueAmount(BigDecimal.ZERO);
+        } else {
+            limit.setHasOverdue(true);
+        }
+        limit.setLastUpdateTime(new Date());
+        userCreditLimitMapper.updateById(limit);
+    }
+
+    private void restoreLoanFromOverdue(Long loanId) {
+        if (loanId == null) {
+            return;
+        }
+        Loan loan = loanMapper.selectById(loanId);
+        if (loan == null || !LoanStatusEnum.OVERDUE.getCode().equals(loan.getStatus())) {
+            return;
+        }
+        loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
+        loan.setUpdateTime(new Date());
+        loanMapper.updateById(loan);
+    }
+
+    private static long nvlCount(Long count) {
+        return count == null ? 0L : count;
+    }
+
     private void restoreCreditLimit(Long userId, BigDecimal principal) {
         if (userId == null || principal == null || principal.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
         UserCreditLimit limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId));
+                new QueryWrapper<UserCreditLimit>().eq("user_id", userId).last("FOR UPDATE"));
         if (limit == null) {
             return;
         }
