@@ -61,13 +61,19 @@ public class FileStorageService {
 
     public Path resolvePath(String storedPath) {
         Path path = Paths.get(storedPath);
+        Path resolved;
         if (path.isAbsolute()) {
-            return path.normalize();
+            resolved = path.normalize();
+        } else if (storedPath.replace('\\', '/').startsWith("upload/risk-supplement")) {
+            resolved = uploadBase.getParent().resolve(path).normalize();
+        } else {
+            resolved = uploadBase.resolve(path).normalize();
         }
-        if (storedPath.replace('\\', '/').startsWith("upload/risk-supplement")) {
-            return uploadBase.getParent().resolve(path).normalize();
+        Path base = uploadBase.normalize().toAbsolutePath();
+        if (!resolved.toAbsolutePath().startsWith(base)) {
+            throw new RuntimeException("非法文件路径");
         }
-        return uploadBase.resolve(path).normalize();
+        return resolved;
     }
 
     private void validateFile(MultipartFile file) {
