@@ -66,6 +66,10 @@ public interface CreditScoreEngine {
 
     String getDecision(double score);
 
+    double getAutoApproveThreshold();
+
+    double getManualReviewThreshold();
+
     double calculateCreditLimit(double score, String monthlyIncome);
 
     double calculateCreditLimitWithFeatures(double score, String monthlyIncome, String idCard);

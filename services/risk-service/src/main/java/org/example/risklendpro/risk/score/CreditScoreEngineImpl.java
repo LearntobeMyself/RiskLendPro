@@ -215,6 +215,8 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
                 cfg.manualReviewThreshold = rules.getThresholdManualReview().doubleValue();
             }
         } catch (Exception e) {
+            log.error("加载评分规则失败，将回退旧量表 version={}",
+                    rules.getVersion(), e);
             cfg.ruleRoot = null;
             cfg.featureScores = null;
         }
@@ -1197,6 +1199,16 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
             return "MANUAL_REVIEW";
         }
         return "REJECT";
+    }
+
+    @Override
+    public double getAutoApproveThreshold() {
+        return loadFullRuleConfig().autoApproveThreshold;
+    }
+
+    @Override
+    public double getManualReviewThreshold() {
+        return loadFullRuleConfig().manualReviewThreshold;
     }
 
     private int getScoreFromGroups(int value, List<Map<String, Object>> groups) {
