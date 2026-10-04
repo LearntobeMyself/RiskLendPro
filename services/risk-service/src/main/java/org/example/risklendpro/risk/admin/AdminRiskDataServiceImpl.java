@@ -13,7 +13,9 @@ import org.example.risklendpro.risk.credit.mapper.UserExternalFeaturesMapper;
 import org.example.risklendpro.risk.admin.AntiFraudHandleRequest;
 import org.example.risklendpro.risk.admin.AdminRiskDataService;
 import org.example.risklendpro.risk.admin.AdminRiskQueryService;
+import org.example.risklendpro.risk.score.CreditScoreEngine;
 import org.example.risklendpro.risk.admin.AdminReportDisplayBuilder;
+import org.example.risklendpro.common.cache.RedisCacheUtil;
 import org.example.risklendpro.common.admin.AdminDateHelper;
 import org.example.risklendpro.common.admin.AdminExportHelper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
@@ -24,12 +26,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AdminRiskDataServiceImpl implements AdminRiskDataService {
 
-    private final Map<String, Map<String, Object>> antiFraudHandleStore = new ConcurrentHashMap<>();
+    private static final String ANTI_FRAUD_KEY_PREFIX = "risk:anti-fraud:handle:";
 
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
@@ -45,15 +46,21 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
     private AdminRiskQueryService adminRiskQueryService;
     @Autowired
     private AdminReportDisplayBuilder adminReportDisplayBuilder;
+    @Autowired
+    private RedisCacheUtil redisCacheUtil;
+    @Autowired
+    private CreditScoreEngine creditScoreEngine;
 
     @Override
     public Map<String, Object> getOverview() {
         long userCount = userServiceClient.countUsers();
         List<RiskAssessment> finals = riskAssessmentMapper.selectList(
                 new QueryWrapper<RiskAssessment>().eq("is_final", true));
-        long scoreHigh = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() >= 80).count();
-        long scoreMid = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() >= 60 && a.getTotalScore() < 80).count();
-        long scoreLow = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() < 60).count();
+        long autoApprove = Math.round(creditScoreEngine.getAutoApproveThreshold());
+        long manualReview = Math.round(creditScoreEngine.getManualReviewThreshold());
+        long scoreHigh = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() >= autoApprove).count();
+        long scoreMid = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() >= manualReview && a.getTotalScore() < autoApprove).count();
+        long scoreLow = finals.stream().filter(a -> a.getTotalScore() != null && a.getTotalScore() < manualReview).count();
 
         List<CreditLimitSnapshot> limits = loanServiceClient.listBCardLimits();
         long bHigh = limits.stream().filter(l -> l.behaviorScore() != null && l.behaviorScore().doubleValue() >= 700).count();
@@ -84,11 +91,12 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
         }
         if (riskLevel != null && !riskLevel.isBlank()) {
             if ("LOW".equals(riskLevel)) {
-                qw.ge("total_score", 80);
+                qw.ge("total_score", Math.round(creditScoreEngine.getAutoApproveThreshold()));
             } else if ("MEDIUM".equals(riskLevel)) {
-                qw.ge("total_score", 60).lt("total_score", 80);
+                qw.ge("total_score", Math.round(creditScoreEngine.getManualReviewThreshold()))
+                        .lt("total_score", Math.round(creditScoreEngine.getAutoApproveThreshold()));
             } else if ("HIGH".equals(riskLevel)) {
-                qw.lt("total_score", 60);
+                qw.lt("total_score", Math.round(creditScoreEngine.getManualReviewThreshold()));
             }
         }
         qw.orderByDesc("submit_time");
@@ -175,7 +183,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
         List<Map<String, Object>> all = new ArrayList<>();
         for (RiskAssessment a : candidates) {
             String id = a.getApplyId();
-            Map<String, Object> handle = antiFraudHandleStore.getOrDefault(id, Map.of("status", "PENDING"));
+            Map<String, Object> handle = loadAntiFraudHandle(id);
             if (status != null && !status.isBlank() && !status.equals(handle.get("status"))) {
                 continue;
             }
@@ -185,7 +193,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
             item.put("userName", a.getName());
             item.put("alertType", detectAlertType(a.getAuditRemark()));
             item.put("description", a.getAuditRemark());
-            item.put("riskLevel", a.getTotalScore() != null && a.getTotalScore() < 60 ? "HIGH" : "MEDIUM");
+            item.put("riskLevel", scoreLevel(a.getTotalScore()));
             item.put("status", handle.get("status"));
             item.put("createTime", AdminDateHelper.formatDateTime(a.getSubmitTime()));
             all.add(item);
@@ -198,12 +206,17 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
 
     @Override
     public Map<String, Object> handleAntiFraud(String id, AntiFraudHandleRequest request, Long adminId) {
+        RiskAssessment assessment = riskAssessmentMapper.selectOne(
+                new QueryWrapper<RiskAssessment>().eq("apply_id", id));
+        if (assessment == null) {
+            throw new RuntimeException("预警申请不存在");
+        }
         Map<String, Object> record = new HashMap<>();
         record.put("status", mapActionToStatus(request.getAction()));
         record.put("remark", request.getRemark());
         record.put("handlerId", adminId);
         record.put("handleTime", AdminDateHelper.formatDateTime(new java.util.Date()));
-        antiFraudHandleStore.put(id, record);
+        redisCacheUtil.set(ANTI_FRAUD_KEY_PREFIX + id, record);
         return Map.of("id", id, "status", record.get("status"));
     }
 
@@ -294,14 +307,27 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
         return item;
     }
 
+    private Map<String, Object> loadAntiFraudHandle(String applyId) {
+        Map<?, ?> cached = redisCacheUtil.get(ANTI_FRAUD_KEY_PREFIX + applyId, Map.class);
+        if (cached == null || cached.isEmpty()) {
+            return Map.of("status", "PENDING");
+        }
+        Map<String, Object> handle = new HashMap<>();
+        cached.forEach((k, v) -> handle.put(String.valueOf(k), v));
+        handle.putIfAbsent("status", "PENDING");
+        return handle;
+    }
+
     private String scoreLevel(Integer score) {
         if (score == null) {
             return "UNKNOWN";
         }
-        if (score >= 80) {
+        double autoApprove = creditScoreEngine.getAutoApproveThreshold();
+        double manualReview = creditScoreEngine.getManualReviewThreshold();
+        if (score >= autoApprove) {
             return "LOW";
         }
-        if (score >= 60) {
+        if (score >= manualReview) {
             return "MEDIUM";
         }
         return "HIGH";
@@ -311,7 +337,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
         if (remark == null) {
             return "MANUAL_REVIEW";
         }
-        if (remark.contains("黑名单")) {
+        if (remark.contains("黑名单") || remark.contains("BLACKLIST")) {
             return "BLACKLIST";
         }
         if (remark.contains("收入")) {
