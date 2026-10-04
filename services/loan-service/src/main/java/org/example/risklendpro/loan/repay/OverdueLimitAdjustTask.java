@@ -80,7 +80,8 @@ public class OverdueLimitAdjustTask {
         QueryWrapper<RepaymentPlan> planQuery = new QueryWrapper<>();
         planQuery.eq("user_id", creditLimit.getUserId());
         planQuery.eq("status", "OVERDUE");
-        RepaymentPlan overduePlan = repaymentPlanMapper.selectOne(planQuery);
+        List<RepaymentPlan> overduePlans = repaymentPlanMapper.selectList(planQuery);
+        RepaymentPlan overduePlan = pickWorstOverduePlan(overduePlans);
 
         if (overduePlan == null || creditLimit.getTotalLimit() == null) {
             return;
@@ -146,6 +147,30 @@ public class OverdueLimitAdjustTask {
                         .eq("user_id", userId)
                         .like("reason", "用户逾期等级为" + overdueLevel));
         return count != null && count > 0;
+    }
+
+    private static RepaymentPlan pickWorstOverduePlan(List<RepaymentPlan> overduePlans) {
+        if (overduePlans == null || overduePlans.isEmpty()) {
+            return null;
+        }
+        RepaymentPlan worst = overduePlans.get(0);
+        for (RepaymentPlan plan : overduePlans) {
+            if (overdueRank(plan.getOverdueLevel()) > overdueRank(worst.getOverdueLevel())) {
+                worst = plan;
+            }
+        }
+        return worst;
+    }
+
+    private static int overdueRank(String level) {
+        String normalized = normalizeOverdueLevel(level);
+        return switch (normalized) {
+            case "M4" -> 4;
+            case "M3" -> 3;
+            case "M2" -> 2;
+            case "M1" -> 1;
+            default -> 0;
+        };
     }
 
     private static String normalizeOverdueLevel(String overdueLevel) {
