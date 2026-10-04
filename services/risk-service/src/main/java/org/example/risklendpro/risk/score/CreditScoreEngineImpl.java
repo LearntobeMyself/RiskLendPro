@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.regex.Pattern;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -65,16 +66,7 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     @Override
     public boolean isInBlacklist(String idCard) {
-        String areaCode = extractAreaCodeFromIdCard(idCard);
-        Integer birthYear = extractBirthYearFromIdCard(idCard);
-        List<Blacklist> allBlacklist = blacklistMapper.selectAll();
-        for (Blacklist record : allBlacklist) {
-            if (areaCode != null && areaCode.equals(record.getAreaCode())) {
-                if (birthYear != null && birthYear.equals(record.getBirthYear())) {
-                    return true;
-                }
-            }
-        }
+        // 仅身份证无法做姓名匹配；命中判定必须走 checkBlacklist(name, idCard)。
         return false;
     }
 
@@ -135,13 +127,28 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
     }
 
     private boolean matchWildcardName(String realName, String patternName) {
-        String regex = patternName.replace("*", ".*");
-        return realName.matches(regex);
+        if (realName == null || patternName == null) {
+            return false;
+        }
+        String trimmed = patternName.trim();
+        if (trimmed.isEmpty() || trimmed.replace("*", "").isEmpty()) {
+            return false;
+        }
+        StringBuilder regex = new StringBuilder();
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (c == '*') {
+                regex.append(".*");
+            } else {
+                regex.append(Pattern.quote(String.valueOf(c)));
+            }
+        }
+        return realName.matches(regex.toString());
     }
 
     private String extractAreaCodeFromIdCard(String idCard) {
         if (idCard == null || idCard.length() < 6) {
-            return "";
+            return null;
         }
         return idCard.substring(0, 6);
     }
@@ -456,7 +463,10 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         if ("3000以下".equals(income)) {
             return 2000;
         }
-        if ("3000-8000".equals(income)) {
+        if ("3000-5000".equals(income)) {
+            return 4000;
+        }
+        if ("5000-8000".equals(income) || "3000-8000".equals(income)) {
             return 5500;
         }
         if ("8000-15000".equals(income)) {
@@ -1911,7 +1921,7 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
         String decision = getDecision(score);
         ExternalFeatures externalFeatures = getExternalFeatures(request.getIdCard());
-        BlacklistCheck blacklistCheck = getBlacklistCheck(request.getIdCard());
+        BlacklistCheck blacklistCheck = getBlacklistCheck(request);
 
         return new ScoreDetailReport(score, decision, contributions, externalFeatures, blacklistCheck);
     }
@@ -1942,17 +1952,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return result;
     }
 
-    private BlacklistCheck getBlacklistCheck(String idCard) {
-        String areaCode = extractAreaCodeFromIdCard(idCard);
-        Integer birthYear = extractBirthYearFromIdCard(idCard);
-        List<Blacklist> allBlacklist = blacklistMapper.selectAll();
-        for (Blacklist record : allBlacklist) {
-            if (areaCode != null && areaCode.equals(record.getAreaCode())) {
-                if (birthYear != null && birthYear.equals(record.getBirthYear())) {
-                    return new BlacklistCheck(true, "credit_data_db", "命中黑名单");
-                }
-            }
+    private BlacklistCheck getBlacklistCheck(RiskAssessmentRequest request) {
+        BlacklistMatchResult hit = checkBlacklist(request.getName(), request.getIdCard());
+        if (hit == null || hit.getMatchLevel() == MatchLevel.NONE) {
+            return new BlacklistCheck(false, null, null);
         }
-        return new BlacklistCheck(false, null, null);
+        return new BlacklistCheck(true, "credit_data_db", hit.getMatchLevel().getDescription());
     }
 }
