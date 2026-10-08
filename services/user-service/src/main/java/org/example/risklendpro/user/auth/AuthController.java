@@ -7,6 +7,7 @@ import org.example.risklendpro.user.auth.UserLoginRequest;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.user.auth.UserLoginResponse;
 import org.example.risklendpro.user.auth.AuthService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,14 +28,14 @@ public class AuthController {
     
     @Operation(summary = "用户注册", description = "用户注册接口")
     @PostMapping("/register")
-    public CommonResponse<Void> register(@RequestBody UserRegisterRequest request) {
+    public CommonResponse<Void> register(@Valid @RequestBody UserRegisterRequest request) {
         authService.register(request);
         return CommonResponse.success("注册成功", null);
     }
     
     @Operation(summary = "用户登录", description = "用户登录接口，登录后返回token和role，如果是用户还返回当前评估状态")
     @PostMapping("/login")
-    public CommonResponse<UserLoginResponse> login(@RequestBody UserLoginRequest request) {
+    public CommonResponse<UserLoginResponse> login(@Valid @RequestBody UserLoginRequest request) {
         UserLoginResponse response = authService.login(request);
         return CommonResponse.success("登录成功", response);
     }

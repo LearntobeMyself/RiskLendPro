@@ -45,8 +45,8 @@ public class UserLoanProductController {
             @RequestParam(required = false) String targetGroup,
             @RequestParam(required = false) List<Long> tagIds,
             @RequestParam(required = false) String sortBy,
-            @RequestParam Integer pageNum,
-            @RequestParam Integer pageSize) {
+            @RequestParam(required = false, defaultValue = "1") Integer pageNum,
+            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
         return CommonResponse.success("查询成功", loanCatalogService.userList(
                 keyword, categoryCode, institutionTypes, amount, maxRate, term,
                 mortgageRequired, targetGroup, tagIds, sortBy, pageNum, pageSize));

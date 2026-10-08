@@ -8,6 +8,7 @@ import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.user.admin.AdminLoginResponse;
 import org.example.risklendpro.user.admin.AdminAuthService;
 import org.example.risklendpro.common.security.SecurityUtils;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,14 +34,14 @@ public class AdminAuthController {
     @Operation(summary = "管理员注册", description = "仅系统管理员可创建运营账号；公网不可匿名注册")
     @PreAuthorize("hasAuthority('sys:admin:write')")
     @PostMapping("/register")
-    public CommonResponse<Void> register(@RequestBody AdminRegisterRequest request) {
+    public CommonResponse<Void> register(@Valid @RequestBody AdminRegisterRequest request) {
         adminAuthService.register(request);
         return CommonResponse.success("注册成功", null);
     }
     
     @Operation(summary = "管理员登录", description = "管理员登录接口")
     @PostMapping("/login")
-    public CommonResponse<AdminLoginResponse> login(@RequestBody AdminLoginRequest request) {
+    public CommonResponse<AdminLoginResponse> login(@Valid @RequestBody AdminLoginRequest request) {
         AdminLoginResponse response = adminAuthService.login(request);
         return CommonResponse.success("登录成功", response);
     }

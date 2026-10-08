@@ -7,6 +7,7 @@ import org.example.risklendpro.loan.limit.LimitAdjustRequest;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.loan.limit.AdminCreditQueryService;
 import org.example.risklendpro.common.security.SecurityUtils;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,7 +52,7 @@ public class AdminCreditController {
     @PreAuthorize("hasAuthority('credit:adjust:write')")
     @PostMapping("/limits/{userId}/adjust")
     public CommonResponse<Map<String, Object>> adjust(
-            @PathVariable Long userId, @RequestBody LimitAdjustRequest request) {
+            @PathVariable Long userId, @Valid @RequestBody LimitAdjustRequest request) {
         return CommonResponse.success("调整成功",
                 adminCreditQueryService.adjustLimit(userId, request, SecurityUtils.getAdminId()));
     }

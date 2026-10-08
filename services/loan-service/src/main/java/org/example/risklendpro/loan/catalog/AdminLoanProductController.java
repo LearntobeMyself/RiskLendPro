@@ -75,8 +75,8 @@ public class AdminLoanProductController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String institutionType,
             @RequestParam(required = false) Integer enabled,
-            @RequestParam Integer pageNum,
-            @RequestParam Integer pageSize) {
+            @RequestParam(required = false, defaultValue = "1") Integer pageNum,
+            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
         return CommonResponse.success("查询成功",
                 loanCatalogService.institutionList(keyword, institutionType, enabled, pageNum, pageSize));
     }
@@ -136,8 +136,8 @@ public class AdminLoanProductController {
             @RequestParam(required = false) String categoryCode,
             @RequestParam(required = false) Long institutionId,
             @RequestParam(required = false) String status,
-            @RequestParam Integer pageNum,
-            @RequestParam Integer pageSize) {
+            @RequestParam(required = false, defaultValue = "1") Integer pageNum,
+            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
         return CommonResponse.success("查询成功",
                 loanCatalogService.adminList(keyword, categoryCode, institutionId, status, pageNum, pageSize));
     }
