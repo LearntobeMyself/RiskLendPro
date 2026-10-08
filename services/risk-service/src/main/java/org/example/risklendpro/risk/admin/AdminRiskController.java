@@ -48,8 +48,8 @@ public class AdminRiskController {
     @PreAuthorize("hasAuthority('risk:approve:write')")
     @PostMapping("/risk/approve")
     public CommonResponse<Void> riskApprove(@RequestBody RiskApproveRequest request) {
-        adminRiskQueryService.approveRisk(request);
-        return CommonResponse.success(null);
+        boolean mailed = adminRiskQueryService.approveRisk(request);
+        return CommonResponse.success(mailed ? "审批成功" : "审批已完成，通知邮件发送失败", null);
     }
 
     @Operation(summary = "B 卡贷后监控列表", description = "已启用 B 卡用户的 B 分、还款态势与预警标签")

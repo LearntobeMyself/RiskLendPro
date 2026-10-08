@@ -25,6 +25,7 @@ import org.example.risklendpro.risk.supplement.SupplementMaterialService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -66,6 +67,9 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
     private BehaviorScoreService behaviorScoreService;
     @Autowired
     private UserBCardLogMapper userBCardLogMapper;
+    @Autowired
+    @Lazy
+    private AdminRiskQueryServiceImpl self;
 
     public Page<Map<String, Object>> getRiskList(Integer page, Integer size, String status) {
         Page<RiskAssessment> pageInfo = new Page<>(page, size);
@@ -435,8 +439,26 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
     }
 
     @Override
+    public boolean approveRisk(RiskApproveRequest request) {
+        // 邮件必须在 completeApproval 的事务提交之后发送。不要给本方法加 @Transactional，
+        // 否则发信失败会把已经提交到其他服务的授信一起卷进回滚。
+        RiskAssessment assessment = self.completeApproval(request);
+        try {
+            emailUtil.sendRiskAssessmentNotification(
+                    assessment.getEmail(),
+                    assessment.getName(),
+                    "PASS".equals(request.getAuditResult()) ? "评估通过" : "评估拒绝",
+                    request.getCreditLimit() != null ? request.getCreditLimit().toString() : "0"
+            );
+            return true;
+        } catch (RuntimeException ex) {
+            log.error("审批已完成，通知邮件发送失败 applyId={}", assessment.getApplyId(), ex);
+            return false;
+        }
+    }
+
     @Transactional
-    public void approveRisk(RiskApproveRequest request) {
+    public RiskAssessment completeApproval(RiskApproveRequest request) {
         RiskAssessment assessment = riskAssessmentMapper.selectOne(
                 new QueryWrapper<RiskAssessment>().eq("apply_id", request.getApplyId()).last("FOR UPDATE")
         );
@@ -468,14 +490,8 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
         riskAssessmentMapper.updateById(assessment);
         userServiceClient.updateAssessmentStatus(
                 new UserAssessmentStatusCommand(assessment.getUserId(), assessment.getStatus()));
-
-        emailUtil.sendRiskAssessmentNotification(
-                assessment.getEmail(),
-                assessment.getName(),
-                "PASS".equals(request.getAuditResult()) ? "评估通过" : "评估拒绝",
-                request.getCreditLimit() != null ? request.getCreditLimit().toString() : "0"
-        );
         supplementMaterialService.clearSupplementOnFinalApproval(request.getApplyId());
+        return assessment;
     }
 
     public List<Map<String, Object>> getBCardMonitor() {
