@@ -94,7 +94,7 @@ risk:
     api-url: https://api.coze.cn/v1/workflow/run
     workflow-id: "7690804879720710159"
     workflow-version: "v0.0.1"
-    # PAT 不写在本文件。填写 config/local/application-local.yml 的 risk.coze.token（该目录已 gitignore）
+    # PAT 不写在本文件。复制 config/application-local.yml.example 到 config/local/application-local.yml 后填写 risk.coze.token
     # 每周日 02:00
     cron: "0 0 2 ? * SUN"
     read-timeout-ms: 300000
@@ -106,7 +106,11 @@ risk:
     max-file-size-mb: 5
     allowed-extensions: jpg,jpeg,png,pdf
 
-# 腾讯云 COS：密钥不要写进仓库。本地填 config/local/application-local.yml 或环境变量 COS_*。
+# 业务服务 CORS（SecurityConfig）。本地可在 application-local.yml 覆盖。
+cors:
+  allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*}
+
+# 腾讯云 COS：密钥不要写进仓库。复制 config/application-local.yml.example 到 config/local/application-local.yml 后填写。
 storage:
   provider: ${STORAGE_PROVIDER:cos}
   bucket: ${COS_BUCKET:}

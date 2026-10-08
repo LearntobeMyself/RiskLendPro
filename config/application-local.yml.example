@@ -1,0 +1,65 @@
+# RiskLendPro 本地密钥模板
+#
+# 使用：
+#   1. 复制本文件到：config/local/application-local.yml
+#   2. 在引号里填密钥（不要提交该文件）
+#   3. 重启 gateway、user-service、risk-service、loan-service、cs-service
+#
+# 未填写的项请保持空字符串或整段注释，服务会继续用 application-common.yml 的默认值。
+
+# ---------- 鉴权（要覆盖默认值时再解开）----------
+# security:
+#   jwt:
+#     secret: ""
+#   internal:
+#     api-token: ""
+
+# 业务服务 CORS。多个源用英文逗号分隔。
+cors:
+  allowed-origin-patterns: http://localhost:*,http://127.0.0.1:*,http://47.109.109.231,http://47.109.109.231:*
+
+# ---------- 扣子黑名单 ----------
+risk:
+  coze:
+    enabled: true
+    token: ""
+    workflow-id: "7690804879720710159"
+    workflow-version: "v0.0.1"
+  supplement:
+    upload-dir: upload/risk-supplement
+  # blacklist-sync:
+  #   api-token: ""
+
+# ---------- 腾讯云 COS（贷款产品图片）----------
+# 私有桶；桶 CORS：PUT/GET/HEAD/OPTIONS，允许头部 Content-Type。
+# bucket 填完整名，例如 mybucket-1250000000
+storage:
+  provider: cos
+  bucket: ""
+  region: ap-guangzhou
+  secret-id: ""
+  secret-key: ""
+  app-id: ""
+  cdn-domain: ""
+  private-bucket: true
+  presign-expire-minutes: 15
+
+# ---------- 可选：覆盖云库 / 邮件 / Redis ----------
+# spring:
+#   datasource:
+#     primary:
+#       jdbc-url: jdbc:mysql://HOST:3306/RiskLendPro?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+#       username: ""
+#       password: ""
+#     credit:
+#       jdbc-url: jdbc:mysql://HOST:3306/credit_data_db?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+#       username: ""
+#       password: ""
+#   mail:
+#     username: ""
+#     password: ""
+#   data:
+#     redis:
+#       host: ""
+#       port: 6379
+#       password: ""

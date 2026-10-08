@@ -1,6 +1,10 @@
 spring:
   application:
     name: risklendpro-gateway
+  config:
+    import:
+      - optional:file:./config/local/application-local.yml
+      - optional:file:../../config/local/application-local.yml
   cloud:
     gateway:
       server:
@@ -9,7 +13,7 @@ spring:
           globalcors:
             cors-configurations:
               '[/**]':
-                allowedOriginPatterns: "*"
+                allowedOriginPatterns: ${cors.allowed-origin-patterns:http://localhost:*,http://127.0.0.1:*}
                 allowedMethods: "*"
                 allowedHeaders: "*"
                 allowCredentials: true

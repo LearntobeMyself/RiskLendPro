@@ -44,8 +44,9 @@ risk-assessment/data/cleaned/
 # 运行时用户上传与备份
 upload/
 
-# 本地密钥（扣子 PAT 等），整个目录不提交
-config/local/
+# 本地密钥目录不提交；模板 example 可以进仓库
+config/local/**
+!config/application-local.yml.example
 
 # 本地记忆 / 会话产物
 .workbuddy/
