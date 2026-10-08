@@ -121,7 +121,7 @@ public class CatalogAssembler {
 
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("dataSource", product.getDataSource());
-        meta.put("verifiedAt", product.getVerifiedAt());
+        meta.put("verifiedAt", product.getVerifiedAt() == null ? null : product.getVerifiedAt().toString());
         meta.put("updateTime", KnowledgeRenderer.dateTime(product.getUpdateTime()));
         meta.put("riskTip", KnowledgeRenderer.RISK_TIP);
 
