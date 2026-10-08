@@ -93,7 +93,7 @@ class RepaymentServiceImplTest {
         RepaymentExecuteRequest req = request();
         req.setAmount(BigDecimal.valueOf(500)); // 部分还款，不合法
         assertThrows(RuntimeException.class, () -> service.executeRepayment(10L, req));
-        verify(repaymentRecordMapper, never()).updateById(any());
+        verify(repaymentRecordMapper, never()).updateById(any(RepaymentRecord.class));
     }
 
     @Test
@@ -106,7 +106,7 @@ class RepaymentServiceImplTest {
         when(repaymentRecordMapper.selectOne(any())).thenReturn(completed);
 
         assertThrows(RuntimeException.class, () -> service.executeRepayment(10L, request()));
-        verify(repaymentRecordMapper, never()).updateById(any());
+        verify(repaymentRecordMapper, never()).updateById(any(RepaymentRecord.class));
     }
 
     @Test
@@ -118,7 +118,7 @@ class RepaymentServiceImplTest {
         RepaymentExecuteRequest req = request();
         req.setAmount(BigDecimal.ZERO);
         assertThrows(RuntimeException.class, () -> service.executeRepayment(10L, req));
-        verify(repaymentRecordMapper, never()).updateById(any());
+        verify(repaymentRecordMapper, never()).updateById(any(RepaymentRecord.class));
     }
 
     @Test
@@ -131,7 +131,7 @@ class RepaymentServiceImplTest {
 
         assertThrows(RuntimeException.class, () -> service.executeRepayment(10L, req));
         verify(repaymentRecordMapper, never()).selectOne(any());
-        verify(repaymentRecordMapper, never()).updateById(any());
+        verify(repaymentRecordMapper, never()).updateById(any(RepaymentRecord.class));
     }
 
     @Test
@@ -143,7 +143,7 @@ class RepaymentServiceImplTest {
         RepaymentResponse resp = service.executeRepayment(10L, request());
 
         assertEquals("COMPLETED", resp.getStatus());
-        verify(repaymentRecordMapper).updateById(any());
+        verify(repaymentRecordMapper).updateById(any(RepaymentRecord.class));
 
         ArgumentCaptor<RepaymentPlan> planCaptor = ArgumentCaptor.forClass(RepaymentPlan.class);
         verify(repaymentPlanMapper).updateById(planCaptor.capture());

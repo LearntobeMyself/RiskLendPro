@@ -1,5 +1,6 @@
 package org.example.risklendpro.loan.limit;
 
+import org.example.risklendpro.loan.entity.LimitAdjustLog;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
@@ -81,8 +82,8 @@ class UserCreditLimitServiceImplTest {
                 creditLimit(BigDecimal.valueOf(1000), BigDecimal.valueOf(200), BigDecimal.valueOf(800)));
 
         assertThrows(RuntimeException.class, () -> service.adjustLimit(request(BigDecimal.valueOf(100)), 0L));
-        verify(userCreditLimitMapper, never()).updateById(any());
-        verify(limitAdjustLogMapper, never()).insert(any());
+        verify(userCreditLimitMapper, never()).updateById(any(UserCreditLimit.class));
+        verify(limitAdjustLogMapper, never()).insert(any(LimitAdjustLog.class));
     }
 
     @Test
@@ -93,8 +94,8 @@ class UserCreditLimitServiceImplTest {
                 creditLimit(BigDecimal.valueOf(1000), BigDecimal.valueOf(900), BigDecimal.valueOf(100)));
 
         assertThrows(RuntimeException.class, () -> service.adjustLimit(request(BigDecimal.ZERO), 0L));
-        verify(userCreditLimitMapper, never()).updateById(any());
-        verify(limitAdjustLogMapper, never()).insert(any());
+        verify(userCreditLimitMapper, never()).updateById(any(UserCreditLimit.class));
+        verify(limitAdjustLogMapper, never()).insert(any(LimitAdjustLog.class));
     }
 
     @Test
@@ -104,7 +105,7 @@ class UserCreditLimitServiceImplTest {
 
         service.adjustLimit(request(BigDecimal.valueOf(1200)), 0L);
 
-        verify(userCreditLimitMapper).updateById(any());
-        verify(limitAdjustLogMapper).insert(any());
+        verify(userCreditLimitMapper).updateById(any(UserCreditLimit.class));
+        verify(limitAdjustLogMapper).insert(any(LimitAdjustLog.class));
     }
 }

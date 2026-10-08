@@ -78,7 +78,7 @@ class BehaviorScoreServiceTest {
         when(userBehaviorFeaturesMapper.selectByIdCard("ID-68")).thenReturn(snapshot);
         when(behaviorScoreEngine.calculateBaseScore(anyMap())).thenReturn(620.0);
         when(behaviorLiveFeatureService.aggregate(68L)).thenReturn(live);
-        when(userBCardLogMapper.insert(any())).thenReturn(1);
+        when(userBCardLogMapper.insert(any(UserBCardLog.class))).thenReturn(1);
 
         behaviorScoreService.recalculate(68L);
 
@@ -109,7 +109,7 @@ class BehaviorScoreServiceTest {
         when(userServiceClient.getUser(101L)).thenReturn(user);
         when(userBehaviorFeaturesMapper.selectByIdCard("ID-101")).thenReturn(null);
         when(behaviorLiveFeatureService.aggregate(101L)).thenReturn(live);
-        when(userBCardLogMapper.insert(any())).thenReturn(1);
+        when(userBCardLogMapper.insert(any(UserBCardLog.class))).thenReturn(1);
 
         behaviorScoreService.recalculate(101L);
 

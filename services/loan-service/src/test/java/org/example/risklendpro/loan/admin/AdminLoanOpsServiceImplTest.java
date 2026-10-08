@@ -3,6 +3,7 @@ package org.example.risklendpro.loan.admin;
 import org.example.risklendpro.loan.borrow.LoanApproveRequest;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
 import org.example.risklendpro.loan.entity.Loan;
+import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
@@ -62,7 +63,7 @@ class AdminLoanOpsServiceImplTest {
         request.setApproveResult("APPROVE");
 
         assertThrows(RuntimeException.class, () -> service.approveLoan(request));
-        verify(loanMapper, never()).updateById(any());
-        verify(repaymentPlanMapper, never()).insert(any());
+        verify(loanMapper, never()).updateById(any(Loan.class));
+        verify(repaymentPlanMapper, never()).insert(any(RepaymentPlan.class));
     }
 }

@@ -50,8 +50,8 @@ class InternalLoanControllerGrantTest {
                 new CreditLimitGrantCommand(7L, "apply-1", new BigDecimal("10000")));
 
         assertEquals(new BigDecimal("10000"), snapshot.totalLimit());
-        verify(userCreditLimitMapper, never()).updateById(any());
-        verify(limitAdjustLogMapper, never()).insert(any());
+        verify(userCreditLimitMapper, never()).updateById(any(UserCreditLimit.class));
+        verify(limitAdjustLogMapper, never()).insert(any(LimitAdjustLog.class));
     }
 
     @Test
