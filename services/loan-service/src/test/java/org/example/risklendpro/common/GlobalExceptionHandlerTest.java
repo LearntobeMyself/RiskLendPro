@@ -24,12 +24,21 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void dataAccessDoesNotExposeSql() {
+    void concurrentRecordChangeIsRetryable() {
         CommonResponse<Void> response = handler.handleDataAccess(new MyBatisSystemException(
                 new PersistenceException("Record has changed since last read in table 'user_credit_limit'")));
+        assertEquals(400, response.getCode());
+        assertEquals("操作冲突，请稍后重试", response.getMessage());
+        assertFalse(response.getMessage().contains("user_credit_limit"));
+    }
+
+    @Test
+    void dataAccessDoesNotExposeSql() {
+        CommonResponse<Void> response = handler.handleDataAccess(new MyBatisSystemException(
+                new PersistenceException("Error querying database. Cause: java.sql.SQLSyntaxErrorException")));
         assertEquals(500, response.getCode());
         assertEquals("服务器内部错误", response.getMessage());
-        assertFalse(response.getMessage().contains("user_credit_limit"));
+        assertFalse(response.getMessage().contains("SQLSyntax"));
     }
 
     @Test

@@ -67,6 +67,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataAccessException.class)
     public CommonResponse<Void> handleDataAccess(DataAccessException e) {
         log.error("DataAccessException", e);
+        if (isConcurrentConflict(e)) {
+            return CommonResponse.fail(400, "操作冲突，请稍后重试");
+        }
         return CommonResponse.fail(500, INTERNAL_ERROR);
     }
 
@@ -89,6 +92,29 @@ public class GlobalExceptionHandler {
     public CommonResponse<Void> handleException(Exception e) {
         log.error("Exception: {}", e.getMessage(), e);
         return CommonResponse.fail(500, INTERNAL_ERROR);
+    }
+
+    private static boolean isConcurrentConflict(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof java.sql.SQLException sql) {
+                int code = sql.getErrorCode();
+                if (code == 1020 || code == 1205 || code == 1213) {
+                    return true;
+                }
+            }
+            String message = current.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase();
+                if (lower.contains("record has changed")
+                        || lower.contains("deadlock")
+                        || lower.contains("lock wait timeout")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     static boolean clientSafe(String message) {
