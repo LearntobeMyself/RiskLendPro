@@ -125,3 +125,26 @@ INSERT IGNORE INTO loan_category(code,name,description,sort) VALUES
 ('BUSINESS','企业经营贷','面向企业、个体工商户或企业主，用于经营周转',2),
 ('MORTGAGE','抵押贷款','用户需要提供房产、车辆等资产作为抵押',3),
 ('CONSUMER_INSTALLMENT','消费分期','针对特定消费场景提供的分期借款产品',4);
+
+INSERT INTO loan_tag(tag_name, category_code, sort)
+SELECT v.tag_name, v.category_code, v.sort
+FROM (
+  SELECT '工薪族' AS tag_name, 'PERSONAL_CREDIT' AS category_code, 1 AS sort
+  UNION ALL SELECT '公积金', 'PERSONAL_CREDIT', 2
+  UNION ALL SELECT '社保', 'PERSONAL_CREDIT', 3
+  UNION ALL SELECT '小微企业', 'BUSINESS', 1
+  UNION ALL SELECT '个体工商户', 'BUSINESS', 2
+  UNION ALL SELECT '企业主', 'BUSINESS', 3
+  UNION ALL SELECT '房产抵押', 'MORTGAGE', 1
+  UNION ALL SELECT '车辆抵押', 'MORTGAGE', 2
+  UNION ALL SELECT '经营用途', 'MORTGAGE', 3
+  UNION ALL SELECT '装修', 'CONSUMER_INSTALLMENT', 1
+  UNION ALL SELECT '教育', 'CONSUMER_INSTALLMENT', 2
+  UNION ALL SELECT '购物', 'CONSUMER_INSTALLMENT', 3
+  UNION ALL SELECT '数码', 'CONSUMER_INSTALLMENT', 4
+  UNION ALL SELECT '无抵押', NULL, 1
+  UNION ALL SELECT '随借随还', NULL, 2
+) v
+WHERE NOT EXISTS (
+  SELECT 1 FROM loan_tag t WHERE t.tag_name = v.tag_name AND t.deleted = 0
+);
