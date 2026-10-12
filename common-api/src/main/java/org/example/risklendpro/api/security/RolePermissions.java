@@ -71,8 +71,7 @@ public final class RolePermissions {
                 Permissions.RISK_MONITOR, AccessLevel.WRITE,
                 Permissions.LOAN_APPROVE, AccessLevel.WRITE,
                 Permissions.CREDIT_ADJUST, AccessLevel.WRITE,
-                Permissions.COLLECTION_CASE, AccessLevel.READ,
-                Permissions.SYS_PRODUCT, AccessLevel.READ
+                Permissions.COLLECTION_CASE, AccessLevel.READ
         ));
         matrix.put(StaffRoles.COLLECTOR, row(
                 Permissions.COLLECTION_CASE, AccessLevel.WRITE,

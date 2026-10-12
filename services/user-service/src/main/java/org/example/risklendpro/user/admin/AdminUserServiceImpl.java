@@ -17,6 +17,8 @@ import org.example.risklendpro.common.admin.AdminDateHelper;
 import org.example.risklendpro.common.admin.AdminEntityMapper;
 import org.example.risklendpro.common.admin.AdminExportHelper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -29,6 +31,8 @@ import java.util.Map;
 
 @Service
 public class AdminUserServiceImpl implements AdminUserService {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminUserServiceImpl.class);
 
     @Autowired
     private UserMapper userMapper;
@@ -68,17 +72,44 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     private Map<Long, CreditLimitSnapshot> batchCreditLimits(List<User> records) {
         List<Long> ids = records.stream().map(User::getId).toList();
-        return ids.isEmpty() ? Map.of() : loanServiceClient.listCreditLimits(ids);
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            Map<Long, CreditLimitSnapshot> limits = loanServiceClient.listCreditLimits(ids);
+            return limits == null ? Map.of() : limits;
+        } catch (RuntimeException ex) {
+            log.warn("credit limit enrichment skipped: {}", ex.getMessage());
+            return Map.of();
+        }
     }
 
     private Map<Long, LoanUserSummaryItem> batchLoanSummaries(List<User> records) {
         List<Long> ids = records.stream().map(User::getId).toList();
-        return ids.isEmpty() ? Map.of() : loanServiceClient.listUserLoanSummaries(ids);
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            Map<Long, LoanUserSummaryItem> summaries = loanServiceClient.listUserLoanSummaries(ids);
+            return summaries == null ? Map.of() : summaries;
+        } catch (RuntimeException ex) {
+            log.warn("loan summary enrichment skipped: {}", ex.getMessage());
+            return Map.of();
+        }
     }
 
     private Map<Long, RiskAssessmentSummary> batchLatestFinalAssessments(List<User> records) {
         List<Long> ids = records.stream().map(User::getId).toList();
-        return ids.isEmpty() ? Map.of() : riskServiceClient.listLatestFinalAssessments(ids);
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            Map<Long, RiskAssessmentSummary> assessments = riskServiceClient.listLatestFinalAssessments(ids);
+            return assessments == null ? Map.of() : assessments;
+        } catch (RuntimeException ex) {
+            log.warn("risk assessment enrichment skipped: {}", ex.getMessage());
+            return Map.of();
+        }
     }
 
     @Override
