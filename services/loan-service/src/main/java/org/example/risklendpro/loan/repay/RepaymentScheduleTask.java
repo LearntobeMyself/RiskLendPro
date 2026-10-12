@@ -7,6 +7,11 @@ import org.example.risklendpro.loan.borrow.LoanStatusEnum;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
+========
+import org.example.risklendpro.common.mail.EmailUtil;
+import org.example.risklendpro.loan.entity.RepaymentPlan;
+import org.example.risklendpro.loan.entity.RepaymentRecord;
+import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
@@ -14,6 +19,9 @@ import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
+========
+import org.example.risklendpro.user.mapper.UserMapper;
+import org.example.risklendpro.risk.score.BehaviorScoreService;
 import org.springframework.beans.factory.annotation.Autowired;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;

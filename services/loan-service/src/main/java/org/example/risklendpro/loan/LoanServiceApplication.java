@@ -6,6 +6,7 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 
 @EnableFeignClients
 @SpringBootApplication(scanBasePackages = "org.example.risklendpro")
+@SpringBootApplication
 public class LoanServiceApplication {
 
     public static void main(String[] args) {

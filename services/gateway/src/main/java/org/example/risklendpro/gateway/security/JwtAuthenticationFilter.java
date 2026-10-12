@@ -61,6 +61,17 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
             // 下游服务各自校验 JWT 并从 SecurityContext 获取登录主体，网关无需转发身份头。
             return chain.filter(exchange);
+            ServerWebExchange authenticatedExchange = exchange.mutate()
+                    .request(request -> request.headers(headers -> {
+                        headers.remove("X-User-Id");
+                        headers.remove("X-User-Role");
+                        headers.add("X-User-Id", claims.getSubject());
+                        if (role != null) {
+                            headers.add("X-User-Role", role);
+                        }
+                    }))
+                    .build();
+            return chain.filter(authenticatedExchange);
         } catch (Exception ignored) {
             return writeError(exchange, HttpStatus.UNAUTHORIZED, "token无效或已过期");
         }

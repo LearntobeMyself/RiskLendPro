@@ -4,5 +4,6 @@ import org.example.risklendpro.api.contract.RiskDecisionApi;
 import org.springframework.cloud.openfeign.FeignClient;
 
 @FeignClient(name = "risk-service", contextId = "riskServiceClient", url = "${service.risk.url}")
+@FeignClient(name = "risk-service", url = "${service.risk.url}")
 public interface RiskServiceClient extends RiskDecisionApi {
 }

@@ -32,4 +32,14 @@ public class RiskSupplementMaterial {
     private Date uploadTime;
     @TableField("expire_at")
     private Date expireAt;
+    @TableField("verification_ocr")
+    private String verificationOcr;
+    @TableField("verification_ai_score")
+    private Double verificationAiScore;
+    @TableField("verification_tamper_score")
+    private Double verificationTamperScore;
+    @TableField("verification_status")
+    private String verificationStatus;
+    @TableField("verification_time")
+    private Date verificationTime;
 }

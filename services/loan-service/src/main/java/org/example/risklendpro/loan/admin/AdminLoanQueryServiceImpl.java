@@ -14,6 +14,20 @@ import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
+========
+import org.example.risklendpro.user.entity.Admin;
+import org.example.risklendpro.loan.entity.Loan;
+import org.example.risklendpro.loan.entity.RepaymentPlan;
+import org.example.risklendpro.risk.entity.RiskAssessment;
+import org.example.risklendpro.user.entity.User;
+import org.example.risklendpro.loan.entity.UserCreditLimit;
+import org.example.risklendpro.loan.borrow.LoanStatusEnum;
+import org.example.risklendpro.user.mapper.AdminMapper;
+import org.example.risklendpro.loan.mapper.LoanMapper;
+import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
+import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
+import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
+import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.loan.borrow.BatchLoanApproveRequest;
 import org.example.risklendpro.loan.borrow.LoanApproveRequest;
 import org.example.risklendpro.loan.admin.AdminLoanQueryService;
@@ -49,6 +63,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
     @Autowired
     private RiskServiceClient riskServiceClient;
     @Autowired
+========
     private AdminLoanOpsService adminLoanOpsService;
     @Autowired
     private AdminExportHelper adminExportHelper;

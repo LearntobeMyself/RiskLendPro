@@ -66,6 +66,10 @@ spring:
               uri: ${CS_SERVICE_URL:http://localhost:8084}
               predicates:
                 - Path=/api/v1/cs/**
+            - id: legacy-service
+              uri: ${LEGACY_SERVICE_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/**
 
 server:
   port: ${GATEWAY_PORT:8088}

@@ -1,7 +1,7 @@
 package org.example.risklendpro.risk.score;
 
 import org.example.risklendpro.api.dto.LoanBehaviorSnapshot;
-import org.example.risklendpro.risk.client.LoanServiceClient;
+import org.example.risklendpro.risk.client.LoanQueryClient;
 import org.example.risklendpro.risk.score.BehaviorLiveFeatureService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 public class BehaviorLiveFeatureServiceImpl implements BehaviorLiveFeatureService {
 
     @Autowired
-    private LoanServiceClient loanServiceClient;
+    private LoanQueryClient loanServiceClient;
 
     @Override
     public LiveFeatures aggregate(Long userId) {

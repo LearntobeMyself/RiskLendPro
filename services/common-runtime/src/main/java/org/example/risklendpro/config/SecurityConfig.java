@@ -47,7 +47,9 @@ public class SecurityConfig {
                             "/swagger-resources/**",
                             "/webjars/**"
                         ).permitAll()
-                        // 3. 其他所有接口都需要认证
+                        // 3. Demo 图片核验接口（匿名可访问，用于演示）
+                        .requestMatchers("/demo/image-verify/**").permitAll()
+                        // 4. 其他所有接口都需要认证
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form.disable())

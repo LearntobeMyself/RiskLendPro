@@ -150,7 +150,8 @@ public class JwtFilter extends OncePerRequestFilter {
                 || requestURI.contains("/swagger-ui")
                 || requestURI.contains("/v3/api-docs")
                 || requestURI.contains("/swagger-resources/")
-                || requestURI.contains("/webjars/");
+                || requestURI.contains("/webjars/")
+                || requestURI.contains("/demo/image-verify");
     }
 
     private boolean isInternalRequest(String requestURI) {

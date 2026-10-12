@@ -12,6 +12,17 @@ import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
+========
+import org.example.risklendpro.loan.entity.LimitAdjustLog;
+import org.example.risklendpro.risk.entity.RiskAssessment;
+import org.example.risklendpro.user.entity.User;
+import org.example.risklendpro.loan.entity.UserCreditLimit;
+import org.example.risklendpro.user.entity.Admin;
+import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
+import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
+import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
+import org.example.risklendpro.user.mapper.UserMapper;
+import org.example.risklendpro.user.mapper.AdminMapper;
 import org.example.risklendpro.loan.limit.BatchCreditAdjustRequest;
 import org.example.risklendpro.loan.limit.LimitAdjustRequest;
 import org.example.risklendpro.loan.limit.LimitAdjustResponse;

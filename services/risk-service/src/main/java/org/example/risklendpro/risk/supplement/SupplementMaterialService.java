@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.risklendpro.risk.supplement.SupplementMaterialProperties;
+import org.example.risklendpro.risk.supplement.dto.ImageVerificationResult;
 import org.example.risklendpro.risk.entity.RiskAssessment;
 import org.example.risklendpro.risk.entity.RiskSupplementMaterial;
 import org.example.risklendpro.risk.assessment.StatusEnum;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -54,6 +56,9 @@ public class SupplementMaterialService {
 
     @Autowired
     private EmailUtil emailUtil;
+
+    @Autowired
+    private ImageVerificationService imageVerificationService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -180,6 +185,31 @@ public class SupplementMaterialService {
             row.setExpireAt(addDays(new Date(), properties.getRetentionDays()));
             materialMapper.insert(row);
 
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("materialId", row.getId());
+            resp.put("applyId", assessment.getApplyId());
+            resp.put("materialType", materialType);
+            resp.put("supplementStatus", assessment.getSupplementStatus());
+            resp.put("expireAt", row.getExpireAt());
+
+            try {
+                ImageVerificationResult vr = imageVerificationService.verifyAll(
+                        Path.of(stored.storedPath()), String.valueOf(row.getId()));
+                row.setVerificationOcr(vr.getOcr() != null ? vr.getOcr().getText() : null);
+                row.setVerificationAiScore(vr.getAiGenerate() != null ? vr.getAiGenerate().getConfidence() : null);
+                row.setVerificationTamperScore(vr.getTamper() != null ? vr.getTamper().getConfidence() : null);
+                row.setVerificationStatus(vr.getStatus());
+                row.setVerificationTime(new Date());
+                materialMapper.updateById(row);
+                resp.put("verification", vr);
+            } catch (Exception ve) {
+                log.warn("图片校验执行失败，跳过: {}", ve.getMessage());
+                row.setVerificationStatus("SKIPPED");
+                row.setVerificationTime(new Date());
+                materialMapper.updateById(row);
+                resp.put("verificationSkipped", true);
+            }
+
             if (allRequiredUploaded(assessment.getApplyId(), requirements)) {
                 assessment.setSupplementStatus(STATUS_SUBMITTED);
             } else {
@@ -187,12 +217,6 @@ public class SupplementMaterialService {
             }
             riskAssessmentMapper.updateById(assessment);
 
-            Map<String, Object> resp = new LinkedHashMap<>();
-            resp.put("materialId", row.getId());
-            resp.put("applyId", assessment.getApplyId());
-            resp.put("materialType", materialType);
-            resp.put("supplementStatus", assessment.getSupplementStatus());
-            resp.put("expireAt", row.getExpireAt());
             return resp;
         } catch (RuntimeException e) {
             throw e;

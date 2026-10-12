@@ -8,6 +8,15 @@ import org.example.risklendpro.api.dto.RiskAssessmentSummary;
 import org.example.risklendpro.user.client.LoanServiceClient;
 import org.example.risklendpro.user.client.RiskServiceClient;
 import org.example.risklendpro.user.entity.User;
+========
+import org.example.risklendpro.loan.entity.Loan;
+import org.example.risklendpro.risk.entity.RiskAssessment;
+import org.example.risklendpro.user.entity.User;
+import org.example.risklendpro.loan.entity.UserCreditLimit;
+import org.example.risklendpro.loan.borrow.LoanStatusEnum;
+import org.example.risklendpro.loan.mapper.LoanMapper;
+import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
+import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.user.admin.AdminUserCreateRequest;
 import org.example.risklendpro.user.admin.AdminUserStatusRequest;

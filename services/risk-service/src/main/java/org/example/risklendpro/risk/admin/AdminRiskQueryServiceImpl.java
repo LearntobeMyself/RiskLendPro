@@ -11,6 +11,7 @@ import org.example.risklendpro.api.dto.CreditLimitGrantCommand;
 import org.example.risklendpro.api.dto.CreditLimitSnapshot;
 import org.example.risklendpro.api.dto.UserAssessmentStatusCommand;
 import org.example.risklendpro.api.dto.UserSummary;
+import org.example.risklendpro.risk.client.LoanQueryClient;
 import org.example.risklendpro.risk.client.LoanServiceClient;
 import org.example.risklendpro.risk.client.UserServiceClient;
 import org.example.risklendpro.risk.assessment.RiskAssessmentRequest;
@@ -53,6 +54,8 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
     private UserServiceClient userServiceClient;
     @Autowired
     private LoanServiceClient loanServiceClient;
+    @Autowired
+    private LoanQueryClient loanQueryClient;
     @Autowired
     private EmailUtil emailUtil;
     @Autowired
@@ -534,7 +537,7 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
 
         Map<Long, BCardRepaymentSnapshot> snapshotCache = new HashMap<>();
         try {
-            Map<Long, BCardRepaymentSnapshot> snaps = loanServiceClient.listBCardRepaymentMonitors(userIds);
+            Map<Long, BCardRepaymentSnapshot> snaps = loanQueryClient.listBCardRepaymentMonitors(userIds);
             if (snaps != null) {
                 snapshotCache.putAll(snaps);
             }
@@ -562,7 +565,7 @@ public class AdminRiskQueryServiceImpl implements AdminRiskQueryService {
 
             BCardRepaymentSnapshot snapshot = snapshotCache.get(limit.userId());
             if (snapshot == null) {
-                try { snapshot = loanServiceClient.getBCardRepaymentMonitor(limit.userId()); } catch (Exception ignored) { }
+                try { snapshot = loanQueryClient.getBCardRepaymentMonitor(limit.userId()); } catch (Exception ignored) { }
             }
             if (snapshot == null) {
                 continue;

@@ -105,6 +105,8 @@ risk:
     retention-days: 30
     max-file-size-mb: 5
     allowed-extensions: jpg,jpeg,png,pdf
+    # Tesseract OCR tessdata 目录（含 chi_sim.traineddata 等语言包）。留空时使用 Tesseract 默认路径。
+    tessdata-path: ${TESSERACT_TESSDATA_PATH:tessdata}
 
 # 业务服务 CORS（SecurityConfig）。本地可在 application-local.yml 覆盖。
 cors:

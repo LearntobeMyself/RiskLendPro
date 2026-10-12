@@ -15,6 +15,7 @@ public class SupplementMaterialProperties {
     private int retentionDays = 30;
     private int maxFileSizeMb = 5;
     private String allowedExtensions = "jpg,jpeg,png,pdf";
+    private String tessdataPath;
 
     public List<String> allowedExtensionList() {
         return Arrays.stream(allowedExtensions.split(","))
