@@ -8,22 +8,11 @@ import org.example.risklendpro.user.client.LoanAdminQueryClient;
 import org.example.risklendpro.user.client.RiskAdminQueryClient;
 import org.example.risklendpro.user.entity.Admin;
 import org.example.risklendpro.user.mapper.AdminMapper;
-========
-import org.example.risklendpro.user.entity.Admin;
-import org.example.risklendpro.loan.entity.LimitAdjustLog;
-import org.example.risklendpro.loan.entity.Loan;
-import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.user.mapper.AdminMapper;
-import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
-import org.example.risklendpro.loan.mapper.LoanMapper;
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.user.admin.AdminCreateRequest;
 import org.example.risklendpro.user.admin.AdminUpdateRequest;
 import org.example.risklendpro.user.system.SystemConfigUpdateRequest;
 import org.example.risklendpro.user.system.AdminSystemService;
 import org.example.risklendpro.common.admin.AdminDateHelper;
-========
-import org.example.risklendpro.common.admin.AdminEntityMapper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;

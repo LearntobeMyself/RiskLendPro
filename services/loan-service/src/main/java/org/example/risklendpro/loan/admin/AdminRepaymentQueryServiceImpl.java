@@ -10,15 +10,6 @@ import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.client.UserServiceClient;
-========
-import org.example.risklendpro.loan.entity.Loan;
-import org.example.risklendpro.loan.entity.RepaymentPlan;
-import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.user.entity.User;
-import org.example.risklendpro.loan.mapper.LoanMapper;
-import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
-import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.loan.repay.RepaymentReminderRequest;
 import org.example.risklendpro.loan.repay.RepaymentReportRequest;
 import org.example.risklendpro.loan.admin.AdminRepaymentQueryService;

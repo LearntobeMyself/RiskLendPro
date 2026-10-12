@@ -7,12 +7,6 @@ import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
-========
-import org.example.risklendpro.loan.entity.Loan;
-import org.example.risklendpro.loan.entity.RepaymentPlan;
-import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.risk.entity.RiskAssessment;
-import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
 import org.example.risklendpro.loan.mapper.LoanMapper;
@@ -25,14 +19,6 @@ import org.example.risklendpro.loan.borrow.LoanService;
 import org.example.risklendpro.loan.catalog.ProductApplySupport;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
-========
-import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.user.mapper.UserMapper;
-import org.example.risklendpro.loan.borrow.LoanRequest;
-import org.example.risklendpro.loan.borrow.LoanResponse;
-import org.example.risklendpro.loan.borrow.LoanService;
-import org.example.risklendpro.risk.score.BehaviorScoreService;
 import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.repay.RepaymentCalculator;
 import org.springframework.beans.BeanUtils;

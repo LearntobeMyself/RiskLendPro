@@ -4,33 +4,27 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
+import org.example.risklendpro.loan.client.RiskServiceClient;
+import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
-========
-import org.example.risklendpro.common.mail.EmailUtil;
-import org.example.risklendpro.loan.entity.RepaymentPlan;
-import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
-import org.example.risklendpro.loan.client.RiskServiceClient;
-import org.example.risklendpro.loan.client.UserServiceClient;
-========
-import org.example.risklendpro.user.mapper.UserMapper;
-import org.example.risklendpro.risk.score.BehaviorScoreService;
 import org.springframework.beans.factory.annotation.Autowired;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
 @Component
 public class RepaymentScheduleTask {
@@ -56,11 +50,12 @@ public class RepaymentScheduleTask {
     @Autowired
     private UserServiceClient userServiceClient;
 
+    private static final Logger log = LoggerFactory.getLogger(RepaymentScheduleTask.class);
+
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd");
 
     @Scheduled(cron = "0 0 1 * * ?")
     @SchedulerLock(name = "repaymentDailyCheck", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10S")
-    @Transactional
     public void dailyCheckAndUpdate() {
         Date today = new Date();
 
@@ -69,7 +64,12 @@ public class RepaymentScheduleTask {
         List<RepaymentPlan> activePlans = repaymentPlanMapper.selectList(planQuery);
 
         for (RepaymentPlan plan : activePlans) {
-            checkAndUpdateActivePlan(plan, today);
+            try {
+                checkAndUpdateActivePlan(plan, today);
+            } catch (Exception e) {
+                // 单个计划处理失败不影响其它计划，也避免邮件/Feign 异常中断整批任务
+                log.warn("处理还款计划[{}]失败，跳过继续: {}", plan.getPlanId(), e.getMessage());
+            }
         }
 
         QueryWrapper<RepaymentPlan> overdueQuery = new QueryWrapper<>();
@@ -77,7 +77,11 @@ public class RepaymentScheduleTask {
         List<RepaymentPlan> overduePlans = repaymentPlanMapper.selectList(overdueQuery);
 
         for (RepaymentPlan plan : overduePlans) {
-            updateOverduePlan(plan, today);
+            try {
+                updateOverduePlan(plan, today);
+            } catch (Exception e) {
+                log.warn("更新逾期计划[{}]失败，跳过继续: {}", plan.getPlanId(), e.getMessage());
+            }
         }
     }
 
@@ -146,9 +150,25 @@ public class RepaymentScheduleTask {
         long diffDays = diffMillis / (1000 * 60 * 60 * 24);
 
         if (diffDays >= 1) {
+            String oldLevel = plan.getOverdueLevel();
             updateOverdueLevel(plan, (int) diffDays);
             markLoanOverdue(plan.getLoanId());
             riskServiceClient.recalculateBehaviorScore(plan.getUserId());
+
+            // 逾期等级升级（M1→M2→M3→M4）时再次发送催收邮件，实现持续催收
+            String newLevel = plan.getOverdueLevel();
+            if (newLevel != null && !"N".equals(newLevel) && !Objects.equals(oldLevel, newLevel)) {
+                UserSummary user = userServiceClient.getUser(plan.getUserId());
+                if (user != null) {
+                    emailUtil.sendOverdueNotification(
+                            user.email(),
+                            user.realName(),
+                            currentRecord.getPeriod(),
+                            (int) diffDays,
+                            currentRecord.getAmount().toString()
+                    );
+                }
+            }
         }
     }
 

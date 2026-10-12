@@ -5,9 +5,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.api.dto.CreditLimitSnapshot;
 import org.example.risklendpro.user.client.LoanServiceClient;
-========
-import org.example.risklendpro.loan.limit.UserCreditLimitResponse;
-import org.example.risklendpro.loan.limit.UserCreditLimitService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
