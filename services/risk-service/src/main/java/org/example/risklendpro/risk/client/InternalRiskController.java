@@ -149,7 +149,8 @@ public class InternalRiskController implements RiskDecisionApi {
                         assessment.getIdCard());
             }
         }
-        return BorrowGateResult.allow(assessment.getApplyId(), assessment.getIdCard());
+        return BorrowGateResult.allow(assessment.getApplyId(), assessment.getIdCard(),
+                Boolean.TRUE.equals(assessment.getHasHouse()), Boolean.TRUE.equals(assessment.getHasCar()));
     }
 
     private BehaviorScoreSnapshot loadLatestSnapshot(Long userId) {

@@ -101,12 +101,21 @@ public class ProductApplySupport {
                 throw new RuntimeException("还款方式不在该产品支持范围内");
             }
         }
+        Map<String, Object> extra = CatalogJson.readMap(product.getExtraConditions());
         return new ResolvedApply(
                 product.getId(),
                 product.getProductName(),
                 CHANNEL_PRODUCT,
                 toLoanRate(product),
-                chineseMethod
+                chineseMethod,
+                product.getCategoryCode(),
+                product.getMortgageRequired(),
+                strList(extra.get("collateralTypes")),
+                decimal(extra.get("maxLoanToValue")),
+                product.getMinAge(),
+                product.getMaxAge(),
+                CatalogJson.readStringList(product.getTargetGroups()),
+                CatalogJson.readStringList(product.getMaterials())
         );
     }
 
@@ -128,12 +137,73 @@ public class ProductApplySupport {
         return percent.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP);
     }
 
+    /** 抵押贷款分类 */
+    public static final String CATEGORY_MORTGAGE = "MORTGAGE";
+    public static final String COLLATERAL_HOUSE = "HOUSE";
+    public static final String COLLATERAL_VEHICLE = "VEHICLE";
+
+    public static boolean isMortgageCategory(String categoryCode) {
+        return CATEGORY_MORTGAGE.equals(categoryCode);
+    }
+
+    /** 从产品的可接受抵押物类型里取一个用于标记借据的抵押物类型。 */
+    public static String collateralTypeOf(List<String> collateralTypes) {
+        if (collateralTypes == null) {
+            return null;
+        }
+        if (collateralTypes.contains(COLLATERAL_HOUSE)) {
+            return COLLATERAL_HOUSE;
+        }
+        if (collateralTypes.contains(COLLATERAL_VEHICLE)) {
+            return COLLATERAL_VEHICLE;
+        }
+        return null;
+    }
+
+    private static List<String> strList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream().filter(v -> v != null).map(String::valueOf).toList();
+    }
+
+    private static BigDecimal decimal(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof BigDecimal bd) {
+            return bd;
+        }
+        if (value instanceof Number n) {
+            return BigDecimal.valueOf(n.doubleValue());
+        }
+        try {
+            return new BigDecimal(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     public record ResolvedApply(
             Long productId,
             String productName,
             String applyChannel,
             BigDecimal interestRate,
-            String repaymentMethod
+            String repaymentMethod,
+            String categoryCode,
+            String mortgageRequired,
+            List<String> collateralTypes,
+            BigDecimal maxLoanToValue,
+            Integer minAge,
+            Integer maxAge,
+            List<String> targetGroups,
+            List<String> materials
     ) {
+        /** 直接借款（无产品）时使用，仅带利率与还款方式。 */
+        public ResolvedApply(Long productId, String productName, String applyChannel,
+                             BigDecimal interestRate, String repaymentMethod) {
+            this(productId, productName, applyChannel, interestRate, repaymentMethod,
+                    null, null, List.of(), null, null, null, List.of(), List.of());
+        }
     }
 }

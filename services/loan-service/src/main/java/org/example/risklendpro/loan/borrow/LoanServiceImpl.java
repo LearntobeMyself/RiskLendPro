@@ -86,7 +86,18 @@ public class LoanServiceImpl implements LoanService {
 
         ProductApplySupport.ResolvedApply apply = resolveApply(request);
 
-        final boolean[] autoApprovedRef = {false};
+        if (ProductApplySupport.isMortgageCategory(apply.categoryCode())) {
+            return requestMortgageLoan(userId, request, apply, gate);
+        }
+        return requestCreditLoan(userId, request, apply, gate);
+    }
+
+    /**
+     * 信用类（个人信用贷、消费分期、经营贷、直接支用）：金额须落在产品区间内且不超过剩余信用额度，
+     * 合格即发放并扣减剩余额度；超过剩余额度直接拒绝，不再转管理员审批。
+     */
+    private LoanResponse requestCreditLoan(Long userId, LoanRequest request,
+                                           ProductApplySupport.ResolvedApply apply, BorrowGateResult gate) {
         final BigDecimal[] remainingLimitRef = {BigDecimal.ZERO};
         Loan loan = transactionTemplate.execute(status -> {
             checkOverdue(userId);
@@ -97,58 +108,88 @@ public class LoanServiceImpl implements LoanService {
             }
 
             BigDecimal remainingLimit = creditLimit.getRemainingLimit();
-            if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
-                throw new RuntimeException("您的额度已用完，无法借款");
+            if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0
+                    || request.getAmount().compareTo(remainingLimit) > 0) {
+                throw new RuntimeException("超出可用信用额度");
             }
             remainingLimitRef[0] = remainingLimit;
 
-            Loan newLoan = new Loan();
-            newLoan.setUserId(userId);
-            newLoan.setAmount(request.getAmount());
-            newLoan.setTermMonths(request.getTermMonths());
-            newLoan.setInterestRate(apply.interestRate());
-            newLoan.setRepaymentMethod(apply.repaymentMethod());
-            newLoan.setProductId(apply.productId());
-            newLoan.setProductName(apply.productName());
-            newLoan.setApplyChannel(apply.applyChannel());
-            newLoan.setApplyTime(new Date());
-            newLoan.setCreateTime(new Date());
-            newLoan.setUpdateTime(new Date());
-
-            if (request.getAmount().compareTo(remainingLimit) <= 0) {
-                newLoan.setStatus(LoanStatusEnum.DISBURSED.getCode());
-                newLoan.setDisbursementTime(new Date());
-                newLoan.setAutoApproved(true);
-                deductCreditLimit(creditLimit, request.getAmount());
-            } else {
-                newLoan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
-                newLoan.setAutoApproved(false);
-            }
+            Loan newLoan = buildLoan(userId, request, apply);
+            newLoan.setStatus(LoanStatusEnum.DISBURSED.getCode());
+            newLoan.setDisbursementTime(new Date());
+            newLoan.setAutoApproved(true);
+            deductCreditLimit(creditLimit, request.getAmount());
 
             loanMapper.insert(newLoan);
-
-            if (newLoan.getAutoApproved()) {
-                generateRepaymentPlan(newLoan, apply.repaymentMethod());
-            }
-            autoApprovedRef[0] = Boolean.TRUE.equals(newLoan.getAutoApproved());
+            generateRepaymentPlan(newLoan, apply.repaymentMethod());
             return newLoan;
         });
 
-        if (autoApprovedRef[0]) {
-            riskServiceClient.activateBehaviorScore(userId, gate.idCard());
-        }
-
-        sendLoanNotification(userId, request, remainingLimitRef[0], autoApprovedRef[0]);
+        riskServiceClient.activateBehaviorScore(userId, gate.idCard());
+        sendLoanNotification(userId, request, remainingLimitRef[0], true);
 
         LoanResponse response = new LoanResponse();
         BeanUtils.copyProperties(loan, response);
-        if (autoApprovedRef[0]) {
-            response.setRemark("额度充足，自动审批通过");
-        } else {
-            response.setRemark("借款金额超出剩余额度(" + remainingLimitRef[0] + ")，请等待管理员审批");
+        response.setRemark("额度充足，自动审批通过");
+        return response;
+    }
+
+    /**
+     * 房抵、车抵：按抵押物类型做准入与互斥校验，材料齐全后进入等待审批，不占用信用额度；
+     * 管理员确认抵押物评估价后按 评估价×抵押率 放款。
+     */
+    private LoanResponse requestMortgageLoan(Long userId, LoanRequest request,
+                                             ProductApplySupport.ResolvedApply apply, BorrowGateResult gate) {
+        String collateralType = ProductApplySupport.collateralTypeOf(apply.collateralTypes());
+        if (collateralType == null) {
+            throw new RuntimeException("该抵押产品未配置可接受的抵押物类型");
+        }
+        if (ProductApplySupport.COLLATERAL_HOUSE.equals(collateralType)
+                && !Boolean.TRUE.equals(gate.hasHouse())) {
+            throw new RuntimeException("房抵产品仅限名下有房的用户申请");
+        }
+        if (ProductApplySupport.COLLATERAL_VEHICLE.equals(collateralType)
+                && !Boolean.TRUE.equals(gate.hasCar())) {
+            throw new RuntimeException("车抵产品仅限名下有车的用户申请");
         }
 
+        Loan loan = transactionTemplate.execute(status -> {
+            checkOverdue(userId);
+            long pendingSameType = loanMapper.selectCount(new QueryWrapper<Loan>()
+                    .eq("user_id", userId)
+                    .eq("status", LoanStatusEnum.PENDING_APPROVAL.getCode())
+                    .eq("collateral_type", collateralType));
+            if (pendingSameType > 0) {
+                throw new RuntimeException("已有同类抵押申请等待审批，暂不能重复申请");
+            }
+            Loan newLoan = buildLoan(userId, request, apply);
+            newLoan.setCollateralType(collateralType);
+            newLoan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
+            newLoan.setAutoApproved(false);
+            loanMapper.insert(newLoan);
+            return newLoan;
+        });
+
+        LoanResponse response = new LoanResponse();
+        BeanUtils.copyProperties(loan, response);
+        response.setRemark("抵押申请已提交，等待管理员确认抵押物后放款");
         return response;
+    }
+
+    private Loan buildLoan(Long userId, LoanRequest request, ProductApplySupport.ResolvedApply apply) {
+        Loan newLoan = new Loan();
+        newLoan.setUserId(userId);
+        newLoan.setAmount(request.getAmount());
+        newLoan.setTermMonths(request.getTermMonths());
+        newLoan.setInterestRate(apply.interestRate());
+        newLoan.setRepaymentMethod(apply.repaymentMethod());
+        newLoan.setProductId(apply.productId());
+        newLoan.setProductName(apply.productName());
+        newLoan.setApplyChannel(apply.applyChannel());
+        newLoan.setApplyTime(new Date());
+        newLoan.setCreateTime(new Date());
+        newLoan.setUpdateTime(new Date());
+        return newLoan;
     }
 
     private ProductApplySupport.ResolvedApply resolveApply(LoanRequest request) {

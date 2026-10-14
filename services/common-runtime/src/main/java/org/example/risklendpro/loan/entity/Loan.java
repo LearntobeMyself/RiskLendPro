@@ -44,6 +44,12 @@ public class Loan {
     private String productName;
     @TableField("apply_channel")
     private String applyChannel;
+    @TableField("collateral_type")
+    private String collateralType;
+    @TableField("collateral_value")
+    private BigDecimal collateralValue;
+    @TableField("collateral_rate")
+    private BigDecimal collateralRate;
     @TableField("create_time")
     private Date createTime;
     @TableField("update_time")
