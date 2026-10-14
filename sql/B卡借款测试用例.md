@@ -290,8 +290,8 @@ WHERE u.phone_number = '13800138101';
 {
   "loanId": 1,
   "approveResult": "APPROVE",
-  "additionalLimit": 10000,
-  "approveRemark": "B-L03 额度外批准"
+  "collateralValue": 300000.00,
+  "approveRemark": "B-L03 抵押确认后放款"
 }
 ```
 

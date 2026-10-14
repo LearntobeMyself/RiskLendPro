@@ -156,7 +156,6 @@ CREATE TABLE `risk_assessment` (
 | `disbursement_time` | `DATETIME`      | `COMMENT '放款时间'`                                        | 放款时间                                                              |
 | `auto_approved`     | `TINYINT(1)`    | `DEFAULT FALSE`                                         | 是否自动审批                                                            |
 | `reject_reason`     | `VARCHAR(500)`  | `COMMENT '拒绝原因'`                                        | 拒绝原因                                                              |
-| `additional_limit`  | `DECIMAL(15,2)` | `COMMENT '额外批准的额度'`                                     | 额外批准的额度                                                           |
 | `operator_id`       | `BIGINT`        | `COMMENT '审批操作员ID'`                                     | 审批操作员ID                                                           |
 | `create_time`       | `DATETIME`      | `DEFAULT CURRENT_TIMESTAMP`                             | 创建时间                                                              |
 | `update_time`       | `DATETIME`      | `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | 更新时间                                                              |
@@ -177,7 +176,6 @@ CREATE TABLE `loan` (
     `disbursement_time` DATETIME COMMENT '放款时间',
     `auto_approved` TINYINT(1) DEFAULT FALSE COMMENT '是否自动审批',
     `reject_reason` VARCHAR(500) COMMENT '拒绝原因',
-    `additional_limit` DECIMAL(15,2) COMMENT '额外批准的额度',
     `operator_id` BIGINT COMMENT '审批操作员ID',
     `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -681,8 +679,6 @@ public class Loan {
     private Boolean autoApproved;
     @TableField("reject_reason")
     private String rejectReason;
-    @TableField("additional_limit")
-    private BigDecimal additionalLimit;
     @TableField("operator_id")
     private Long operatorId;
     @TableField("create_time")
