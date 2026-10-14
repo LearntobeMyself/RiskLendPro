@@ -10,13 +10,11 @@ import org.example.risklendpro.loan.borrow.LoanApproveResponse;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
 import org.example.risklendpro.loan.catalog.CatalogJson;
 import org.example.risklendpro.loan.catalog.entity.LoanProduct;
-import org.example.risklendpro.loan.entity.LimitAdjustLog;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.entity.VintageData;
-import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.LoanProductMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
@@ -56,8 +54,6 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     private LoanProductMapper loanProductMapper;
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
-    @Autowired
-    private LimitAdjustLogMapper limitAdjustLogMapper;
     @Autowired
     private VintageDataMapper vintageDataMapper;
     @Autowired
