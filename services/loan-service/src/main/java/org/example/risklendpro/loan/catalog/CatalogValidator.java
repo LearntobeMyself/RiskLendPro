@@ -5,6 +5,7 @@ import org.example.risklendpro.common.CatalogBusinessException;
 import org.example.risklendpro.loan.catalog.dto.ProductSaveRequest;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -92,7 +93,10 @@ public final class CatalogValidator {
                 throw new CatalogBusinessException(CatalogErrorCodes.RANGE_INVALID, "有期限时必须填写期限单位");
             }
             CatalogEnums.requireKnown(termUnit, CatalogEnums.TERM_UNIT, "termUnit");
-            return termUnit;
+            if (!"MONTH".equals(termUnit)) {
+                throw new CatalogBusinessException(CatalogErrorCodes.RANGE_INVALID, "期限单位只能按月");
+            }
+            return "MONTH";
         }
         return blankToNull(termUnit);
     }
@@ -109,8 +113,11 @@ public final class CatalogValidator {
         if (rate == null) {
             return;
         }
-        if (rate.compareTo(BigDecimal.ZERO) <= 0 || rate.compareTo(new BigDecimal("100")) > 0) {
-            throw new CatalogBusinessException(CatalogErrorCodes.RANGE_INVALID, "年化利率须在0到100之间（不含0）");
+        if (rate.compareTo(BigDecimal.ZERO) < 0) {
+            throw new CatalogBusinessException(CatalogErrorCodes.RANGE_INVALID, "年化利率不能为负");
+        }
+        if (rate.compareTo(new BigDecimal("24")) > 0) {
+            throw new CatalogBusinessException(CatalogErrorCodes.RANGE_INVALID, "年化利率不能超过24%");
         }
     }
 
@@ -215,6 +222,79 @@ public final class CatalogValidator {
             }
             text(tree.get("merchantScope"), 255, "合作商户范围");
         }
+    }
+
+    private static final List<String> IDENTITY_GROUPS =
+            List.of("SALARIED", "PROVIDENT_FUND", "CIVIL_SERVANT", "SME_OWNER", "SELF_EMPLOYED");
+
+    /**
+     * 材料清单校验：房抵至少房产证、车抵至少行驶证和车辆登记证；
+     * 材料清单里收集了身份证明时，必须覆盖所声明的特定身份（第 4 节对应证明）。
+     */
+    public static void validateMaterials(String categoryCode, Map<String, Object> extra,
+                                         List<String> materials, List<String> targetGroups) {
+        List<String> list = materials == null ? List.of() : materials;
+        if ("MORTGAGE".equals(categoryCode)) {
+            List<String> types = asStringList(extra.get("collateralTypes"));
+            if (types.contains("HOUSE") && !containsAny(list, "房产证")) {
+                throw new CatalogBusinessException(CatalogErrorCodes.FIELD_DEPENDENCY_INVALID,
+                        "房抵产品材料清单必须包含房产证");
+            }
+            if (types.contains("VEHICLE") && !(containsAny(list, "行驶证") && containsAny(list, "车辆登记证"))) {
+                throw new CatalogBusinessException(CatalogErrorCodes.FIELD_DEPENDENCY_INVALID,
+                        "车抵产品材料清单必须包含行驶证和车辆登记证");
+            }
+        }
+        List<String> constrained = (targetGroups == null ? List.<String>of() : targetGroups).stream()
+                .filter(IDENTITY_GROUPS::contains)
+                .toList();
+        if (constrained.isEmpty() || !containsAny(list, "工资流水", "社保", "公积金", "工作证", "在职证明", "营业执照")) {
+            return;
+        }
+        for (String group : constrained) {
+            if (!containsAny(list, acceptableProofs(group))) {
+                throw new CatalogBusinessException(CatalogErrorCodes.FIELD_DEPENDENCY_INVALID,
+                        "适用人群含" + group + "时，材料清单必须包含对应身份证明");
+            }
+        }
+    }
+
+    private static String[] acceptableProofs(String group) {
+        return switch (group) {
+            case "SALARIED" -> new String[]{"工资流水", "社保"};
+            case "PROVIDENT_FUND" -> new String[]{"公积金"};
+            case "CIVIL_SERVANT" -> new String[]{"工作证", "在职证明"};
+            case "SME_OWNER", "SELF_EMPLOYED" -> new String[]{"营业执照"};
+            default -> new String[0];
+        };
+    }
+
+    private static boolean containsAny(List<String> materials, String... keywords) {
+        for (String material : materials) {
+            if (material == null) {
+                continue;
+            }
+            for (String keyword : keywords) {
+                if (material.contains(keyword)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> asStringList(Object value) {
+        if (value instanceof List<?> list) {
+            List<String> out = new ArrayList<>();
+            for (Object item : list) {
+                if (item != null) {
+                    out.add(String.valueOf(item));
+                }
+            }
+            return out;
+        }
+        return List.of();
     }
 
     private static void positiveInt(JsonNode node, String field) {

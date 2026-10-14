@@ -21,6 +21,7 @@ public final class CatalogErrorCodes {
     public static final int PRODUCT_OFF_SHELF = 40904;
     public static final int PRODUCT_CANNOT_DELETE = 40905;
     public static final int TAG_IN_USE = 40906;
+    public static final int PRODUCT_RANGE_DUPLICATE = 40907;
     public static final int ON_SHELF_CHECK_FAILED = 42201;
     public static final int STORAGE_ERROR = 50001;
 
