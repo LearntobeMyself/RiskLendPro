@@ -353,9 +353,6 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
         }
 
         response.setStatus(LoanStatusEnum.DISBURSED.getCode());
-        response.setOriginalLimit(null);
-        response.setAdditionalLimit(BigDecimal.ZERO);
-        response.setTotalLimit(null);
         response.setActualDisbursedAmount(loan.getAmount());
         response.setEmailSent(true);
 

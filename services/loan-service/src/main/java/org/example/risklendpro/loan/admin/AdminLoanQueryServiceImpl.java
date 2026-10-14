@@ -251,8 +251,6 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
                 LoanApproveRequest approveRequest = new LoanApproveRequest();
                 approveRequest.setLoanId(loanId);
                 approveRequest.setApproveResult(request.getApproveResult());
-                approveRequest.setAdditionalLimit(request.getAdditionalLimit() != null
-                        ? request.getAdditionalLimit() : BigDecimal.ZERO);
                 approveRequest.setApproveRemark(request.getApproveRemark());
                 adminLoanOpsService.approveLoan(approveRequest);
                 Loan loan = loanMapper.selectById(loanId);

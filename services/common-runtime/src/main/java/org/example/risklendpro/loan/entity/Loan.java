@@ -34,8 +34,6 @@ public class Loan {
     private Boolean autoApproved;
     @TableField("reject_reason")
     private String rejectReason;
-    @TableField("additional_limit")
-    private BigDecimal additionalLimit;
     @TableField("operator_id")
     private Long operatorId;
     @TableField("product_id")

@@ -3,7 +3,6 @@ package org.example.risklendpro.loan.borrow;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -13,8 +12,6 @@ public class BatchLoanApproveRequest {
     private List<Long> loanIds;
     @Schema(description = "APPROVE 或 REJECT")
     private String approveResult;
-    @Schema(description = "额外批准额度（批量通过时可选）")
-    private BigDecimal additionalLimit;
     @Schema(description = "审批备注")
     private String approveRemark;
 }
