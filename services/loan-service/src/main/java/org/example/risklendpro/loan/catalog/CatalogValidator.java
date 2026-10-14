@@ -47,19 +47,25 @@ public final class CatalogValidator {
     public static String applyMortgageRule(String categoryCode, String mortgageRequired) {
         CatalogEnums.requireKnown(categoryCode, CatalogEnums.CATEGORY, "categoryCode");
         CatalogEnums.requireKnown(mortgageRequired, CatalogEnums.MORTGAGE, "mortgageRequired");
+        String normalized = blankToNull(mortgageRequired);
         if ("MORTGAGE".equals(categoryCode)) {
-            if (mortgageRequired == null || mortgageRequired.isBlank()) {
-                return "REQUIRED";
-            }
-            if (!"REQUIRED".equals(mortgageRequired)) {
+            if (normalized != null && !"REQUIRED".equals(normalized)) {
                 throw new CatalogBusinessException(CatalogErrorCodes.CATEGORY_RULE_CONFLICT, "抵押贷款必须需要抵押");
             }
             return "REQUIRED";
         }
-        if ("REQUIRED".equals(mortgageRequired)) {
+        if ("REQUIRED".equals(normalized)) {
             throw new CatalogBusinessException(CatalogErrorCodes.CATEGORY_RULE_CONFLICT, "非抵押贷款不能为必须抵押");
         }
-        return blankToNull(mortgageRequired);
+        if ("OPTIONAL".equals(normalized)) {
+            if ("BUSINESS".equals(categoryCode)) {
+                return "OPTIONAL";
+            }
+            throw new CatalogBusinessException(CatalogErrorCodes.CATEGORY_RULE_CONFLICT,
+                    "个人信用贷和消费分期只能填无需抵押");
+        }
+        // 个人信用贷、消费分期、企业经营贷：未填一律视为无需抵押
+        return "NONE";
     }
 
     public static void amountRange(Long min, Long max) {
@@ -185,9 +191,15 @@ public final class CatalogValidator {
             text(tree.get("revenueRequirement"), 255, "营业收入要求");
             text(tree.get("licenseRequirement"), 255, "营业执照要求");
         } else if ("MORTGAGE".equals(categoryCode)) {
+            List<String> types = List.of();
             if (tree.has("collateralTypes") && !tree.get("collateralTypes").isNull()) {
-                List<String> types = CatalogJson.readStringList(tree.get("collateralTypes").toString());
+                types = CatalogJson.readStringList(tree.get("collateralTypes").toString());
                 enumList(types, CatalogEnums.COLLATERAL, "collateralTypes");
+            }
+            // 抵押贷款必须写明抵押物为房产或车辆，才能被识别为房抵 / 车抵
+            if (types.isEmpty() || !(types.contains("HOUSE") || types.contains("VEHICLE"))) {
+                throw new CatalogBusinessException(CatalogErrorCodes.FIELD_DEPENDENCY_INVALID,
+                        "抵押贷款必须写明抵押物为房产或车辆");
             }
             text(tree.get("collateralValueRequirement"), 255, "抵押物价值要求");
             if (tree.hasNonNull("maxLoanToValue")) {
