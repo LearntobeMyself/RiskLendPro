@@ -219,9 +219,9 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             BigDecimal totalLimit = creditLimit != null ? creditLimit.getTotalLimit() : BigDecimal.ZERO;
             BigDecimal remainingLimit = creditLimit != null ? creditLimit.getRemainingLimit() : BigDecimal.ZERO;
             BigDecimal exceedAmount = loan.getAmount().subtract(remainingLimit).max(BigDecimal.ZERO);
-            // 信用类额度内借款由系统自动放款，不应出现在人工审批列表；
-            // 抵押类申请与剩余信用额度无关，一律进入管理员抵押确认列表。
-            if (loan.getCollateralType() == null && exceedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            // 抵押类申请与剩余信用额度无关，一律进入管理员抵押确认列表；
+            // 信用类申请超过剩余额度在受理时已直接拒绝，不会进入人工审批。
+            if (loan.getCollateralType() == null) {
                 continue;
             }
 
@@ -290,75 +290,8 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
                 return response;
             }
 
-            loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
-            loan.setApproveTime(new Date());
-            loan.setDisbursementTime(new Date());
-
-            UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
-                    new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId()).last("FOR UPDATE")
-            );
-
-            if (creditLimit != null) {
-                BigDecimal oldTotalLimit = creditLimit.getTotalLimit() != null ? creditLimit.getTotalLimit() : BigDecimal.ZERO;
-                BigDecimal oldUsedLimit = creditLimit.getUsedLimit() != null ? creditLimit.getUsedLimit() : BigDecimal.ZERO;
-                BigDecimal oldRemainingLimit = creditLimit.getRemainingLimit() != null ? creditLimit.getRemainingLimit() : BigDecimal.ZERO;
-                BigDecimal additionalLimit = request.getAdditionalLimit() != null ? request.getAdditionalLimit() : BigDecimal.ZERO;
-
-                // 额度外借款审批：新增额度必须至少覆盖超出部分，否则新总额度会小于新已用额度
-                BigDecimal exceedAmount = loan.getAmount().subtract(oldRemainingLimit).max(BigDecimal.ZERO);
-                if (additionalLimit.compareTo(exceedAmount) < 0) {
-                    additionalLimit = exceedAmount;
-                }
-
-                BigDecimal newTotalLimit = oldTotalLimit.add(additionalLimit);
-                BigDecimal newUsedLimit = oldUsedLimit.add(loan.getAmount());
-                // 二次兜底：即使 additionalLimit 有异常，也保证总额度不低于已用额度
-                if (newTotalLimit.compareTo(newUsedLimit) < 0) {
-                    newTotalLimit = newUsedLimit;
-                }
-                BigDecimal newRemainingLimit = newTotalLimit.subtract(newUsedLimit);
-
-                creditLimit.setTotalLimit(newTotalLimit);
-                creditLimit.setUsedLimit(newUsedLimit);
-                creditLimit.setRemainingLimit(newRemainingLimit);
-                creditLimit.setLastUpdateTime(new Date());
-                userCreditLimitMapper.updateById(creditLimit);
-
-                loan.setAdditionalLimit(additionalLimit);
-
-                LimitAdjustLog log = new LimitAdjustLog();
-                log.setUserId(loan.getUserId());
-                log.setOldLimit(oldTotalLimit);
-                log.setNewLimit(newTotalLimit);
-                log.setReason("审批放款：借款金额 " + loan.getAmount() + "，新增授信 " + additionalLimit + "，原额度 " + oldTotalLimit);
-                log.setOperatorId(0L);
-                log.setAdjustTime(new Date());
-                limitAdjustLogMapper.insert(log);
-
-                response.setOriginalLimit(oldTotalLimit);
-                response.setAdditionalLimit(additionalLimit);
-                response.setTotalLimit(newTotalLimit);
-                response.setActualDisbursedAmount(loan.getAmount());
-            }
-
-            loanMapper.updateById(loan);
-
-            generateRepaymentPlan(loan, loan.getRepaymentMethod());
-
-            if (user != null && user.idCard() != null) {
-                riskServiceClient.activateBehaviorScore(loan.getUserId(), user.idCard());
-            }
-
-            response.setStatus(LoanStatusEnum.DISBURSED.getCode());
-            response.setEmailSent(true);
-
-            if (user != null) {
-                emailUtil.sendLoanSuccessNotification(
-                        user.email(),
-                        user.realName(),
-                        loan.getAmount().toString()
-                );
-            }
+            // 信用类申请超过剩余额度在受理时已直接拒绝，管理员不能改成通过。
+            throw new RuntimeException("信用类申请超出剩余额度将被直接拒绝，不支持人工审批放款");
         } else {
             loan.setStatus(LoanStatusEnum.REJECTED.getCode());
             loan.setApproveTime(new Date());
