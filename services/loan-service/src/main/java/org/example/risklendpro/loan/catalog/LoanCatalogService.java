@@ -203,6 +203,23 @@ public class LoanCatalogService {
         return toCards(ranked, false);
     }
 
+    /** 供推荐等场景复用：已上架且机构启用的产品，可按分类过滤并排除指定产品。 */
+    public List<LoanProduct> visibleProducts(String categoryCode, Long excludeProductId) {
+        QueryWrapper<LoanProduct> wrapper = visibleWrapper();
+        if (categoryCode != null && !categoryCode.isBlank()) {
+            wrapper.eq("category_code", categoryCode);
+        }
+        if (excludeProductId != null) {
+            wrapper.ne("id", excludeProductId);
+        }
+        return productMapper.selectList(wrapper);
+    }
+
+    /** 供推荐等场景复用：按现有卡片结构组装产品卡片。 */
+    public List<Map<String, Object>> cardsOf(List<LoanProduct> products) {
+        return toCards(products, false);
+    }
+
     public Map<String, Object> compare(List<Long> productIds) {
         if (productIds == null || productIds.size() < 2 || productIds.size() > 4) {
             throw new CatalogBusinessException(CatalogErrorCodes.PARAM_INVALID, "对比产品须为2到4个");

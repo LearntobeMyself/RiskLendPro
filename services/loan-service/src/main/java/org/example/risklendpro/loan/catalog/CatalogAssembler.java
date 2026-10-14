@@ -65,9 +65,11 @@ public class CatalogAssembler {
         card.put("categoryCode", product.getCategoryCode());
         card.put("categoryName", CatalogEnums.CATEGORY.get(product.getCategoryCode()));
         card.put("coverImage", cover);
+        card.put("minAmount", product.getMinAmount());
         card.put("maxAmount", product.getMaxAmount());
         card.put("minAnnualRate", product.getMinAnnualRate());
         card.put("maxAnnualRate", product.getMaxAnnualRate());
+        card.put("minTerm", product.getMinTerm());
         card.put("maxTerm", product.getMaxTerm());
         card.put("termUnit", product.getTermUnit());
         card.put("mortgageRequired", CatalogEnums.named(product.getMortgageRequired(), CatalogEnums.MORTGAGE));
