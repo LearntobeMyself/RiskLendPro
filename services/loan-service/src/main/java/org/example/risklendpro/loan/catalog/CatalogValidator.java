@@ -1,6 +1,7 @@
 package org.example.risklendpro.loan.catalog;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.example.risklendpro.api.contract.IdentityProofMaterials;
 import org.example.risklendpro.common.CatalogBusinessException;
 import org.example.risklendpro.loan.catalog.dto.ProductSaveRequest;
 
@@ -248,7 +249,7 @@ public final class CatalogValidator {
         List<String> constrained = (targetGroups == null ? List.<String>of() : targetGroups).stream()
                 .filter(IDENTITY_GROUPS::contains)
                 .toList();
-        if (constrained.isEmpty() || !containsAny(list, "工资流水", "社保", "公积金", "工作证", "在职证明", "营业执照")) {
+        if (constrained.isEmpty() || !IdentityProofMaterials.mentionsIdentityProof(list)) {
             return;
         }
         for (String group : constrained) {

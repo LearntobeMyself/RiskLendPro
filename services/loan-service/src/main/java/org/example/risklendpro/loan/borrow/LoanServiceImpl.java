@@ -154,13 +154,13 @@ public class LoanServiceImpl implements LoanService {
         if (collateralType == null) {
             throw new RuntimeException("该抵押产品未配置可接受的抵押物类型");
         }
-        if (ProductApplySupport.COLLATERAL_HOUSE.equals(collateralType)
-                && !Boolean.TRUE.equals(gate.hasHouse())) {
-            throw new RuntimeException("房抵产品仅限名下有房的用户申请");
-        }
-        if (ProductApplySupport.COLLATERAL_VEHICLE.equals(collateralType)
-                && !Boolean.TRUE.equals(gate.hasCar())) {
-            throw new RuntimeException("车抵产品仅限名下有车的用户申请");
+        boolean hasCollateral = ProductApplySupport.COLLATERAL_HOUSE.equals(collateralType)
+                ? Boolean.TRUE.equals(gate.hasHouse()) : Boolean.TRUE.equals(gate.hasCar());
+        // 名下有房/有车，或此前已有管理员确认过的同类抵押物（评估价已录入），均可申请
+        if (!hasCollateral && !hasConfirmedCollateral(userId, collateralType)) {
+            throw new RuntimeException(ProductApplySupport.COLLATERAL_HOUSE.equals(collateralType)
+                    ? "房抵产品仅限名下有房或已有确认过的房产材料的用户申请"
+                    : "车抵产品仅限名下有车或已有确认过的车辆材料的用户申请");
         }
 
         Loan loan = transactionTemplate.execute(status -> {
@@ -216,8 +216,21 @@ public class LoanServiceImpl implements LoanService {
         }
     }
 
+    /** 该用户此前是否已有管理员确认过的同类抵押物（已录入评估价）。 */
+    private boolean hasConfirmedCollateral(Long userId, String collateralType) {
+        Long count = loanMapper.selectCount(new QueryWrapper<Loan>()
+                .eq("user_id", userId)
+                .eq("collateral_type", collateralType)
+                .isNotNull("collateral_value"));
+        return count != null && count > 0;
+    }
+
     /** 产品要求特定身份时，对应证明材料必须先通过补充材料接口上传。 */
     private void validateIdentityProofs(Long userId, ProductApplySupport.ResolvedApply apply) {
+        // 材料清单未提及身份证明的产品（如随心周转金「职业不限」）不要求上传证明
+        if (!IdentityProofMaterials.mentionsIdentityProof(apply.materials())) {
+            return;
+        }
         Set<String> required = IdentityProofMaterials.requiredCodes(apply.targetGroups());
         if (required.isEmpty()) {
             return;

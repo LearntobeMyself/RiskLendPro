@@ -37,6 +37,31 @@ public final class IdentityProofMaterials {
         return code != null && ALL_CODES.contains(code);
     }
 
+    /** 材料清单里出现这些字样，才对该产品声明的特定身份强制要求上传证明。 */
+    private static final List<String> IDENTITY_PROOF_KEYWORDS =
+            List.of("工资流水", "社保", "公积金", "工作证", "在职证明", "营业执照");
+
+    /**
+     * 产品材料清单是否提及身份证明。未提及的产品（如随心周转金「职业不限」）不要求身份证明，
+     * 与产品保存时的材料校验口径保持一致。
+     */
+    public static boolean mentionsIdentityProof(List<String> materials) {
+        if (materials == null) {
+            return false;
+        }
+        for (String material : materials) {
+            if (material == null) {
+                continue;
+            }
+            for (String keyword : IDENTITY_PROOF_KEYWORDS) {
+                if (material.contains(keyword)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /**
      * 产品声明的特定身份集合 → 需要的证明材料类型集合。
      * 同一产品声明的多个身份取并集，用户满足其中任意一种即可（例如经营周转贷在企业主/个体工商户里证明一种）。

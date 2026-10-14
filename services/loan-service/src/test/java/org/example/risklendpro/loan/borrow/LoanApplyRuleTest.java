@@ -24,6 +24,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -104,12 +105,28 @@ class LoanApplyRuleTest {
         when(repaymentPlanMapper.selectCount(any())).thenReturn(0L);
     }
 
+    /** 按声明的身份组拼出含身份证明字样的材料清单；无身份组时不含身份证明字样（如随心周转金）。 */
+    private static List<String> proofMaterialsFor(List<String> targetGroups) {
+        List<String> materials = new ArrayList<>(List.of("身份证"));
+        for (String group : targetGroups == null ? List.<String>of() : targetGroups) {
+            switch (group) {
+                case "SALARIED" -> materials.add("近6个月工资流水");
+                case "PROVIDENT_FUND" -> materials.add("公积金缴存证明");
+                case "CIVIL_SERVANT" -> materials.add("工作证或在职证明");
+                case "SME_OWNER", "SELF_EMPLOYED" -> materials.add("营业执照");
+                default -> {
+                }
+            }
+        }
+        return materials;
+    }
+
     private ProductApplySupport.ResolvedApply apply(String categoryCode, List<String> collateralTypes,
                                                     Integer minAge, Integer maxAge, List<String> targetGroups) {
         return new ProductApplySupport.ResolvedApply(
                 PRODUCT_ID, "薪金闪贷", ProductApplySupport.CHANNEL_PRODUCT, new BigDecimal("0.072"),
                 "等额本息", categoryCode, "NONE", collateralTypes, null, minAge, maxAge,
-                targetGroups, List.of());
+                targetGroups, proofMaterialsFor(targetGroups));
     }
 
     private LoanRequest request(String amount, int termMonths) {
