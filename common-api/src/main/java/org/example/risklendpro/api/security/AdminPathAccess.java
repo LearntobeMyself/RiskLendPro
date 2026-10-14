@@ -19,6 +19,9 @@ public final class AdminPathAccess {
         if (isBorrowerPath(path)) {
             return StaffRoles.USER.equals(role);
         }
+        if (!write && StaffRoles.SYS_ADMIN.equals(role) && isBoardPath(path)) {
+            return true;
+        }
 
         String permission = permissionFor(path);
         if (permission == null) {
@@ -67,6 +70,10 @@ public final class AdminPathAccess {
 
     private static boolean isExport(String path) {
         return path.endsWith("/export") || path.contains("/export/") || path.endsWith("/download");
+    }
+
+    private static boolean isBoardPath(String path) {
+        return "/admin/dashboard/stats".equals(path) || path.startsWith("/admin/bi");
     }
 
     private static boolean isBorrowerPath(String path) {

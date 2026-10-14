@@ -23,21 +23,21 @@ public class AdminLoanOpsController {
     private AdminLoanOpsService adminLoanOpsService;
 
     @Operation(summary = "获取Vintage曲线数据", description = "获取Vintage曲线数据，用于分析不同放款月份的逾期率趋势")
-    @PreAuthorize("hasAuthority('risk:monitor')")
+    @PreAuthorize("hasAnyAuthority('risk:monitor', 'ROLE_SYS_ADMIN')")
     @GetMapping("/bi/vintage")
     public CommonResponse<Object> vintage() {
         return CommonResponse.success("获取Vintage数据成功", adminLoanOpsService.getVintageData());
     }
 
     @Operation(summary = "获取滚动率数据", description = "获取滚动率数据，用于分析逾期账户在各状态间的转化情况")
-    @PreAuthorize("hasAuthority('risk:monitor')")
+    @PreAuthorize("hasAnyAuthority('risk:monitor', 'ROLE_SYS_ADMIN')")
     @GetMapping("/bi/roll-rate")
     public CommonResponse<Object> rollRate() {
         return CommonResponse.success("获取滚动率数据成功", adminLoanOpsService.getRollRateData());
     }
 
     @Operation(summary = "获取管理员首页统计", description = "获取管理员首页的汇总统计数据")
-    @PreAuthorize("hasAuthority('risk:monitor')")
+    @PreAuthorize("hasAnyAuthority('risk:monitor', 'ROLE_SYS_ADMIN')")
     @GetMapping("/dashboard/stats")
     public CommonResponse<Object> dashboardStats() {
         return CommonResponse.success("获取统计数据成功", adminLoanOpsService.getDashboardStats());

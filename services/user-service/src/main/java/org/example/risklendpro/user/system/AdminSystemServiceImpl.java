@@ -14,6 +14,8 @@ import org.example.risklendpro.user.system.SystemConfigUpdateRequest;
 import org.example.risklendpro.user.system.AdminSystemService;
 import org.example.risklendpro.common.admin.AdminDateHelper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -30,11 +32,14 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 @Service
 public class AdminSystemServiceImpl implements AdminSystemService {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminSystemServiceImpl.class);
 
     private final Map<String, Object> configStore = new ConcurrentHashMap<>(Map.of(
             "emailEnabled", true,
@@ -132,24 +137,9 @@ public class AdminSystemServiceImpl implements AdminSystemService {
         Date start = AdminDateHelper.parseDateStart(startDate);
         Date end = AdminDateHelper.parseDateEnd(endDate);
 
-        for (OperationLogItem log : loanAdminQueryClient.listCreditAdjustLogs()) {
-            if (!inRange(log.createTime(), start, end)) {
-                continue;
-            }
-            all.add(operationLogEntry(log));
-        }
-        for (OperationLogItem log : loanAdminQueryClient.listLoanApprovalLogs()) {
-            if (!inRange(log.createTime(), start, end)) {
-                continue;
-            }
-            all.add(operationLogEntry(log));
-        }
-        for (OperationLogItem log : riskAdminQueryClient.listRiskApprovalLogs()) {
-            if (!inRange(log.createTime(), start, end)) {
-                continue;
-            }
-            all.add(operationLogEntry(log));
-        }
+        appendLogs(all, start, end, loanAdminQueryClient::listCreditAdjustLogs);
+        appendLogs(all, start, end, loanAdminQueryClient::listLoanApprovalLogs);
+        appendLogs(all, start, end, riskAdminQueryClient::listRiskApprovalLogs);
 
         if (module != null && !module.isBlank()) {
             all = all.stream().filter(l -> module.equals(l.get("module"))).toList();
@@ -159,6 +149,24 @@ public class AdminSystemServiceImpl implements AdminSystemService {
         int from = Math.max(0, (page - 1) * size);
         int to = Math.min(all.size(), from + size);
         return AdminPageHelper.toListPage(from >= all.size() ? List.of() : all.subList(from, to), all.size());
+    }
+
+    private void appendLogs(List<Map<String, Object>> all, Date start, Date end,
+                            Supplier<List<OperationLogItem>> source) {
+        try {
+            List<OperationLogItem> logs = source.get();
+            if (logs == null) {
+                return;
+            }
+            for (OperationLogItem item : logs) {
+                if (!inRange(item.createTime(), start, end)) {
+                    continue;
+                }
+                all.add(operationLogEntry(item));
+            }
+        } catch (RuntimeException ex) {
+            log.warn("operation log source skipped: {}", ex.getMessage());
+        }
     }
 
     @Override

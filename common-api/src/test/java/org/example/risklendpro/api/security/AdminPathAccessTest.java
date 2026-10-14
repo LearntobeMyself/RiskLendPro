@@ -73,8 +73,12 @@ class AdminPathAccessTest {
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.SYS_ADMIN));
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "POST", StaffRoles.SYS_ADMIN));
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products/knowledge/export", "GET", StaffRoles.SYS_ADMIN));
-        assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.RISK_MANAGER));
+        assertFalse(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.RISK_MANAGER));
         assertFalse(AdminPathAccess.allows("/api/v1/admin/products", "POST", StaffRoles.RISK_MANAGER));
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/dashboard/stats", "GET", StaffRoles.SYS_ADMIN));
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/bi/vintage", "GET", StaffRoles.SYS_ADMIN));
+        assertFalse(AdminPathAccess.allows("/api/v1/admin/b-card/monitor", "GET", StaffRoles.SYS_ADMIN));
+        assertFalse(AdminPathAccess.allows("/api/v1/admin/bi/vintage/export", "GET", StaffRoles.SYS_ADMIN));
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.CS_AGENT));
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.AUDITOR));
         assertFalse(AdminPathAccess.allows("/api/v1/admin/products/knowledge/export", "GET", StaffRoles.AUDITOR));

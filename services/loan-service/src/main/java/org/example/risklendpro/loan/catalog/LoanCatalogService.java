@@ -143,8 +143,7 @@ public class LoanCatalogService {
         applyFilters(wrapper, keyword, categoryCode, institutionTypes, amount, maxRate, term, mortgageRequired, targetGroup, tagIds);
         applySort(wrapper, sortBy);
         Page<LoanProduct> page = productMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
-        List<Map<String, Object>> list = page.getRecords().stream().map(p -> toCard(p, false)).toList();
-        return pageResult(list, page.getTotal(), pageNum, pageSize);
+        return pageResult(toCards(page.getRecords(), false), page.getTotal(), pageNum, pageSize);
     }
 
     public Map<String, Object> userDetail(Long productId) {
@@ -168,7 +167,7 @@ public class LoanCatalogService {
                 .last("limit 50"));
         Map<String, Object> result = new LinkedHashMap<>(assembler.institutionBrief(institution, logo(institution, false)));
         result.put("introduction", institution.getIntroduction());
-        result.put("products", products.stream().map(p -> toCard(p, false)).toList());
+        result.put("products", toCards(products, false));
         return result;
     }
 
@@ -178,21 +177,29 @@ public class LoanCatalogService {
         if (!isVisible(current)) {
             throw new CatalogBusinessException(CatalogErrorCodes.PRODUCT_OFF_SHELF, "产品已下架");
         }
-        Set<Long> currentTags = tagIdsOf(productId);
         List<LoanProduct> candidates = productMapper.selectList(visibleWrapper()
                 .eq("category_code", current.getCategoryCode())
                 .ne("id", productId));
-        return candidates.stream()
+        List<Long> tagLookupIds = new ArrayList<>(candidates.size() + 1);
+        tagLookupIds.add(productId);
+        for (LoanProduct candidate : candidates) {
+            tagLookupIds.add(candidate.getId());
+        }
+        Map<Long, Set<Long>> tagsByProduct = tagIdsByProducts(tagLookupIds);
+        Set<Long> currentTags = tagsByProduct.getOrDefault(productId, Set.of());
+        List<LoanProduct> ranked = candidates.stream()
                 .sorted((a, b) -> {
-                    int cmp = Long.compare(overlap(tagIdsOf(b.getId()), currentTags), overlap(tagIdsOf(a.getId()), currentTags));
+                    int cmp = Long.compare(
+                            overlap(tagsByProduct.getOrDefault(b.getId(), Set.of()), currentTags),
+                            overlap(tagsByProduct.getOrDefault(a.getId(), Set.of()), currentTags));
                     if (cmp != 0) {
                         return cmp;
                     }
                     return Integer.compare(nz(b.getSortWeight()), nz(a.getSortWeight()));
                 })
                 .limit(limit)
-                .map(p -> toCard(p, false))
                 .toList();
+        return toCards(ranked, false);
     }
 
     public Map<String, Object> compare(List<Long> productIds) {
@@ -291,9 +298,12 @@ public class LoanCatalogService {
         }
         wrapper.orderByDesc("update_time");
         Page<LoanProduct> page = productMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (LoanProduct product : page.getRecords()) {
-            Map<String, Object> card = toCard(product, true);
+        List<LoanProduct> records = page.getRecords();
+        List<Map<String, Object>> cards = toCards(records, true);
+        List<Map<String, Object>> list = new ArrayList<>(cards.size());
+        for (int i = 0; i < cards.size(); i++) {
+            LoanProduct product = records.get(i);
+            Map<String, Object> card = cards.get(i);
             card.put("status", product.getStatus());
             card.put("updateBy", product.getUpdateBy());
             card.put("updateTime", KnowledgeRenderer.dateTime(product.getUpdateTime()));
@@ -472,17 +482,19 @@ public class LoanCatalogService {
         }
         wrapper.orderByDesc(LoanInstitution::getUpdateTime);
         Page<LoanInstitution> page = institutionMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (LoanInstitution institution : page.getRecords()) {
-            Map<String, Object> item = new LinkedHashMap<>(assembler.institutionBrief(institution, logo(institution, true)));
+        List<LoanInstitution> records = page.getRecords();
+        Map<String, LoanImage> logos = logosByKey(records);
+        Map<Long, long[]> counts = productCountsByInstitution(records);
+        List<Map<String, Object>> list = new ArrayList<>(records.size());
+        for (LoanInstitution institution : records) {
+            Map<String, Object> item = new LinkedHashMap<>(assembler.institutionBrief(
+                    institution, assembler.image(logos.get(institution.getLogoKey()), true)));
             item.put("introduction", institution.getIntroduction());
             item.put("enabled", institution.getEnabled());
             item.put("version", institution.getVersion());
-            item.put("productCount", productMapper.selectCount(new LambdaQueryWrapper<LoanProduct>()
-                    .eq(LoanProduct::getInstitutionId, institution.getId())));
-            item.put("onShelfCount", productMapper.selectCount(new LambdaQueryWrapper<LoanProduct>()
-                    .eq(LoanProduct::getInstitutionId, institution.getId())
-                    .eq(LoanProduct::getStatus, "ON_SHELF")));
+            long[] count = counts.getOrDefault(institution.getId(), new long[]{0L, 0L});
+            item.put("productCount", count[0]);
+            item.put("onShelfCount", count[1]);
             list.add(item);
         }
         return pageResult(list, page.getTotal(), pageNum, pageSize);
@@ -910,9 +922,143 @@ public class LoanCatalogService {
         }
     }
 
-    private Map<String, Object> toCard(LoanProduct product, boolean admin) {
-        LoanInstitution institution = requireInstitution(product.getInstitutionId());
-        return assembler.productCard(product, institution, coverVo(product.getId(), admin), logo(institution, admin), tagsOf(product.getId()));
+    private List<Map<String, Object>> toCards(List<LoanProduct> products, boolean admin) {
+        if (products == null || products.isEmpty()) {
+            return List.of();
+        }
+        List<Long> productIds = products.stream().map(LoanProduct::getId).toList();
+        Set<Long> institutionIds = products.stream().map(LoanProduct::getInstitutionId).collect(Collectors.toSet());
+        Map<Long, LoanInstitution> institutions = institutionMapper.selectBatchIds(institutionIds).stream()
+                .collect(Collectors.toMap(LoanInstitution::getId, institution -> institution, (a, b) -> a));
+        Map<String, LoanImage> covers = coversByProduct(productIds);
+        Map<String, LoanImage> logos = logosByKey(institutions.values());
+        Map<Long, List<TagVO>> tags = tagsByProducts(productIds);
+        List<Map<String, Object>> cards = new ArrayList<>(products.size());
+        for (LoanProduct product : products) {
+            LoanInstitution institution = institutions.get(product.getInstitutionId());
+            if (institution == null) {
+                throw new CatalogBusinessException(CatalogErrorCodes.INSTITUTION_NOT_FOUND, "机构不存在");
+            }
+            LoanImage cover = covers.get(String.valueOf(product.getId()));
+            LoanImage logo = institution.getLogoKey() == null ? null : logos.get(institution.getLogoKey());
+            cards.add(assembler.productCard(
+                    product,
+                    institution,
+                    assembler.image(cover, admin),
+                    assembler.image(logo, admin),
+                    tags.getOrDefault(product.getId(), List.of())));
+        }
+        return cards;
+    }
+
+    private Map<String, LoanImage> coversByProduct(List<Long> productIds) {
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        List<String> bizIds = productIds.stream().map(String::valueOf).toList();
+        List<LoanImage> images = imageMapper.selectList(new LambdaQueryWrapper<LoanImage>()
+                .eq(LoanImage::getImageType, "COVER")
+                .eq(LoanImage::getStatus, "BOUND")
+                .in(LoanImage::getBizId, bizIds));
+        Map<String, LoanImage> covers = new HashMap<>();
+        for (LoanImage image : images) {
+            covers.merge(image.getBizId(), image, this::preferImage);
+        }
+        return covers;
+    }
+
+    private Map<String, LoanImage> logosByKey(Iterable<LoanInstitution> institutions) {
+        Set<String> keys = new HashSet<>();
+        for (LoanInstitution institution : institutions) {
+            if (institution.getLogoKey() != null && !institution.getLogoKey().isBlank()) {
+                keys.add(institution.getLogoKey());
+            }
+        }
+        if (keys.isEmpty()) {
+            return Map.of();
+        }
+        List<LoanImage> images = imageMapper.selectList(new LambdaQueryWrapper<LoanImage>()
+                .in(LoanImage::getObjectKey, keys));
+        Map<String, LoanImage> logos = new HashMap<>();
+        for (LoanImage image : images) {
+            logos.merge(image.getObjectKey(), image, this::preferImage);
+        }
+        return logos;
+    }
+
+    private LoanImage preferImage(LoanImage current, LoanImage candidate) {
+        int currentSort = current.getSort() == null ? 0 : current.getSort();
+        int candidateSort = candidate.getSort() == null ? 0 : candidate.getSort();
+        if (currentSort != candidateSort) {
+            return currentSort <= candidateSort ? current : candidate;
+        }
+        long currentId = current.getId() == null ? Long.MAX_VALUE : current.getId();
+        long candidateId = candidate.getId() == null ? Long.MAX_VALUE : candidate.getId();
+        return currentId <= candidateId ? current : candidate;
+    }
+
+    private Map<Long, List<TagVO>> tagsByProducts(List<Long> productIds) {
+        Map<Long, Set<Long>> ids = tagIdsByProducts(productIds);
+        Set<Long> tagIds = ids.values().stream().flatMap(Set::stream).collect(Collectors.toSet());
+        if (tagIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, TagVO> tags = tagMapper.selectBatchIds(tagIds).stream()
+                .collect(Collectors.toMap(LoanTag::getId, assembler::tag, (a, b) -> a));
+        Map<Long, List<TagVO>> result = new HashMap<>();
+        for (Map.Entry<Long, Set<Long>> entry : ids.entrySet()) {
+            List<TagVO> list = new ArrayList<>();
+            for (Long tagId : entry.getValue()) {
+                TagVO tag = tags.get(tagId);
+                if (tag != null) {
+                    list.add(tag);
+                }
+            }
+            result.put(entry.getKey(), list);
+        }
+        return result;
+    }
+
+    private Map<Long, Set<Long>> tagIdsByProducts(List<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, Set<Long>> result = new HashMap<>();
+        List<LoanProductTag> links = productTagMapper.selectList(new LambdaQueryWrapper<LoanProductTag>()
+                .in(LoanProductTag::getProductId, productIds));
+        for (LoanProductTag link : links) {
+            result.computeIfAbsent(link.getProductId(), key -> new HashSet<>()).add(link.getTagId());
+        }
+        return result;
+    }
+
+    private Map<Long, long[]> productCountsByInstitution(List<LoanInstitution> institutions) {
+        if (institutions.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = institutions.stream().map(LoanInstitution::getId).toList();
+        List<Map<String, Object>> rows = productMapper.selectMaps(new QueryWrapper<LoanProduct>()
+                .select("institution_id", "status", "count(*) as cnt")
+                .in("institution_id", ids)
+                .groupBy("institution_id", "status"));
+        Map<Long, long[]> counts = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            Object idValue = row.get("institution_id");
+            if (idValue == null) {
+                idValue = row.get("institutionId");
+            }
+            if (idValue == null) {
+                continue;
+            }
+            long institutionId = ((Number) idValue).longValue();
+            long cnt = ((Number) (row.get("cnt") == null ? row.get("CNT") : row.get("cnt"))).longValue();
+            long[] bucket = counts.computeIfAbsent(institutionId, key -> new long[]{0L, 0L});
+            bucket[0] += cnt;
+            if ("ON_SHELF".equals(String.valueOf(row.get("status") == null ? row.get("STATUS") : row.get("status")))) {
+                bucket[1] += cnt;
+            }
+        }
+        return counts;
     }
 
     private Map<String, Object> toDetail(LoanProduct product, boolean admin) {
