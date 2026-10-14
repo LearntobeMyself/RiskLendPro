@@ -14,10 +14,7 @@ import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.example.risklendpro.loan.client.RiskServiceClient;
 import org.example.risklendpro.loan.client.UserServiceClient;
-import org.example.risklendpro.loan.borrow.BatchLoanApproveRequest;
-import org.example.risklendpro.loan.borrow.LoanApproveRequest;
 import org.example.risklendpro.loan.admin.AdminLoanQueryService;
-import org.example.risklendpro.loan.admin.AdminLoanOpsService;
 import org.example.risklendpro.common.admin.AdminDateHelper;
 import org.example.risklendpro.common.admin.AdminEntityMapper;
 import org.example.risklendpro.common.admin.AdminExportHelper;
@@ -48,8 +45,6 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
     private UserServiceClient userServiceClient;
     @Autowired
     private RiskServiceClient riskServiceClient;
-    @Autowired
-    private AdminLoanOpsService adminLoanOpsService;
     @Autowired
     private AdminExportHelper adminExportHelper;
 
@@ -239,39 +234,6 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
             item.put("paidAmount", BigDecimal.ZERO);
         }
         return item;
-    }
-
-    @Override
-    public Map<String, Object> batchApprove(BatchLoanApproveRequest request, Long adminId) {
-        int successCount = 0;
-        int failCount = 0;
-        List<Map<String, Object>> failedItems = new ArrayList<>();
-        for (Long loanId : request.getLoanIds()) {
-            try {
-                LoanApproveRequest approveRequest = new LoanApproveRequest();
-                approveRequest.setLoanId(loanId);
-                approveRequest.setApproveResult(request.getApproveResult());
-                approveRequest.setApproveRemark(request.getApproveRemark());
-                adminLoanOpsService.approveLoan(approveRequest);
-                Loan loan = loanMapper.selectById(loanId);
-                if (loan != null) {
-                    loan.setOperatorId(adminId);
-                    loanMapper.updateById(loan);
-                }
-                successCount++;
-            } catch (Exception e) {
-                failCount++;
-                Map<String, Object> fail = new HashMap<>();
-                fail.put("loanId", loanId);
-                fail.put("reason", e.getMessage());
-                failedItems.add(fail);
-            }
-        }
-        Map<String, Object> data = new HashMap<>();
-        data.put("successCount", successCount);
-        data.put("failCount", failCount);
-        data.put("failedItems", failedItems);
-        return data;
     }
 
     @Override

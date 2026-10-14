@@ -2,16 +2,12 @@ package org.example.risklendpro.loan.admin;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.example.risklendpro.loan.borrow.BatchLoanApproveRequest;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.loan.admin.AdminLoanQueryService;
-import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -65,14 +61,6 @@ public class AdminLoanController {
     @GetMapping("/records/{loanId}")
     public CommonResponse<Map<String, Object>> recordDetail(@PathVariable Long loanId) {
         return CommonResponse.success("查询成功", adminLoanQueryService.getRecordDetail(loanId));
-    }
-
-    @Operation(summary = "批量审批")
-    @PreAuthorize("hasAuthority('loan:approve:write')")
-    @PostMapping("/batch-approve")
-    public CommonResponse<Map<String, Object>> batchApprove(@RequestBody BatchLoanApproveRequest request) {
-        return CommonResponse.success("批量审批完成",
-                adminLoanQueryService.batchApprove(request, SecurityUtils.getAdminId()));
     }
 
     @Operation(summary = "借款记录导出")
