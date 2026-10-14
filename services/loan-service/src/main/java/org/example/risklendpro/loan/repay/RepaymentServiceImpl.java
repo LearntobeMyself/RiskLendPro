@@ -140,8 +140,11 @@ public class RepaymentServiceImpl implements RepaymentService {
 
         repaymentPlanMapper.updateById(plan);
 
-        // 5. 恢复信用额度：按期归还本金后，对应本金部分释放回可用额度
-        restoreCreditLimit(plan.getUserId(), record.getPrincipal());
+        // 5. 恢复信用额度：只有放款时扣过信用额度的借据（信用类），还回本金才释放；房抵、车抵不改变信用额度
+        Loan repaidLoan = loanMapper.selectById(plan.getLoanId());
+        if (repaidLoan == null || repaidLoan.getCollateralType() == null) {
+            restoreCreditLimit(plan.getUserId(), record.getPrincipal());
+        }
         refreshOverdueState(plan);
 
         // 6. 构建响应
