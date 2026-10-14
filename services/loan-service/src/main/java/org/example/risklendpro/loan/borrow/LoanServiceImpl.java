@@ -2,6 +2,7 @@ package org.example.risklendpro.loan.borrow;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.contract.IdentityProofMaterials;
 import org.example.risklendpro.api.dto.BorrowGateResult;
 import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.Loan;
@@ -29,9 +30,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -85,6 +89,12 @@ public class LoanServiceImpl implements LoanService {
         }
 
         ProductApplySupport.ResolvedApply apply = resolveApply(request);
+
+        if (!"等额本息".equals(apply.repaymentMethod())) {
+            throw new RuntimeException("还款方式必须为等额本息");
+        }
+        validateAge(gate.idCard(), apply);
+        validateIdentityProofs(userId, apply);
 
         if (ProductApplySupport.isMortgageCategory(apply.categoryCode())) {
             return requestMortgageLoan(userId, request, apply, gate);
@@ -174,6 +184,49 @@ public class LoanServiceImpl implements LoanService {
         BeanUtils.copyProperties(loan, response);
         response.setRemark("抵押申请已提交，等待管理员确认抵押物后放款");
         return response;
+    }
+
+    /** 年龄取最近一次已通过评估的出生日期（身份证号解析）。未写年龄限制的只要求已满 18 岁。 */
+    private void validateAge(String idCard, ProductApplySupport.ResolvedApply apply) {
+        Integer age = ageFromIdCard(idCard);
+        if (age == null) {
+            return;
+        }
+        int minAge = apply.minAge() != null ? apply.minAge() : 18;
+        if (age < minAge) {
+            throw new RuntimeException("年龄未达到该产品要求");
+        }
+        if (apply.maxAge() != null && age > apply.maxAge()) {
+            throw new RuntimeException("年龄超过该产品限制");
+        }
+    }
+
+    private Integer ageFromIdCard(String idCard) {
+        if (idCard == null || idCard.length() < 14) {
+            return null;
+        }
+        try {
+            LocalDate birth = LocalDate.of(
+                    Integer.parseInt(idCard.substring(6, 10)),
+                    Integer.parseInt(idCard.substring(10, 12)),
+                    Integer.parseInt(idCard.substring(12, 14)));
+            return Period.between(birth, LocalDate.now()).getYears();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** 产品要求特定身份时，对应证明材料必须先通过补充材料接口上传。 */
+    private void validateIdentityProofs(Long userId, ProductApplySupport.ResolvedApply apply) {
+        Set<String> required = IdentityProofMaterials.requiredCodes(apply.targetGroups());
+        if (required.isEmpty()) {
+            return;
+        }
+        List<String> uploaded = riskServiceClient.listIdentityProofs(userId);
+        boolean satisfied = uploaded != null && uploaded.stream().anyMatch(required::contains);
+        if (!satisfied) {
+            throw new RuntimeException("该产品需要上传身份证明，请先上传后再申请");
+        }
     }
 
     private Loan buildLoan(Long userId, LoanRequest request, ProductApplySupport.ResolvedApply apply) {
