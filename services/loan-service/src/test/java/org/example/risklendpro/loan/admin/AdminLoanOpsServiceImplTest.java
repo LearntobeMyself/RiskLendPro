@@ -18,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,6 +50,8 @@ class AdminLoanOpsServiceImplTest {
     private RiskServiceClient riskServiceClient;
     @Mock
     private UserServiceClient userServiceClient;
+    @Mock
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void approveLoan_alreadyDisbursed_throws() {

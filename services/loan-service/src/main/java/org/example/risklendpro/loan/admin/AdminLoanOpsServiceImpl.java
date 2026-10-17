@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -38,6 +37,9 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +68,8 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     private RiskServiceClient riskServiceClient;
     @Autowired
     private UserServiceClient userServiceClient;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     public Map<String, Object> getVintageData() {
         List<VintageData> vintageDataList = vintageDataMapper.selectList(null);
@@ -255,8 +259,45 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     }
 
     @Override
-    @Transactional
     public LoanApproveResponse approveLoan(LoanApproveRequest request) {
+        // 事务内只做加锁、校验、状态流转与还款计划生成；
+        // 跨服务调用（Feign）与邮件发送放到事务提交之后，避免长时间占用数据库连接、也避免邮件失败回滚审批。
+        ApproveOutcome outcome = new TransactionTemplate(transactionManager).execute(status -> doApprove(request));
+
+        LoanApproveResponse response = new LoanApproveResponse();
+        response.setLoanId(outcome.loanId());
+        response.setUserId(outcome.userId());
+        response.setStatus(outcome.status());
+        response.setApproveTime(outcome.approveTime());
+        response.setEmailSent(true);
+
+        UserSummary user = userServiceClient.getUser(outcome.userId());
+
+        if (LoanStatusEnum.REJECTED.getCode().equals(outcome.status())) {
+            response.setRejectReason(outcome.rejectReason());
+            if (user != null) {
+                emailUtil.sendLoanRejectNotification(
+                        user.email(),
+                        user.realName(),
+                        outcome.amount().toString(),
+                        outcome.rejectReason()
+                );
+            }
+            return response;
+        }
+
+        response.setActualDisbursedAmount(outcome.amount());
+        if (user != null && user.idCard() != null) {
+            riskServiceClient.activateBehaviorScore(outcome.userId(), user.idCard());
+        }
+        if (user != null) {
+            emailUtil.sendLoanSuccessNotification(user.email(), user.realName(), outcome.amount().toString());
+        }
+        return response;
+    }
+
+    /** 审批的数据库部分：加锁、幂等校验、状态流转、还款计划生成。 */
+    private ApproveOutcome doApprove(LoanApproveRequest request) {
         Loan loan = loanMapper.selectOne(
                 new QueryWrapper<Loan>().eq("loan_id", request.getLoanId()).last("FOR UPDATE"));
         if (loan == null) {
@@ -266,11 +307,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             throw new RuntimeException("该贷款申请已处理，无法重复审批");
         }
 
-        UserSummary user = userServiceClient.getUser(loan.getUserId());
-
-        LoanApproveResponse response = new LoanApproveResponse();
-        response.setLoanId(loan.getLoanId());
-        response.setUserId(loan.getUserId());
+        Date approveTime = new Date();
 
         if ("APPROVE".equals(request.getApproveResult())) {
             long existingPlans = repaymentPlanMapper.selectCount(
@@ -281,45 +318,27 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
 
             // 抵押类：管理员确认抵押物、录入评估价后按 评估价×抵押率 放款，不占用信用额度。
             if (loan.getCollateralType() != null) {
-                approveMortgageLoan(loan, request, response, user);
-                response.setApproveTime(new Date());
-                return response;
+                return approveMortgageLoan(loan, request, approveTime);
             }
 
             // 信用类申请超过剩余额度在受理时已直接拒绝，管理员不能改成通过。
             throw new RuntimeException("信用类申请超出剩余额度将被直接拒绝，不支持人工审批放款");
-        } else {
-            loan.setStatus(LoanStatusEnum.REJECTED.getCode());
-            loan.setApproveTime(new Date());
-            loan.setRejectReason(request.getApproveRemark());
-
-            loanMapper.updateById(loan);
-
-            response.setStatus(LoanStatusEnum.REJECTED.getCode());
-            response.setRejectReason(request.getApproveRemark());
-            response.setEmailSent(true);
-
-            if (user != null) {
-                emailUtil.sendLoanRejectNotification(
-                        user.email(),
-                        user.realName(),
-                        loan.getAmount().toString(),
-                        request.getApproveRemark()
-                );
-            }
         }
 
-        response.setApproveTime(new Date());
+        loan.setStatus(LoanStatusEnum.REJECTED.getCode());
+        loan.setApproveTime(approveTime);
+        loan.setRejectReason(request.getApproveRemark());
+        loanMapper.updateById(loan);
 
-        return response;
+        return new ApproveOutcome(loan.getLoanId(), loan.getUserId(), loan.getAmount(),
+                LoanStatusEnum.REJECTED.getCode(), request.getApproveRemark(), approveTime);
     }
 
     /**
      * 房抵、车抵审批：管理员确认抵押物并录入评估价，金额须 ≤ min(评估价×抵押率, 产品上限)，
      * 通过后直接放款且不占用、不恢复信用额度。
      */
-    private void approveMortgageLoan(Loan loan, LoanApproveRequest request,
-                                     LoanApproveResponse response, UserSummary user) {
+    private ApproveOutcome approveMortgageLoan(Loan loan, LoanApproveRequest request, Date approveTime) {
         if (request.getCollateralValue() == null || request.getCollateralValue().compareTo(BigDecimal.ZERO) <= 0) {
             throw new RuntimeException("审批通过抵押类申请必须录入抵押物评估价");
         }
@@ -341,24 +360,20 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             loan.setCollateralType(request.getCollateralType());
         }
         loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
-        loan.setApproveTime(new Date());
-        loan.setDisbursementTime(new Date());
+        loan.setApproveTime(approveTime);
+        loan.setDisbursementTime(approveTime);
         loan.setAutoApproved(false);
         loanMapper.updateById(loan);
 
         generateRepaymentPlan(loan, loan.getRepaymentMethod());
 
-        if (user != null && user.idCard() != null) {
-            riskServiceClient.activateBehaviorScore(loan.getUserId(), user.idCard());
-        }
+        return new ApproveOutcome(loan.getLoanId(), loan.getUserId(), loan.getAmount(),
+                LoanStatusEnum.DISBURSED.getCode(), null, approveTime);
+    }
 
-        response.setStatus(LoanStatusEnum.DISBURSED.getCode());
-        response.setActualDisbursedAmount(loan.getAmount());
-        response.setEmailSent(true);
-
-        if (user != null) {
-            emailUtil.sendLoanSuccessNotification(user.email(), user.realName(), loan.getAmount().toString());
-        }
+    /** 审批结果，供事务提交后的事务外处理（跨服务调用、邮件通知）使用。 */
+    private record ApproveOutcome(Long loanId, Long userId, BigDecimal amount,
+                                  String status, String rejectReason, Date approveTime) {
     }
 
     /** 抵押率：优先取产品的 maxLoanToValue，缺省住宅 70%、车辆 80%。 */
