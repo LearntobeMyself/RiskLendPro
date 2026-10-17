@@ -108,7 +108,6 @@ public class LoanServiceImpl implements LoanService {
      */
     private LoanResponse requestCreditLoan(Long userId, LoanRequest request,
                                            ProductApplySupport.ResolvedApply apply, BorrowGateResult gate) {
-        final BigDecimal[] remainingLimitRef = {BigDecimal.ZERO};
         Loan loan = transactionTemplate.execute(status -> {
             checkOverdue(userId);
 
@@ -122,7 +121,6 @@ public class LoanServiceImpl implements LoanService {
                     || request.getAmount().compareTo(remainingLimit) > 0) {
                 throw new RuntimeException("超出可用信用额度");
             }
-            remainingLimitRef[0] = remainingLimit;
 
             Loan newLoan = buildLoan(userId, request, apply);
             newLoan.setStatus(LoanStatusEnum.DISBURSED.getCode());
@@ -136,7 +134,7 @@ public class LoanServiceImpl implements LoanService {
         });
 
         riskServiceClient.activateBehaviorScore(userId, gate.idCard());
-        sendLoanNotification(userId, request, remainingLimitRef[0], true);
+        notifyLoanDisbursed(userId, request);
 
         LoanResponse response = new LoanResponse();
         BeanUtils.copyProperties(loan, response);
@@ -179,6 +177,8 @@ public class LoanServiceImpl implements LoanService {
             loanMapper.insert(newLoan);
             return newLoan;
         });
+
+        notifyMortgagePending(userId, request, apply);
 
         LoanResponse response = new LoanResponse();
         BeanUtils.copyProperties(loan, response);
@@ -388,31 +388,34 @@ public class LoanServiceImpl implements LoanService {
     }
 
     /**
-     * 发送借款通知
+     * 信用类自动放款后的借款成功通知
      */
-    private void sendLoanNotification(Long userId, LoanRequest request, BigDecimal remainingLimit, boolean autoApproved) {
+    private void notifyLoanDisbursed(Long userId, LoanRequest request) {
         UserSummary user = userServiceClient.getUser(userId);
         if (user == null) {
             return;
         }
+        emailUtil.sendLoanSuccessNotification(
+                user.email(),
+                user.realName(),
+                request.getAmount().toString()
+        );
+    }
 
-        if (autoApproved) {
-            // 发送借款成功通知给用户
-            emailUtil.sendLoanSuccessNotification(
-                    user.email(),
-                    user.realName(),
-                    request.getAmount().toString()
-            );
-        } else {
-            // 发送借款审批通知给用户
-            emailUtil.sendLoanApprovalNotification(
-                    user.email(),
-                    user.realName(),
-                    request.getAmount().toString(),
-                    remainingLimit.toString()
-            );
-            
+    /**
+     * 抵押类申请已受理、等待管理员确认抵押物后的受理通知
+     */
+    private void notifyMortgagePending(Long userId, LoanRequest request, ProductApplySupport.ResolvedApply apply) {
+        UserSummary user = userServiceClient.getUser(userId);
+        if (user == null) {
+            return;
         }
+        emailUtil.sendMortgageLoanPendingNotification(
+                user.email(),
+                user.realName(),
+                request.getAmount().toString(),
+                apply.productName()
+        );
     }
 
     /**
