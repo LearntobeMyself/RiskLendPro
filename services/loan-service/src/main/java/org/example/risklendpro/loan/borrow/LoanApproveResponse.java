@@ -12,12 +12,6 @@ public class LoanApproveResponse {
     private Long loanId;
     @Schema(description = "用户ID")
     private Long userId;
-    @Schema(description = "原额度")
-    private BigDecimal originalLimit;
-    @Schema(description = "额外批准的额度")
-    private BigDecimal additionalLimit;
-    @Schema(description = "总额度")
-    private BigDecimal totalLimit;
     @Schema(description = "实际发放金额")
     private BigDecimal actualDisbursedAmount;
     @Schema(description = "状态")

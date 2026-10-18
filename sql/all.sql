@@ -37,7 +37,6 @@ CREATE TABLE `loan` (
   `disbursement_time` datetime DEFAULT NULL COMMENT '放款时间',
   `auto_approved` tinyint(1) DEFAULT '0' COMMENT '是否自动审批',
   `reject_reason` varchar(500) DEFAULT NULL COMMENT '拒绝原因',
-  `additional_limit` decimal(15,2) DEFAULT NULL COMMENT '额外批准的额度',
   `operator_id` bigint DEFAULT NULL COMMENT '审批操作员ID',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

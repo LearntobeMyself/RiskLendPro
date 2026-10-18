@@ -12,6 +12,7 @@ import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.example.risklendpro.risk.mapper.UserBCardLogMapper;
 import org.example.risklendpro.risk.score.BehaviorScoreService;
 import org.example.risklendpro.risk.score.CreditScoreEngine;
+import org.example.risklendpro.risk.supplement.SupplementMaterialService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -37,6 +38,9 @@ public class InternalRiskController implements RiskDecisionApi {
 
     @Autowired
     private CreditScoreEngine creditScoreEngine;
+
+    @Autowired
+    private SupplementMaterialService supplementMaterialService;
 
     @Override
     public RiskAssessmentSummary getLatestFinalAssessment(Long userId) {
@@ -149,7 +153,13 @@ public class InternalRiskController implements RiskDecisionApi {
                         assessment.getIdCard());
             }
         }
-        return BorrowGateResult.allow(assessment.getApplyId(), assessment.getIdCard());
+        return BorrowGateResult.allow(assessment.getApplyId(), assessment.getIdCard(),
+                Boolean.TRUE.equals(assessment.getHasHouse()), Boolean.TRUE.equals(assessment.getHasCar()));
+    }
+
+    @Override
+    public List<String> listIdentityProofs(Long userId) {
+        return supplementMaterialService.listUploadedIdentityProofs(userId);
     }
 
     private BehaviorScoreSnapshot loadLatestSnapshot(Long userId) {

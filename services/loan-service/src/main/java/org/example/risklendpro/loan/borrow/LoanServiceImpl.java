@@ -2,6 +2,7 @@ package org.example.risklendpro.loan.borrow;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.risklendpro.api.contract.IdentityProofMaterials;
 import org.example.risklendpro.api.dto.BorrowGateResult;
 import org.example.risklendpro.api.dto.UserSummary;
 import org.example.risklendpro.loan.entity.Loan;
@@ -29,9 +30,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -86,8 +90,24 @@ public class LoanServiceImpl implements LoanService {
 
         ProductApplySupport.ResolvedApply apply = resolveApply(request);
 
-        final boolean[] autoApprovedRef = {false};
-        final BigDecimal[] remainingLimitRef = {BigDecimal.ZERO};
+        if (!"等额本息".equals(apply.repaymentMethod())) {
+            throw new RuntimeException("还款方式必须为等额本息");
+        }
+        validateAge(gate.idCard(), apply);
+        validateIdentityProofs(userId, apply);
+
+        if (ProductApplySupport.isMortgageCategory(apply.categoryCode())) {
+            return requestMortgageLoan(userId, request, apply, gate);
+        }
+        return requestCreditLoan(userId, request, apply, gate);
+    }
+
+    /**
+     * 信用类（个人信用贷、消费分期、经营贷、直接支用）：金额须落在产品区间内且不超过剩余信用额度，
+     * 合格即发放并扣减剩余额度；超过剩余额度直接拒绝，不再转管理员审批。
+     */
+    private LoanResponse requestCreditLoan(Long userId, LoanRequest request,
+                                           ProductApplySupport.ResolvedApply apply, BorrowGateResult gate) {
         Loan loan = transactionTemplate.execute(status -> {
             checkOverdue(userId);
 
@@ -97,58 +117,145 @@ public class LoanServiceImpl implements LoanService {
             }
 
             BigDecimal remainingLimit = creditLimit.getRemainingLimit();
-            if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0) {
-                throw new RuntimeException("您的额度已用完，无法借款");
+            if (remainingLimit == null || remainingLimit.compareTo(BigDecimal.ZERO) <= 0
+                    || request.getAmount().compareTo(remainingLimit) > 0) {
+                throw new RuntimeException("超出可用信用额度");
             }
-            remainingLimitRef[0] = remainingLimit;
 
-            Loan newLoan = new Loan();
-            newLoan.setUserId(userId);
-            newLoan.setAmount(request.getAmount());
-            newLoan.setTermMonths(request.getTermMonths());
-            newLoan.setInterestRate(apply.interestRate());
-            newLoan.setRepaymentMethod(apply.repaymentMethod());
-            newLoan.setProductId(apply.productId());
-            newLoan.setProductName(apply.productName());
-            newLoan.setApplyChannel(apply.applyChannel());
-            newLoan.setApplyTime(new Date());
-            newLoan.setCreateTime(new Date());
-            newLoan.setUpdateTime(new Date());
-
-            if (request.getAmount().compareTo(remainingLimit) <= 0) {
-                newLoan.setStatus(LoanStatusEnum.DISBURSED.getCode());
-                newLoan.setDisbursementTime(new Date());
-                newLoan.setAutoApproved(true);
-                deductCreditLimit(creditLimit, request.getAmount());
-            } else {
-                newLoan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
-                newLoan.setAutoApproved(false);
-            }
+            Loan newLoan = buildLoan(userId, request, apply);
+            newLoan.setStatus(LoanStatusEnum.DISBURSED.getCode());
+            newLoan.setDisbursementTime(new Date());
+            newLoan.setAutoApproved(true);
+            deductCreditLimit(creditLimit, request.getAmount());
 
             loanMapper.insert(newLoan);
-
-            if (newLoan.getAutoApproved()) {
-                generateRepaymentPlan(newLoan, apply.repaymentMethod());
-            }
-            autoApprovedRef[0] = Boolean.TRUE.equals(newLoan.getAutoApproved());
+            generateRepaymentPlan(newLoan, apply.repaymentMethod());
             return newLoan;
         });
 
-        if (autoApprovedRef[0]) {
-            riskServiceClient.activateBehaviorScore(userId, gate.idCard());
-        }
-
-        sendLoanNotification(userId, request, remainingLimitRef[0], autoApprovedRef[0]);
+        riskServiceClient.activateBehaviorScore(userId, gate.idCard());
+        notifyLoanDisbursed(userId, request);
 
         LoanResponse response = new LoanResponse();
         BeanUtils.copyProperties(loan, response);
-        if (autoApprovedRef[0]) {
-            response.setRemark("额度充足，自动审批通过");
-        } else {
-            response.setRemark("借款金额超出剩余额度(" + remainingLimitRef[0] + ")，请等待管理员审批");
+        response.setRemark("额度充足，自动审批通过");
+        return response;
+    }
+
+    /**
+     * 房抵、车抵：按抵押物类型做准入与互斥校验，材料齐全后进入等待审批，不占用信用额度；
+     * 管理员确认抵押物评估价后按 评估价×抵押率 放款。
+     */
+    private LoanResponse requestMortgageLoan(Long userId, LoanRequest request,
+                                             ProductApplySupport.ResolvedApply apply, BorrowGateResult gate) {
+        String collateralType = ProductApplySupport.collateralTypeOf(apply.collateralTypes());
+        if (collateralType == null) {
+            throw new RuntimeException("该抵押产品未配置可接受的抵押物类型");
+        }
+        boolean hasCollateral = ProductApplySupport.COLLATERAL_HOUSE.equals(collateralType)
+                ? Boolean.TRUE.equals(gate.hasHouse()) : Boolean.TRUE.equals(gate.hasCar());
+        // 名下有房/有车，或此前已有管理员确认过的同类抵押物（评估价已录入），均可申请
+        if (!hasCollateral && !hasConfirmedCollateral(userId, collateralType)) {
+            throw new RuntimeException(ProductApplySupport.COLLATERAL_HOUSE.equals(collateralType)
+                    ? "房抵产品仅限名下有房或已有确认过的房产材料的用户申请"
+                    : "车抵产品仅限名下有车或已有确认过的车辆材料的用户申请");
         }
 
+        Loan loan = transactionTemplate.execute(status -> {
+            checkOverdue(userId);
+            long pendingSameType = loanMapper.selectCount(new QueryWrapper<Loan>()
+                    .eq("user_id", userId)
+                    .eq("status", LoanStatusEnum.PENDING_APPROVAL.getCode())
+                    .eq("collateral_type", collateralType));
+            if (pendingSameType > 0) {
+                throw new RuntimeException("已有同类抵押申请等待审批，暂不能重复申请");
+            }
+            Loan newLoan = buildLoan(userId, request, apply);
+            newLoan.setCollateralType(collateralType);
+            newLoan.setStatus(LoanStatusEnum.PENDING_APPROVAL.getCode());
+            newLoan.setAutoApproved(false);
+            loanMapper.insert(newLoan);
+            return newLoan;
+        });
+
+        notifyMortgagePending(userId, request, apply);
+
+        LoanResponse response = new LoanResponse();
+        BeanUtils.copyProperties(loan, response);
+        response.setRemark("抵押申请已提交，等待管理员确认抵押物后放款");
         return response;
+    }
+
+    /** 年龄取最近一次已通过评估的出生日期（身份证号解析）。未写年龄限制的只要求已满 18 岁。 */
+    private void validateAge(String idCard, ProductApplySupport.ResolvedApply apply) {
+        Integer age = ageFromIdCard(idCard);
+        if (age == null) {
+            return;
+        }
+        int minAge = apply.minAge() != null ? apply.minAge() : 18;
+        if (age < minAge) {
+            throw new RuntimeException("年龄未达到该产品要求");
+        }
+        if (apply.maxAge() != null && age > apply.maxAge()) {
+            throw new RuntimeException("年龄超过该产品限制");
+        }
+    }
+
+    private Integer ageFromIdCard(String idCard) {
+        if (idCard == null || idCard.length() < 14) {
+            return null;
+        }
+        try {
+            LocalDate birth = LocalDate.of(
+                    Integer.parseInt(idCard.substring(6, 10)),
+                    Integer.parseInt(idCard.substring(10, 12)),
+                    Integer.parseInt(idCard.substring(12, 14)));
+            return Period.between(birth, LocalDate.now()).getYears();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** 该用户此前是否已有管理员确认过的同类抵押物（已录入评估价）。 */
+    private boolean hasConfirmedCollateral(Long userId, String collateralType) {
+        Long count = loanMapper.selectCount(new QueryWrapper<Loan>()
+                .eq("user_id", userId)
+                .eq("collateral_type", collateralType)
+                .isNotNull("collateral_value"));
+        return count != null && count > 0;
+    }
+
+    /** 产品要求特定身份时，对应证明材料必须先通过补充材料接口上传。 */
+    private void validateIdentityProofs(Long userId, ProductApplySupport.ResolvedApply apply) {
+        // 材料清单未提及身份证明的产品（如随心周转金「职业不限」）不要求上传证明
+        if (!IdentityProofMaterials.mentionsIdentityProof(apply.materials())) {
+            return;
+        }
+        Set<String> required = IdentityProofMaterials.requiredCodes(apply.targetGroups());
+        if (required.isEmpty()) {
+            return;
+        }
+        List<String> uploaded = riskServiceClient.listIdentityProofs(userId);
+        boolean satisfied = uploaded != null && uploaded.stream().anyMatch(required::contains);
+        if (!satisfied) {
+            throw new RuntimeException("该产品需要上传身份证明，请先上传后再申请");
+        }
+    }
+
+    private Loan buildLoan(Long userId, LoanRequest request, ProductApplySupport.ResolvedApply apply) {
+        Loan newLoan = new Loan();
+        newLoan.setUserId(userId);
+        newLoan.setAmount(request.getAmount());
+        newLoan.setTermMonths(request.getTermMonths());
+        newLoan.setInterestRate(apply.interestRate());
+        newLoan.setRepaymentMethod(apply.repaymentMethod());
+        newLoan.setProductId(apply.productId());
+        newLoan.setProductName(apply.productName());
+        newLoan.setApplyChannel(apply.applyChannel());
+        newLoan.setApplyTime(new Date());
+        newLoan.setCreateTime(new Date());
+        newLoan.setUpdateTime(new Date());
+        return newLoan;
     }
 
     private ProductApplySupport.ResolvedApply resolveApply(LoanRequest request) {
@@ -281,31 +388,34 @@ public class LoanServiceImpl implements LoanService {
     }
 
     /**
-     * 发送借款通知
+     * 信用类自动放款后的借款成功通知
      */
-    private void sendLoanNotification(Long userId, LoanRequest request, BigDecimal remainingLimit, boolean autoApproved) {
+    private void notifyLoanDisbursed(Long userId, LoanRequest request) {
         UserSummary user = userServiceClient.getUser(userId);
         if (user == null) {
             return;
         }
+        emailUtil.sendLoanSuccessNotification(
+                user.email(),
+                user.realName(),
+                request.getAmount().toString()
+        );
+    }
 
-        if (autoApproved) {
-            // 发送借款成功通知给用户
-            emailUtil.sendLoanSuccessNotification(
-                    user.email(),
-                    user.realName(),
-                    request.getAmount().toString()
-            );
-        } else {
-            // 发送借款审批通知给用户
-            emailUtil.sendLoanApprovalNotification(
-                    user.email(),
-                    user.realName(),
-                    request.getAmount().toString(),
-                    remainingLimit.toString()
-            );
-            
+    /**
+     * 抵押类申请已受理、等待管理员确认抵押物后的受理通知
+     */
+    private void notifyMortgagePending(Long userId, LoanRequest request, ProductApplySupport.ResolvedApply apply) {
+        UserSummary user = userServiceClient.getUser(userId);
+        if (user == null) {
+            return;
         }
+        emailUtil.sendMortgageLoanPendingNotification(
+                user.email(),
+                user.realName(),
+                request.getAmount().toString(),
+                apply.productName()
+        );
     }
 
     /**

@@ -3,6 +3,7 @@ package org.example.risklendpro.loan.catalog;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.risklendpro.common.api.CommonResponse;
+import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -21,9 +23,12 @@ import java.util.Map;
 public class UserLoanProductController {
 
     private final LoanCatalogService loanCatalogService;
+    private final LoanRecommendationService loanRecommendationService;
 
-    public UserLoanProductController(LoanCatalogService loanCatalogService) {
+    public UserLoanProductController(LoanCatalogService loanCatalogService,
+                                     LoanRecommendationService loanRecommendationService) {
         this.loanCatalogService = loanCatalogService;
+        this.loanRecommendationService = loanRecommendationService;
     }
 
     @Operation(summary = "U1 获取分类与筛选项")
@@ -72,6 +77,22 @@ public class UserLoanProductController {
             @PathVariable Long productId,
             @RequestParam(required = false) Integer size) {
         return CommonResponse.success("查询成功", loanCatalogService.similar(productId, size));
+    }
+
+    @Operation(summary = "U7 授信通过弹窗推荐")
+    @GetMapping("/recommendations")
+    public CommonResponse<Map<String, Object>> recommendations(HttpServletRequest request) {
+        Long userId = SecurityUtils.getUserIdFromRequest(request);
+        return CommonResponse.success("查询成功", loanRecommendationService.recommendations(userId));
+    }
+
+    @Operation(summary = "U8 成功页再推荐")
+    @GetMapping("/{productId}/post-loan-recommendations")
+    public CommonResponse<Map<String, Object>> postLoanRecommendations(
+            @PathVariable Long productId, HttpServletRequest request) {
+        Long userId = SecurityUtils.getUserIdFromRequest(request);
+        return CommonResponse.success("查询成功",
+                loanRecommendationService.postLoanRecommendations(userId, productId));
     }
 
     @Operation(summary = "U3 产品详情")

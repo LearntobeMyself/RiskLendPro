@@ -1,7 +1,5 @@
 package org.example.risklendpro.loan.admin;
 
-import org.example.risklendpro.loan.borrow.BatchLoanApproveRequest;
-
 import java.util.Map;
 
 public interface AdminLoanQueryService {
@@ -15,8 +13,6 @@ public interface AdminLoanQueryService {
                                     String startDate, String endDate);
 
     Map<String, Object> getRecordDetail(Long loanId);
-
-    Map<String, Object> batchApprove(BatchLoanApproveRequest request, Long adminId);
 
     Map<String, Object> exportRecords(String status, String userName, String startDate, String endDate);
 }

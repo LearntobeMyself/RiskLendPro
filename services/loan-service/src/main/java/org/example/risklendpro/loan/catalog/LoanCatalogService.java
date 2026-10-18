@@ -41,6 +41,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -200,6 +201,23 @@ public class LoanCatalogService {
                 .limit(limit)
                 .toList();
         return toCards(ranked, false);
+    }
+
+    /** 供推荐等场景复用：已上架且机构启用的产品，可按分类过滤并排除指定产品。 */
+    public List<LoanProduct> visibleProducts(String categoryCode, Long excludeProductId) {
+        QueryWrapper<LoanProduct> wrapper = visibleWrapper();
+        if (categoryCode != null && !categoryCode.isBlank()) {
+            wrapper.eq("category_code", categoryCode);
+        }
+        if (excludeProductId != null) {
+            wrapper.ne("id", excludeProductId);
+        }
+        return productMapper.selectList(wrapper);
+    }
+
+    /** 供推荐等场景复用：按现有卡片结构组装产品卡片。 */
+    public List<Map<String, Object>> cardsOf(List<LoanProduct> products) {
+        return toCards(products, false);
     }
 
     public Map<String, Object> compare(List<Long> productIds) {
@@ -670,7 +688,7 @@ public class LoanCatalogService {
         String name = CatalogValidator.requireName(request.getProductName(), 64, "productName");
         LoanInstitution institution = requireInstitution(request.getInstitutionId());
         CatalogEnums.requireKnown(request.getCategoryCode(), CatalogEnums.CATEGORY, "categoryCode");
-        ensureProductNameUnique(name, request.getInstitutionId(), creating ? null : product.getId());
+        ensureProductNameUnique(name, creating ? null : product.getId());
         ProductSaveRequest.LoanInfo loan = CatalogValidator.loanInfo(request.getLoanInfo());
         ProductSaveRequest.Conditions conditions = CatalogValidator.conditions(request.getConditions());
         ProductSaveRequest.Others others = CatalogValidator.others(request.getOthers());
@@ -688,6 +706,11 @@ public class LoanCatalogService {
         List<String> materials = CatalogJson.unique(request.getMaterials());
         Map<String, Object> extra = CatalogValidator.extraConditions(request.getCategoryCode(), conditions.getExtraConditions());
         CatalogValidator.validateExtraValues(request.getCategoryCode(), extra);
+        CatalogValidator.validateMaterials(request.getCategoryCode(), extra, materials, groups);
+        if (creating) {
+            requireCreateFields(request, loan, termUnit, repayments);
+        }
+        ensureRangeUnique(request.getCategoryCode(), loan, repayments, creating ? null : product.getId());
         CatalogValidator.length(request.getSummary(), 500, "summary");
         CatalogValidator.length(loan.getDisbursementTime(), 100, "disbursementTime");
         CatalogValidator.length(conditions.getIncomeRequirement(), 255, "incomeRequirement");
@@ -853,6 +876,10 @@ public class LoanCatalogService {
         if (blank(product.getSummary())) missing.add("summary");
         if (blank(product.getDataSource())) missing.add("dataSource");
         if (product.getVerifiedAt() == null) missing.add("verifiedAt");
+        // 还款方式不含等额本息的产品不能上架
+        if (!CatalogJson.readStringList(product.getRepaymentMethods()).contains("EQUAL_INSTALLMENT")) {
+            missing.add("repaymentMethod");
+        }
         LoanInstitution institution = institutionMapper.selectById(product.getInstitutionId());
         if (institution == null || institution.getEnabled() == null || institution.getEnabled() != 1) {
             missing.add("institutionEnabled");
@@ -1166,16 +1193,67 @@ public class LoanCatalogService {
         return institution;
     }
 
-    private void ensureProductNameUnique(String name, Long institutionId, Long excludeId) {
+    private void ensureProductNameUnique(String name, Long excludeId) {
         LambdaQueryWrapper<LoanProduct> wrapper = new LambdaQueryWrapper<LoanProduct>()
-                .eq(LoanProduct::getProductName, name)
-                .eq(LoanProduct::getInstitutionId, institutionId);
+                .eq(LoanProduct::getProductName, name);
         if (excludeId != null) {
             wrapper.ne(LoanProduct::getId, excludeId);
         }
         if (productMapper.selectCount(wrapper) > 0) {
-            throw new CatalogBusinessException(CatalogErrorCodes.PRODUCT_NAME_DUPLICATE, "同机构下产品名重复");
+            throw new CatalogBusinessException(CatalogErrorCodes.PRODUCT_NAME_DUPLICATE, "产品名已存在");
         }
+    }
+
+    /** 新建必填项：名称、分类、摘要、封面、额度上下限、期限上下限、期限单位、年化上下限、还款方式、是否抵押、数据来源、核对日期。 */
+    private void requireCreateFields(ProductSaveRequest request, ProductSaveRequest.LoanInfo loan,
+                                     String termUnit, List<String> repayments) {
+        List<String> missing = new ArrayList<>();
+        if (blank(request.getSummary())) missing.add("summary");
+        if (request.getCoverImageId() == null) missing.add("coverImageId");
+        if (loan.getMinAmount() == null) missing.add("minAmount");
+        if (loan.getMaxAmount() == null) missing.add("maxAmount");
+        if (loan.getMinTerm() == null) missing.add("minTerm");
+        if (loan.getMaxTerm() == null) missing.add("maxTerm");
+        if (blank(termUnit)) missing.add("termUnit");
+        if (loan.getMinAnnualRate() == null) missing.add("minAnnualRate");
+        if (loan.getMaxAnnualRate() == null) missing.add("maxAnnualRate");
+        if (repayments == null || repayments.isEmpty()) missing.add("repaymentMethods");
+        if (blank(request.getDataSource())) missing.add("dataSource");
+        if (request.getVerifiedAt() == null) missing.add("verifiedAt");
+        if (!missing.isEmpty()) {
+            throw new CatalogBusinessException(CatalogErrorCodes.PARAM_INVALID,
+                    "新建产品缺少必填项: " + String.join(",", missing));
+        }
+    }
+
+    /** 同一分类内，额度区间、期限区间、年化区间、还款方式集合完全相同的产品不允许重复（编辑时排除自身）。 */
+    private void ensureRangeUnique(String categoryCode, ProductSaveRequest.LoanInfo loan, List<String> repayments,
+                                   Long excludeId) {
+        Set<String> methods = new HashSet<>(repayments == null ? List.of() : repayments);
+        List<LoanProduct> sameCategory = productMapper.selectList(
+                new LambdaQueryWrapper<LoanProduct>().eq(LoanProduct::getCategoryCode, categoryCode));
+        for (LoanProduct other : sameCategory) {
+            if (excludeId != null && excludeId.equals(other.getId())) {
+                continue;
+            }
+            if (Objects.equals(other.getMinAmount(), loan.getMinAmount())
+                    && Objects.equals(other.getMaxAmount(), loan.getMaxAmount())
+                    && Objects.equals(other.getMinTerm(), loan.getMinTerm())
+                    && Objects.equals(other.getMaxTerm(), loan.getMaxTerm())
+                    && sameDecimal(other.getMinAnnualRate(), loan.getMinAnnualRate())
+                    && sameDecimal(other.getMaxAnnualRate(), loan.getMaxAnnualRate())
+                    && new HashSet<>(CatalogJson.readStringList(other.getRepaymentMethods())).equals(methods)) {
+                throw new CatalogBusinessException(CatalogErrorCodes.PRODUCT_RANGE_DUPLICATE,
+                        "同分类下已存在区间与还款方式完全相同的产品：" + other.getProductName());
+            }
+        }
+    }
+
+    private static boolean sameDecimal(BigDecimal left, BigDecimal right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return left.compareTo(right) == 0;
     }
 
     private void ensureTagNameUnique(String name, String categoryCode, Long excludeId) {

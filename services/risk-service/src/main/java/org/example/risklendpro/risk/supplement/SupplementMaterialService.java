@@ -3,6 +3,7 @@ package org.example.risklendpro.risk.supplement;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.risklendpro.api.contract.IdentityProofMaterials;
 import org.example.risklendpro.risk.supplement.SupplementMaterialProperties;
 import org.example.risklendpro.risk.supplement.dto.ImageVerificationResult;
 import org.example.risklendpro.risk.entity.RiskAssessment;
@@ -140,6 +141,19 @@ public class SupplementMaterialService {
                 .anyMatch(m -> materialType.equals(m.getMaterialType()));
     }
 
+    /** 用户已上传的身份证明材料类型（不限申请，取最近一次评估挂载的材料）。 */
+    public List<String> listUploadedIdentityProofs(Long userId) {
+        return materialMapper.selectList(
+                        new QueryWrapper<RiskSupplementMaterial>()
+                                .eq("user_id", userId)
+                                .gt("expire_at", new Date()))
+                .stream()
+                .map(RiskSupplementMaterial::getMaterialType)
+                .filter(IdentityProofMaterials::isIdentityProof)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
     public String resolveRuleTrigger(RiskAssessment assessment) {
         if (assessment == null) {
             return "NONE";
@@ -153,6 +167,10 @@ public class SupplementMaterialService {
 
     @Transactional
     public Map<String, Object> upload(Long userId, String materialType, MultipartFile file, String remark) {
+        // 身份证明（目录产品申请用）随时可传，挂到用户最近一次评估上，不受人工复核流程约束
+        if (IdentityProofMaterials.isIdentityProof(materialType)) {
+            return uploadIdentityProof(userId, materialType, file, remark);
+        }
         RiskAssessment assessment = findLatestManualReviewAssessment(userId);
         if (assessment == null) {
             throw new RuntimeException("当前没有可上传材料的人工复核申请");
@@ -311,6 +329,52 @@ public class SupplementMaterialService {
         assessment.setSupplementStatus(STATUS_REQUIRED);
         riskAssessmentMapper.updateById(assessment);
         sendSupplementExpiredEmail(assessment, requirements);
+    }
+
+    /** 身份证明上传：挂到用户最近一次评估，不要求处于人工复核补充态。 */
+    private Map<String, Object> uploadIdentityProof(Long userId, String materialType, MultipartFile file, String remark) {
+        RiskAssessment assessment = findLatestAssessment(userId);
+        if (assessment == null) {
+            throw new RuntimeException("请先完成授信评估后再上传身份证明");
+        }
+        boolean uploaded = listUploadedIdentityProofs(userId).contains(materialType);
+        if (uploaded) {
+            throw new RuntimeException("该身份证明已上传，请勿重复提交");
+        }
+        try {
+            FileStorageService.StoredFile stored = fileStorageService.store(assessment.getApplyId(), file);
+            RiskSupplementMaterial row = new RiskSupplementMaterial();
+            row.setApplyId(assessment.getApplyId());
+            row.setUserId(userId);
+            row.setMaterialType(materialType);
+            row.setOriginalName(stored.originalName());
+            row.setStoredPath(stored.storedPath());
+            row.setFileSize(stored.size());
+            row.setMimeType(stored.mimeType());
+            row.setRemark(remark);
+            row.setUploadTime(new Date());
+            row.setExpireAt(addDays(new Date(), properties.getRetentionDays()));
+            materialMapper.insert(row);
+
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("materialId", row.getId());
+            resp.put("applyId", assessment.getApplyId());
+            resp.put("materialType", materialType);
+            resp.put("expireAt", row.getExpireAt());
+            return resp;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("材料上传失败: " + e.getMessage());
+        }
+    }
+
+    private RiskAssessment findLatestAssessment(Long userId) {
+        return riskAssessmentMapper.selectOne(
+                new QueryWrapper<RiskAssessment>()
+                        .eq("user_id", userId)
+                        .orderByDesc("submit_time")
+                        .last("LIMIT 1"));
     }
 
     private RiskAssessment findLatestManualReviewAssessment(Long userId) {

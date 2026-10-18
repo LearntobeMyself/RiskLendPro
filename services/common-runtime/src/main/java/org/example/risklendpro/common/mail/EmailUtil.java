@@ -1,5 +1,7 @@
 package org.example.risklendpro.common.mail;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
@@ -10,6 +12,8 @@ import java.util.List;
 
 @Component
 public class EmailUtil {
+
+    private static final Logger log = LoggerFactory.getLogger(EmailUtil.class);
 
     @Autowired
     private JavaMailSender mailSender;
@@ -29,7 +33,12 @@ public class EmailUtil {
         message.setTo(to);
         message.setSubject(subject);
         message.setText(content);
-        mailSender.send(message);
+        try {
+            mailSender.send(message);
+        } catch (Exception e) {
+            // 邮件只是事后通知，发送失败不应阻断主流程、也不应回滚已完成的业务事务
+            log.warn("邮件发送失败，收件人={}，主题={}", to, subject, e);
+        }
     }
 
     /**
@@ -60,7 +69,7 @@ public class EmailUtil {
     public void sendLoanSuccessNotification(String userEmail, String userName, String loanAmount) {
         String subject = "【RiskLendPro】借款成功通知";
         String content = "尊敬的" + userName + "先生/女士：\n\n" +
-                "您的借款申请已自动审批通过，详情如下：\n\n" +
+                "您的借款申请已审批通过，详情如下：\n\n" +
                 "借款金额：" + loanAmount + "元\n" +
                 "状态：已发放\n\n" +
                 "资金已转入您的账户，请查收。\n\n" +
@@ -70,20 +79,21 @@ public class EmailUtil {
     }
 
     /**
-     * 发送借款审批通知（给用户）
+     * 发送抵押类借款申请受理通知（等待管理员确认抵押物）
      * @param userEmail 用户邮箱
      * @param userName 用户名
      * @param loanAmount 借款金额
-     * @param remainingLimit 剩余额度
+     * @param productName 产品名称
      */
-    public void sendLoanApprovalNotification(String userEmail, String userName, String loanAmount, String remainingLimit) {
-        String subject = "【RiskLendPro】借款申请审批通知";
+    public void sendMortgageLoanPendingNotification(String userEmail, String userName,
+                                                    String loanAmount, String productName) {
+        String subject = "【RiskLendPro】借款申请已受理 - 待审批";
         String content = "尊敬的" + userName + "先生/女士：\n\n" +
-                "您的借款申请已提交，详情如下：\n\n" +
+                "您的抵押类借款申请已受理，详情如下：\n\n" +
+                "产品名称：" + productName + "\n" +
                 "借款金额：" + loanAmount + "元\n" +
-                "剩余额度：" + remainingLimit + "元\n" +
                 "状态：待审批\n\n" +
-                "由于您的借款金额超出剩余额度，需要管理员审批，请关注最新审批情况。\n\n" +
+                "管理员核对抵押物并录入评估价后即完成放款，请关注最新审批情况。\n\n" +
                 "此致\n" +
                 "RiskLendPro团队";
         sendSimpleEmail(userEmail, subject, content);

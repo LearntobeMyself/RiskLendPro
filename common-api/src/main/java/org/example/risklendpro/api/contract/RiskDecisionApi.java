@@ -47,4 +47,8 @@ public interface RiskDecisionApi {
      */
     @GetMapping("/internal/risk-assessments/users/{userId}/borrow-gate")
     BorrowGateResult getBorrowGate(@PathVariable("userId") Long userId);
+
+    /** 用户已上传的身份证明材料类型（目录产品申请的身份校验用）。 */
+    @GetMapping("/internal/supplement/users/{userId}/identity-proofs")
+    List<String> listIdentityProofs(@PathVariable("userId") Long userId);
 }

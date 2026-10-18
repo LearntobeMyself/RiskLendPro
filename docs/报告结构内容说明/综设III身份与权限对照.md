@@ -172,7 +172,7 @@ flowchart LR
 | 功能 | 状态 | 接口 | 权限码 | 需求 |
 |------|------|------|--------|------|
 | 待审列表、评分报告、人工通过/拒绝 | 已有 | `GET /admin/risk/list`、`GET /admin/risk/report/{applyId}`、`POST /admin/risk/approve` | `risk:approve` | R03-2 |
-| 借款待审与审批 | 已有 | `GET /admin/loan/pending-list`、`POST /admin/loan/approve`、`GET /admin/loan/**`、`POST /admin/loan/batch-approve` | `loan:approve` | R05-3 |
+| 借款待审与审批 | 已有 | `GET /admin/loan/pending-list`、`POST /admin/loan/approve`、`GET /admin/loan/**` | `loan:approve` | R05-3 |
 | 额度列表、调额、历史 | 已有 | `GET /admin/credit/**`、`POST /admin/credit/limits/{userId}/adjust`、`POST …/batch-adjust` | `credit:adjust` | R06 / 贷中 |
 | 反欺诈列表与处置 | 已有 | `GET /admin/risk/anti-fraud`、`POST /admin/risk/anti-fraud/{id}/handle` 及 overview / credit-scores / multi-loan / credit-reports | `risk:fraud` | R03-4 |
 | B 卡监控 / 重算 / 快照 | 已有 | `GET /admin/b-card/monitor`、`POST /admin/b-card/recalculate/{userId}`、snapshot、features | `risk:monitor` | R06 |

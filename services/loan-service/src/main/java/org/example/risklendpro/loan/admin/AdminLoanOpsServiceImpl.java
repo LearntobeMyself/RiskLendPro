@@ -8,14 +8,15 @@ import org.example.risklendpro.common.mail.EmailUtil;
 import org.example.risklendpro.loan.borrow.LoanApproveRequest;
 import org.example.risklendpro.loan.borrow.LoanApproveResponse;
 import org.example.risklendpro.loan.borrow.LoanStatusEnum;
-import org.example.risklendpro.loan.entity.LimitAdjustLog;
+import org.example.risklendpro.loan.catalog.CatalogJson;
+import org.example.risklendpro.loan.catalog.entity.LoanProduct;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
 import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.entity.VintageData;
-import org.example.risklendpro.loan.mapper.LimitAdjustLogMapper;
 import org.example.risklendpro.loan.mapper.LoanMapper;
+import org.example.risklendpro.loan.mapper.LoanProductMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
 import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
@@ -27,15 +28,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,9 +53,9 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     @Autowired
     private LoanMapper loanMapper;
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
+    private LoanProductMapper loanProductMapper;
     @Autowired
-    private LimitAdjustLogMapper limitAdjustLogMapper;
+    private UserCreditLimitMapper userCreditLimitMapper;
     @Autowired
     private VintageDataMapper vintageDataMapper;
     @Autowired
@@ -64,6 +68,8 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     private RiskServiceClient riskServiceClient;
     @Autowired
     private UserServiceClient userServiceClient;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     public Map<String, Object> getVintageData() {
         List<VintageData> vintageDataList = vintageDataMapper.selectList(null);
@@ -213,14 +219,19 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             BigDecimal totalLimit = creditLimit != null ? creditLimit.getTotalLimit() : BigDecimal.ZERO;
             BigDecimal remainingLimit = creditLimit != null ? creditLimit.getRemainingLimit() : BigDecimal.ZERO;
             BigDecimal exceedAmount = loan.getAmount().subtract(remainingLimit).max(BigDecimal.ZERO);
-            // 额度内借款应由系统自动放款，不应出现在人工审批列表
-            if (exceedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            // 抵押类申请与剩余信用额度无关，一律进入管理员抵押确认列表；
+            // 信用类申请超过剩余额度在受理时已直接拒绝，不会进入人工审批。
+            if (loan.getCollateralType() == null) {
                 continue;
             }
 
             Map<String, Object> record = new HashMap<>();
             record.put("loanId", loan.getLoanId());
             record.put("userId", loan.getUserId());
+            record.put("productId", loan.getProductId());
+            record.put("productName", loan.getProductName());
+            record.put("collateralType", loan.getCollateralType());
+            record.put("collateralValue", loan.getCollateralValue());
 
             UserSummary user = userServiceClient.getUser(loan.getUserId());
             if (user != null) {
@@ -248,8 +259,45 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
     }
 
     @Override
-    @Transactional
     public LoanApproveResponse approveLoan(LoanApproveRequest request) {
+        // 事务内只做加锁、校验、状态流转与还款计划生成；
+        // 跨服务调用（Feign）与邮件发送放到事务提交之后，避免长时间占用数据库连接、也避免邮件失败回滚审批。
+        ApproveOutcome outcome = new TransactionTemplate(transactionManager).execute(status -> doApprove(request));
+
+        LoanApproveResponse response = new LoanApproveResponse();
+        response.setLoanId(outcome.loanId());
+        response.setUserId(outcome.userId());
+        response.setStatus(outcome.status());
+        response.setApproveTime(outcome.approveTime());
+        response.setEmailSent(true);
+
+        UserSummary user = userServiceClient.getUser(outcome.userId());
+
+        if (LoanStatusEnum.REJECTED.getCode().equals(outcome.status())) {
+            response.setRejectReason(outcome.rejectReason());
+            if (user != null) {
+                emailUtil.sendLoanRejectNotification(
+                        user.email(),
+                        user.realName(),
+                        outcome.amount().toString(),
+                        outcome.rejectReason()
+                );
+            }
+            return response;
+        }
+
+        response.setActualDisbursedAmount(outcome.amount());
+        if (user != null && user.idCard() != null) {
+            riskServiceClient.activateBehaviorScore(outcome.userId(), user.idCard());
+        }
+        if (user != null) {
+            emailUtil.sendLoanSuccessNotification(user.email(), user.realName(), outcome.amount().toString());
+        }
+        return response;
+    }
+
+    /** 审批的数据库部分：加锁、幂等校验、状态流转、还款计划生成。 */
+    private ApproveOutcome doApprove(LoanApproveRequest request) {
         Loan loan = loanMapper.selectOne(
                 new QueryWrapper<Loan>().eq("loan_id", request.getLoanId()).last("FOR UPDATE"));
         if (loan == null) {
@@ -259,11 +307,7 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
             throw new RuntimeException("该贷款申请已处理，无法重复审批");
         }
 
-        UserSummary user = userServiceClient.getUser(loan.getUserId());
-
-        LoanApproveResponse response = new LoanApproveResponse();
-        response.setLoanId(loan.getLoanId());
-        response.setUserId(loan.getUserId());
+        Date approveTime = new Date();
 
         if ("APPROVE".equals(request.getApproveResult())) {
             long existingPlans = repaymentPlanMapper.selectCount(
@@ -272,99 +316,82 @@ public class AdminLoanOpsServiceImpl implements AdminLoanOpsService {
                 throw new RuntimeException("该贷款已生成还款计划，无法重复放款");
             }
 
-            loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
-            loan.setApproveTime(new Date());
-            loan.setDisbursementTime(new Date());
-
-            UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
-                    new QueryWrapper<UserCreditLimit>().eq("user_id", loan.getUserId()).last("FOR UPDATE")
-            );
-
-            if (creditLimit != null) {
-                BigDecimal oldTotalLimit = creditLimit.getTotalLimit() != null ? creditLimit.getTotalLimit() : BigDecimal.ZERO;
-                BigDecimal oldUsedLimit = creditLimit.getUsedLimit() != null ? creditLimit.getUsedLimit() : BigDecimal.ZERO;
-                BigDecimal oldRemainingLimit = creditLimit.getRemainingLimit() != null ? creditLimit.getRemainingLimit() : BigDecimal.ZERO;
-                BigDecimal additionalLimit = request.getAdditionalLimit() != null ? request.getAdditionalLimit() : BigDecimal.ZERO;
-
-                // 额度外借款审批：新增额度必须至少覆盖超出部分，否则新总额度会小于新已用额度
-                BigDecimal exceedAmount = loan.getAmount().subtract(oldRemainingLimit).max(BigDecimal.ZERO);
-                if (additionalLimit.compareTo(exceedAmount) < 0) {
-                    additionalLimit = exceedAmount;
-                }
-
-                BigDecimal newTotalLimit = oldTotalLimit.add(additionalLimit);
-                BigDecimal newUsedLimit = oldUsedLimit.add(loan.getAmount());
-                // 二次兜底：即使 additionalLimit 有异常，也保证总额度不低于已用额度
-                if (newTotalLimit.compareTo(newUsedLimit) < 0) {
-                    newTotalLimit = newUsedLimit;
-                }
-                BigDecimal newRemainingLimit = newTotalLimit.subtract(newUsedLimit);
-
-                creditLimit.setTotalLimit(newTotalLimit);
-                creditLimit.setUsedLimit(newUsedLimit);
-                creditLimit.setRemainingLimit(newRemainingLimit);
-                creditLimit.setLastUpdateTime(new Date());
-                userCreditLimitMapper.updateById(creditLimit);
-
-                loan.setAdditionalLimit(additionalLimit);
-
-                LimitAdjustLog log = new LimitAdjustLog();
-                log.setUserId(loan.getUserId());
-                log.setOldLimit(oldTotalLimit);
-                log.setNewLimit(newTotalLimit);
-                log.setReason("审批放款：借款金额 " + loan.getAmount() + "，新增授信 " + additionalLimit + "，原额度 " + oldTotalLimit);
-                log.setOperatorId(0L);
-                log.setAdjustTime(new Date());
-                limitAdjustLogMapper.insert(log);
-
-                response.setOriginalLimit(oldTotalLimit);
-                response.setAdditionalLimit(additionalLimit);
-                response.setTotalLimit(newTotalLimit);
-                response.setActualDisbursedAmount(loan.getAmount());
+            // 抵押类：管理员确认抵押物、录入评估价后按 评估价×抵押率 放款，不占用信用额度。
+            if (loan.getCollateralType() != null) {
+                return approveMortgageLoan(loan, request, approveTime);
             }
 
-            loanMapper.updateById(loan);
-
-            generateRepaymentPlan(loan, loan.getRepaymentMethod());
-
-            if (user != null && user.idCard() != null) {
-                riskServiceClient.activateBehaviorScore(loan.getUserId(), user.idCard());
-            }
-
-            response.setStatus(LoanStatusEnum.DISBURSED.getCode());
-            response.setEmailSent(true);
-
-            if (user != null) {
-                emailUtil.sendLoanSuccessNotification(
-                        user.email(),
-                        user.realName(),
-                        loan.getAmount().toString()
-                );
-            }
-        } else {
-            loan.setStatus(LoanStatusEnum.REJECTED.getCode());
-            loan.setApproveTime(new Date());
-            loan.setRejectReason(request.getApproveRemark());
-
-            loanMapper.updateById(loan);
-
-            response.setStatus(LoanStatusEnum.REJECTED.getCode());
-            response.setRejectReason(request.getApproveRemark());
-            response.setEmailSent(true);
-
-            if (user != null) {
-                emailUtil.sendLoanRejectNotification(
-                        user.email(),
-                        user.realName(),
-                        loan.getAmount().toString(),
-                        request.getApproveRemark()
-                );
-            }
+            // 信用类申请超过剩余额度在受理时已直接拒绝，管理员不能改成通过。
+            throw new RuntimeException("信用类申请超出剩余额度将被直接拒绝，不支持人工审批放款");
         }
 
-        response.setApproveTime(new Date());
+        loan.setStatus(LoanStatusEnum.REJECTED.getCode());
+        loan.setApproveTime(approveTime);
+        loan.setRejectReason(request.getApproveRemark());
+        loanMapper.updateById(loan);
 
-        return response;
+        return new ApproveOutcome(loan.getLoanId(), loan.getUserId(), loan.getAmount(),
+                LoanStatusEnum.REJECTED.getCode(), request.getApproveRemark(), approveTime);
+    }
+
+    /**
+     * 房抵、车抵审批：管理员确认抵押物并录入评估价，金额须 ≤ min(评估价×抵押率, 产品上限)，
+     * 通过后直接放款且不占用、不恢复信用额度。
+     */
+    private ApproveOutcome approveMortgageLoan(Loan loan, LoanApproveRequest request, Date approveTime) {
+        if (request.getCollateralValue() == null || request.getCollateralValue().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RuntimeException("审批通过抵押类申请必须录入抵押物评估价");
+        }
+
+        LoanProduct product = loan.getProductId() == null ? null : loanProductMapper.selectById(loan.getProductId());
+        BigDecimal rate = resolveCollateralRate(loan.getCollateralType(), product);
+        BigDecimal cap = request.getCollateralValue()
+                .multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        if (product != null && product.getMaxAmount() != null) {
+            cap = cap.min(BigDecimal.valueOf(product.getMaxAmount()));
+        }
+        if (loan.getAmount().compareTo(cap) > 0) {
+            throw new RuntimeException("借款金额超过抵押物可贷上限（评估价×抵押率" + rate + "% = " + cap + "）");
+        }
+
+        loan.setCollateralValue(request.getCollateralValue());
+        loan.setCollateralRate(rate);
+        if (request.getCollateralType() != null && !request.getCollateralType().isBlank()) {
+            loan.setCollateralType(request.getCollateralType());
+        }
+        loan.setStatus(LoanStatusEnum.DISBURSED.getCode());
+        loan.setApproveTime(approveTime);
+        loan.setDisbursementTime(approveTime);
+        loan.setAutoApproved(false);
+        loanMapper.updateById(loan);
+
+        generateRepaymentPlan(loan, loan.getRepaymentMethod());
+
+        return new ApproveOutcome(loan.getLoanId(), loan.getUserId(), loan.getAmount(),
+                LoanStatusEnum.DISBURSED.getCode(), null, approveTime);
+    }
+
+    /** 审批结果，供事务提交后的事务外处理（跨服务调用、邮件通知）使用。 */
+    private record ApproveOutcome(Long loanId, Long userId, BigDecimal amount,
+                                  String status, String rejectReason, Date approveTime) {
+    }
+
+    /** 抵押率：优先取产品的 maxLoanToValue，缺省住宅 70%、车辆 80%。 */
+    private BigDecimal resolveCollateralRate(String collateralType, LoanProduct product) {
+        if (product != null && product.getExtraConditions() != null) {
+            Object ltv = CatalogJson.readMap(product.getExtraConditions()).get("maxLoanToValue");
+            if (ltv instanceof Number n) {
+                return BigDecimal.valueOf(n.doubleValue());
+            }
+            if (ltv != null) {
+                try {
+                    return new BigDecimal(ltv.toString());
+                } catch (NumberFormatException ignored) {
+                    // 落到默认值
+                }
+            }
+        }
+        return "VEHICLE".equals(collateralType) ? new BigDecimal("80") : new BigDecimal("70");
     }
 
     private Map<String, Object> calculateRollRate() {
