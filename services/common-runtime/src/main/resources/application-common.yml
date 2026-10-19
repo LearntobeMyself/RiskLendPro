@@ -82,6 +82,13 @@ security:
     secret: ${JWT_SECRET:MySecretKeyForJWT2024VeryLongAndSafe12345678}
   internal:
     api-token: ${INTERNAL_API_TOKEN:dev-internal-token-change-me}
+  demo:
+    # 匿名演示接口总开关，默认关闭。
+    # 关闭时：控制器不注册（404）、JwtFilter 不放行、SecurityConfig 不加白名单，三层同时收紧。
+    # 需要演示时用环境变量 DEMO_IMAGE_VERIFY_ENABLED=true 临时打开，演示完立即关闭。
+    image-verify-enabled: ${DEMO_IMAGE_VERIFY_ENABLED:false}
+    # 打开时按客户端 IP 限流，防止免鉴权接口被当作免费 OCR/检测算力刷。
+    image-verify-rate-limit-per-minute: ${DEMO_IMAGE_VERIFY_RATE_LIMIT:10}
 
 risk:
   schema:

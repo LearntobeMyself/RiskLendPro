@@ -29,6 +29,9 @@ public class SecurityConfig {
     private AdminAccessFilter adminAccessFilter;
     @Value("${cors.allowed-origin-patterns:http://localhost:*}")
     private String allowedOriginPatterns;
+    /** 匿名演示接口开关：默认关闭，关闭时不会为 /demo/** 打开白名单。 */
+    @Value("${security.demo.image-verify-enabled:false}")
+    private boolean demoImageVerifyEnabled;
     
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -36,9 +39,9 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        // 1. 放行登录、健康检查与内部契约调用（管理员注册不再对公网开放）
-                        .requestMatchers("/auth/**", "/admin/login", "/actuator/health").permitAll()
+                .authorizeHttpRequests(auth -> {
+                    // 1. 放行登录、健康检查与内部契约调用（管理员注册不再对公网开放）
+                    auth.requestMatchers("/auth/**", "/admin/login", "/actuator/health").permitAll()
                         // 2. 彻底放行 Swagger 相关路径 (不带 /api/v1)
                         .requestMatchers(
                             "/v3/api-docs/**",
@@ -46,12 +49,14 @@ public class SecurityConfig {
                             "/swagger-ui.html",
                             "/swagger-resources/**",
                             "/webjars/**"
-                        ).permitAll()
-                        // 3. Demo 图片核验接口（匿名可访问，用于演示）
-                        .requestMatchers("/demo/image-verify/**").permitAll()
-                        // 4. 其他所有接口都需要认证
-                        .anyRequest().authenticated()
-                )
+                        ).permitAll();
+                    // 3. Demo 图片核验接口：仅当显式打开开关时匿名放行，默认走认证
+                    if (demoImageVerifyEnabled) {
+                        auth.requestMatchers("/demo/image-verify/**").permitAll();
+                    }
+                    // 4. 其他所有接口都需要认证
+                    auth.anyRequest().authenticated();
+                })
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

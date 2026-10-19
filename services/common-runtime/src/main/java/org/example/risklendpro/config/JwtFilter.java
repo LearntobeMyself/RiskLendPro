@@ -33,6 +33,10 @@ public class JwtFilter extends OncePerRequestFilter {
     private final BlacklistSyncProperties blacklistSyncProperties;
     private final InternalApiProperties internalApiProperties;
 
+    /** 匿名演示接口开关：默认关闭，关闭时 /demo/** 与普通接口一样必须带 token。 */
+    @org.springframework.beans.factory.annotation.Value("${security.demo.image-verify-enabled:false}")
+    private boolean demoImageVerifyEnabled;
+
     @Autowired
     public JwtFilter(JwtConfig jwtConfig,
                      BlacklistSyncProperties blacklistSyncProperties,
@@ -151,7 +155,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 || requestURI.contains("/v3/api-docs")
                 || requestURI.contains("/swagger-resources/")
                 || requestURI.contains("/webjars/")
-                || requestURI.contains("/demo/image-verify");
+                || (demoImageVerifyEnabled && requestURI.contains("/demo/image-verify"));
     }
 
     private boolean isInternalRequest(String requestURI) {
