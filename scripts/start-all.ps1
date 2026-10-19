@@ -84,8 +84,14 @@ $javaCandidates = New-Object 'System.Collections.Generic.List[string]'
 Add-JavaCandidate $javaCandidates $env:JAVA_HOME
 
 $jbrCandidates = @()
-$jbrCandidates += Get-ChildItem -Path 'F:\IntelliJ IDEA*\jbr' -Directory -ErrorAction SilentlyContinue
-$jbrCandidates += Get-ChildItem -Path 'C:\Program Files\JetBrains\*\jbr' -Directory -ErrorAction SilentlyContinue
+# 注意：对不存在的盘符使用通配路径时，Get-ChildItem 会在参数绑定阶段就抛
+# ParameterBindingException（-Directory 找不到），-ErrorAction SilentlyContinue 挡不住，
+# 所以先确认路径根存在再扫描，避免没有 F: 盘的机器直接启动失败。
+foreach ($jbrPattern in @('F:\IntelliJ IDEA*\jbr', 'C:\Program Files\JetBrains\*\jbr')) {
+    $patternRoot = [System.IO.Path]::GetPathRoot($jbrPattern)
+    if (-not $patternRoot -or -not (Test-Path -LiteralPath $patternRoot)) { continue }
+    $jbrCandidates += Get-ChildItem -Path $jbrPattern -Directory -ErrorAction SilentlyContinue
+}
 foreach ($item in $jbrCandidates) {
     Add-JavaCandidate $javaCandidates $item.FullName
 }
@@ -141,6 +147,16 @@ Write-Host '正在编译项目（首次运行可能需要下载依赖）...'
 & $mvnCmd '-DskipTests' 'package'
 if ($LASTEXITCODE -ne 0) {
     throw "项目编译失败，退出码：$LASTEXITCODE"
+}
+
+# 根 pom 的 <modules> 只聚合了 common-api / common-runtime / risk-service，
+# gateway、user-service、loan-service、cs-service 需要单独打包，否则下面找不到 jar。
+foreach ($module in @('gateway', 'user-service', 'loan-service', 'cs-service')) {
+    Write-Host "正在编译 services/$module ..."
+    & $mvnCmd '-DskipTests' '-f' "services/$module/pom.xml" 'package'
+    if ($LASTEXITCODE -ne 0) {
+        throw "services/$module 编译失败，退出码：$LASTEXITCODE"
+    }
 }
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
