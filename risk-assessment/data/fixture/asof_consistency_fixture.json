@@ -1,0 +1,56 @@
+{
+  "fixture_version": "ASOF_CONSISTENCY_V1",
+  "feature_version": "BF_V2.2",
+  "purpose": "离线(Python)与在线(Java BCardFeatureServiceImpl)对同一批原始还款数据必须产出完全一致的 as-of 特征",
+  "deployable": false,
+  "cases": [
+    {
+      "name": "unpaid_72d_overdue_with_history",
+      "user_id": 68,
+      "as_of_date": "2026-09-11",
+      "loans": [
+        {"loan_id": 100, "status": "OVERDUE", "amount": 5000, "apply_time": "2026-04-21", "disbursement_time": "2026-05-01"}
+      ],
+      "plans": [
+        {"plan_id": 200, "loan_id": 100, "create_time": "2026-05-01"}
+      ],
+      "records": [
+        {"record_id": 300, "loan_id": 100, "due_date": "2026-07-01", "repayment_date": null, "status": "OVERDUE", "amount": 1000, "actual_amount": 0, "create_time": "2026-06-01"},
+        {"record_id": 301, "loan_id": 100, "due_date": "2026-05-01", "repayment_date": "2026-05-03", "status": "COMPLETED", "amount": 1000, "actual_amount": 1000, "create_time": "2026-04-01"}
+      ],
+      "credit_limit_history": [
+        {"snapshot_date": "2026-09-10", "total_limit": 10000, "used_limit": 6000, "remaining_limit": 4000, "overdue_amount": 0, "has_overdue": false}
+      ]
+    },
+    {
+      "name": "repayment_after_as_of_must_not_count",
+      "user_id": 69,
+      "as_of_date": "2026-09-11",
+      "loans": [
+        {"loan_id": 110, "status": "REPAID", "amount": 3000, "apply_time": "2026-04-01", "disbursement_time": "2026-04-10"}
+      ],
+      "plans": [],
+      "records": [
+        {"record_id": 310, "loan_id": 110, "due_date": "2026-07-01", "repayment_date": "2026-09-20", "status": "COMPLETED", "amount": 3000, "actual_amount": 3000, "create_time": "2026-05-01"}
+      ],
+      "credit_limit_history": [
+        {"snapshot_date": "2026-09-10", "total_limit": 5000, "used_limit": 3000, "remaining_limit": 2000, "overdue_amount": 3000, "has_overdue": true}
+      ]
+    },
+    {
+      "name": "missing_limit_history_and_future_loan",
+      "user_id": 70,
+      "as_of_date": "2026-09-11",
+      "loans": [
+        {"loan_id": 120, "status": "DISBURSED", "amount": 4000, "apply_time": "2026-01-05", "disbursement_time": "2026-01-15"},
+        {"loan_id": 121, "status": "DISBURSED", "amount": 9000, "apply_time": "2026-09-20", "disbursement_time": "2026-09-25"}
+      ],
+      "plans": [],
+      "records": [
+        {"record_id": 320, "loan_id": 120, "due_date": "2026-12-01", "repayment_date": null, "status": "PENDING", "amount": 2000, "actual_amount": 0, "create_time": "2026-01-15"},
+        {"record_id": 321, "loan_id": 120, "due_date": "2025-08-01", "repayment_date": null, "status": "OVERDUE", "amount": 1000, "actual_amount": 0, "create_time": "2025-07-01"}
+      ],
+      "credit_limit_history": []
+    }
+  ]
+}

@@ -5,14 +5,16 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.risklendpro.api.dto.CreditBehaviorUpsertCommand;
 import org.example.risklendpro.api.dto.CreditLimitSnapshot;
+import org.example.risklendpro.api.dto.LimitMultiplierDecision;
 import org.example.risklendpro.api.dto.UserSummary;
+import org.example.risklendpro.risk.bcard.BCardDecisionAuditRecorder;
 import org.example.risklendpro.risk.client.LoanServiceClient;
 import org.example.risklendpro.risk.client.UserServiceClient;
+import org.example.risklendpro.risk.credit.BehaviorScoringRules;
 import org.example.risklendpro.risk.credit.UserBehaviorFeatures;
+import org.example.risklendpro.risk.credit.mapper.BehaviorScoringRulesMapper;
 import org.example.risklendpro.risk.credit.mapper.UserBehaviorFeaturesMapper;
-import org.example.risklendpro.risk.entity.BCardFeatureSnapshot;
 import org.example.risklendpro.risk.entity.UserBCardLog;
-import org.example.risklendpro.risk.mapper.BCardFeatureSnapshotMapper;
 import org.example.risklendpro.risk.mapper.UserBCardLogMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -38,6 +43,13 @@ public class BehaviorScoreService {
     private static final String STATUS_FEATURE_NOT_FOUND = "FEATURE_NOT_FOUND";
     private static final String STATUS_FEATURE_PARSE_ERROR = "FEATURE_PARSE_ERROR";
     private static final String STATUS_INSUFFICIENT_HISTORY = "INSUFFICIENT_HISTORY";
+    private static final String STATUS_NO_SCORE_LOG = "NO_SCORE_LOG";
+    private static final String STATUS_TRUST_PARSE_ERROR = "TRUST_PARSE_ERROR";
+
+    /** 当前线上 B 卡入模的特征口径（HC 静态特征 + 贷后实时修正特征）。 */
+    public static final String FEATURE_VERSION = "HC_STATIC_V1+LIVE_V1";
+    /** 额度系数策略版本（阈值来源为激活规则）。 */
+    public static final String POLICY_VERSION = "BCARD_LIMIT_POLICY_V1";
 
     @Autowired
     private BehaviorScoreEngine behaviorScoreEngine;
@@ -49,16 +61,19 @@ public class BehaviorScoreService {
     private UserBehaviorFeaturesMapper userBehaviorFeaturesMapper;
 
     @Autowired
-    private BCardFeatureSnapshotMapper bCardFeatureSnapshotMapper;
+    private UserBCardLogMapper userBCardLogMapper;
 
     @Autowired
-    private UserBCardLogMapper userBCardLogMapper;
+    private BehaviorScoringRulesMapper behaviorScoringRulesMapper;
 
     @Autowired
     private LoanServiceClient loanServiceClient;
 
     @Autowired
     private UserServiceClient userServiceClient;
+
+    @Autowired
+    private BCardDecisionAuditRecorder decisionAuditRecorder;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -89,6 +104,10 @@ public class BehaviorScoreService {
         return limit != null && limit.bCardEnabled();
     }
 
+    /**
+     * 仅按分数映射额度系数（纯函数）。调用方必须先确认分数可信；
+     * 对外额度流程请使用 {@link #resolveLimitMultiplierForUser(Long, double)}。
+     */
     public double resolveLimitMultiplier(double finalBScore) {
         double watch = behaviorScoreEngine.getThresholdWatch();
         double reduce = behaviorScoreEngine.getThresholdReduceLimit();
@@ -110,16 +129,67 @@ public class BehaviorScoreService {
         return 0.0;
     }
 
-    public Double resolveLimitMultiplierForUser(Long userId, double finalBScore) {
-        if (!isLatestScoreReliable(userId)) {
-            return null;
+    /**
+     * 统一的额度系数决策入口：可信度判断与系数生成在同一决策点完成。
+     *
+     * <p>{@code scoreReliable=false} 时返回 {@code decisionAllowed=false} 且
+     * {@code multiplier=null}，调用方不得据此调整额度。</p>
+     */
+    public LimitMultiplierDecision resolveLimitMultiplierForUser(Long userId, double finalBScore) {
+        ScoreTrust trust = loadLatestScoreTrust(userId);
+        boolean allowed = trust.scoreReliable;
+        Double multiplier = allowed ? resolveLimitMultiplier(finalBScore) : null;
+        String reason = allowed
+                ? "B 卡分数可信，按激活规则阈值生成额度系数"
+                : "B 卡分数不可信，拒绝生成额度系数 dataStatus=" + trust.dataStatus;
+        if (!allowed) {
+            log.warn("B 卡额度系数被拒绝 userId={} dataStatus={} score={}", userId, trust.dataStatus, finalBScore);
         }
-        return resolveLimitMultiplier(finalBScore);
+        LimitMultiplierDecision decision = new LimitMultiplierDecision(
+                userId,
+                multiplier,
+                trust.scoreReliable,
+                allowed,
+                trust.dataStatus,
+                trust.modelVersion,
+                trust.featureVersion,
+                trust.policyVersion != null ? trust.policyVersion : POLICY_VERSION,
+                trust.ruleHash,
+                reason);
+        recordAudit(decision, trust.logId, finalBScore);
+        return decision;
+    }
+
+    /** 审计失败不得影响额度决策本身（只记录错误日志）。 */
+    private void recordAudit(LimitMultiplierDecision decision, Long logId, double score) {
+        try {
+            decisionAuditRecorder.record(new BCardDecisionAuditRecorder.AuditEntry(
+                    decision.userId(),
+                    "QUOTA_MULTIPLIER",
+                    decision.modelVersion(),
+                    null,
+                    decision.featureVersion(),
+                    decision.policyVersion(),
+                    null,
+                    decision.ruleHash(),
+                    logId == null ? null : "b_card_log:" + logId,
+                    decision.dataStatus(),
+                    score,
+                    null,
+                    decision.multiplier(),
+                    decision.decisionAllowed()));
+        } catch (Exception e) {
+            log.error("写 B 卡决策审计失败 userId={}", decision.userId(), e);
+        }
     }
 
     public boolean isLatestScoreReliable(Long userId) {
+        return loadLatestScoreTrust(userId).scoreReliable;
+    }
+
+    private ScoreTrust loadLatestScoreTrust(Long userId) {
         if (userId == null) {
-            return false;
+            return ScoreTrust.unavailable(STATUS_NO_SCORE_LOG);
         }
         UserBCardLog latestLog = userBCardLogMapper.selectOne(
                 new QueryWrapper<UserBCardLog>()
@@ -127,15 +197,22 @@ public class BehaviorScoreService {
                         .orderByDesc("created_at")
                         .last("LIMIT 1"));
         if (latestLog == null || latestLog.getLiveFeatures() == null) {
-            return false;
+            return ScoreTrust.unavailable(STATUS_NO_SCORE_LOG);
         }
         try {
             Map<String, Object> liveFeatures = objectMapper.readValue(
                     latestLog.getLiveFeatures(), new TypeReference<Map<String, Object>>() {});
-            return Boolean.TRUE.equals(liveFeatures.get("scoreReliable"));
+            return new ScoreTrust(
+                    Boolean.TRUE.equals(liveFeatures.get("scoreReliable")),
+                    asString(liveFeatures.get("dataStatus")),
+                    asString(liveFeatures.get("modelVersion")),
+                    asString(liveFeatures.get("featureVersion")),
+                    asString(liveFeatures.get("policyVersion")),
+                    asString(liveFeatures.get("ruleHash")),
+                    latestLog.getId());
         } catch (Exception e) {
             log.warn("解析 B 卡可信状态失败 userId={}", userId, e);
-            return false;
+            return ScoreTrust.unavailable(STATUS_TRUST_PARSE_ERROR);
         }
     }
 
@@ -163,13 +240,12 @@ public class BehaviorScoreService {
 
         boolean scoreReliable = baseResult.resolved && live.isHistoryAvailable();
         String dataStatus = resolveDataStatus(baseResult, live);
+        RuleMeta ruleMeta = loadRuleMeta();
 
+        // 不可信结果不得回写额度分（上游修复 b513450），避免脏分数影响额度
         if (scoreReliable) {
             loanServiceClient.upsertBehaviorScore(
                     new CreditBehaviorUpsertCommand(userId, bCardEnabled, BigDecimal.valueOf(finalScore)));
-        } else {
-            log.warn("B 卡结果不可用于额度决策，跳过回写额度分 userId={} dataStatus={} baseScore={} delta={}",
-                    userId, dataStatus, baseResult.score, delta);
         }
 
         UserBCardLog cardLog = new UserBCardLog();
@@ -186,23 +262,24 @@ public class BehaviorScoreService {
             liveMap.put("baseScoreResolved", baseResult.resolved);
             liveMap.put("scoreReliable", scoreReliable);
             liveMap.put("dataStatus", dataStatus);
+            liveMap.put("modelVersion", ruleMeta.version);
+            liveMap.put("featureVersion", FEATURE_VERSION);
+            liveMap.put("policyVersion", POLICY_VERSION);
+            liveMap.put("ruleHash", ruleMeta.ruleHash);
             cardLog.setLiveFeatures(objectMapper.writeValueAsString(liveMap));
         } catch (Exception e) {
             cardLog.setLiveFeatures("{}");
         }
         cardLog.setCreatedAt(new Date());
         userBCardLogMapper.insert(cardLog);
+
+        if (!scoreReliable) {
+            log.warn("B 卡结果不可用于额度决策 userId={} dataStatus={} baseScore={} delta={}",
+                    userId, dataStatus, baseResult.score, delta);
+        }
     }
 
     private BaseScoreResult computeBaseScore(Long userId, String idCard) {
-        Map<String, Double> liveFeatures = loadLiveBfFeatures(userId);
-        if (liveFeatures != null && !liveFeatures.isEmpty()) {
-            try {
-                return BaseScoreResult.resolved(behaviorScoreEngine.calculateBaseScore(liveFeatures));
-            } catch (Exception e) {
-                log.warn("解析 BF_V2.1 特征失败 userId={}", userId, e);
-            }
-        }
         if (idCard == null || idCard.isBlank()) {
             log.warn("B 卡基础分回退为中性分：缺少身份证 userId={}", userId);
             return BaseScoreResult.unresolved(NEUTRAL_BASE, STATUS_MISSING_ID_CARD);
@@ -216,41 +293,48 @@ public class BehaviorScoreService {
             Map<String, Double> features = objectMapper.readValue(
                     snap.getFeatureJson(), new TypeReference<Map<String, Double>>() {});
             return BaseScoreResult.resolved(behaviorScoreEngine.calculateBaseScore(features));
+        } catch (BehaviorScoreEngineImpl.RuleUnavailableException e) {
+            log.warn("B 卡规则不可用，标记为不可信 userId={} dataStatus={}", userId, e.getDataStatus());
+            return BaseScoreResult.unresolved(NEUTRAL_BASE, e.getDataStatus());
         } catch (Exception e) {
             log.warn("解析 B 卡特征失败 userId={}", userId, e);
             return BaseScoreResult.unresolved(NEUTRAL_BASE, STATUS_FEATURE_PARSE_ERROR);
         }
     }
 
-    private Map<String, Double> loadLiveBfFeatures(Long userId) {
-        if (userId == null || bCardFeatureSnapshotMapper == null) {
-            return null;
+    private RuleMeta loadRuleMeta() {
+        try {
+            BehaviorScoringRules rules = behaviorScoringRulesMapper.selectActiveRule();
+            if (rules == null) {
+                return RuleMeta.empty();
+            }
+            return new RuleMeta(rules.getVersion(), sha256Hex(rules.getRuleContent()));
+        } catch (Exception e) {
+            log.warn("读取 B 卡规则元数据失败", e);
+            return RuleMeta.empty();
         }
-        BCardFeatureSnapshot snapshot = bCardFeatureSnapshotMapper.selectOne(
-                new QueryWrapper<BCardFeatureSnapshot>()
-                        .eq("user_id", userId)
-                        .eq("feature_version", "BF_V2.1")
-                        .orderByDesc("as_of_date")
-                        .last("LIMIT 1"));
-        if (snapshot == null || snapshot.getFeatureJson() == null || snapshot.getFeatureJson().isBlank()) {
+    }
+
+    private static String sha256Hex(String content) {
+        if (content == null) {
             return null;
         }
         try {
-            Map<String, Object> raw = objectMapper.readValue(
-                    snapshot.getFeatureJson(), new TypeReference<Map<String, Object>>() {});
-            Map<String, Double> features = new HashMap<>();
-            for (Map.Entry<String, Object> entry : raw.entrySet()) {
-                if (entry.getValue() instanceof Number number) {
-                    features.put(entry.getKey(), number.doubleValue());
-                } else if (entry.getValue() instanceof Boolean bool) {
-                    features.put(entry.getKey(), bool ? 1.0 : 0.0);
-                }
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
             }
-            return features.isEmpty() ? null : features;
-        } catch (Exception e) {
-            log.warn("读取 BF_V2.1 快照失败 userId={}", userId, e);
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
             return null;
         }
+    }
+
+    private static String asString(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     private static String resolveDataStatus(
@@ -286,6 +370,47 @@ public class BehaviorScoreService {
 
         private static BaseScoreResult unresolved(double score, String dataStatus) {
             return new BaseScoreResult(score, false, dataStatus);
+        }
+    }
+
+    /** 最新评分日志中的可信度与版本元数据。 */
+    private static class ScoreTrust {
+        private final boolean scoreReliable;
+        private final String dataStatus;
+        private final String modelVersion;
+        private final String featureVersion;
+        private final String policyVersion;
+        private final String ruleHash;
+        private final Long logId;
+
+        private ScoreTrust(boolean scoreReliable, String dataStatus, String modelVersion,
+                           String featureVersion, String policyVersion, String ruleHash, Long logId) {
+            this.scoreReliable = scoreReliable;
+            this.dataStatus = dataStatus;
+            this.modelVersion = modelVersion;
+            this.featureVersion = featureVersion;
+            this.policyVersion = policyVersion;
+            this.ruleHash = ruleHash;
+            this.logId = logId;
+        }
+
+        private static ScoreTrust unavailable(String dataStatus) {
+            return new ScoreTrust(false, dataStatus, null, null, null, null, null);
+        }
+    }
+
+    /** 激活规则版本与内容哈希。 */
+    private static class RuleMeta {
+        private final String version;
+        private final String ruleHash;
+
+        private RuleMeta(String version, String ruleHash) {
+            this.version = version;
+            this.ruleHash = ruleHash;
+        }
+
+        private static RuleMeta empty() {
+            return new RuleMeta(null, null);
         }
     }
 }

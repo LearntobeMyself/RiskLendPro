@@ -1,0 +1,46 @@
+{
+  "checks": [
+    {
+      "check": "概率校准参数与曲线",
+      "detail": "method=platt a=1.01908094 b=-1.19058784 reliability_bins=9 deciles=10 spearman(rel)=0.8667 spearman(decile)=-0.9451",
+      "passed": true
+    },
+    {
+      "check": "阈值决策回放",
+      "detail": "chosen=(0.055,0.645) review=0.095455 capacity=0.1 replay_cost=151311.0811 reported=151311.0811",
+      "passed": true
+    },
+    {
+      "check": "跨期稳定性与 PSI",
+      "detail": {
+        "calib": {
+          "auc": 0.832579,
+          "psi": 0.031503
+        },
+        "oot": {
+          "auc": 0.792485,
+          "psi": 0.021133
+        },
+        "train": {
+          "auc": 0.842531,
+          "psi": 0.0
+        }
+      },
+      "passed": true
+    },
+    {
+      "check": "影子产物与只读约束",
+      "detail": "approve_below=0.055 reject_above=0.645 deployable=False",
+      "passed": true
+    },
+    {
+      "check": "校准/阈值可重复",
+      "detail": "params_same=True thresholds_same=True shadow_same=True",
+      "passed": true
+    }
+  ],
+  "checks_failed": 0,
+  "checks_total": 5,
+  "passed": true,
+  "phase": "A4"
+}

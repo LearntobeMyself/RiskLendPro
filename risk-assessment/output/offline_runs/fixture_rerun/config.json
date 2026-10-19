@@ -1,0 +1,30 @@
+{
+  "catalog_version": "BCARD_FEATURE_CATALOG_V1",
+  "data_version": "c3f2291d77f6daac",
+  "dataset": "fixture",
+  "dataset_path": "output\\fixture\\b_card_asof_training_fixture.csv",
+  "deployable": false,
+  "feature_version": "BF_V2.2",
+  "label_column": "label_30dpd_6m",
+  "label_version": "LBL_V1",
+  "model_hash": "63513d8b381de7f873499f7876acf280d41cf56ded3ed018f458649b8071ed5e",
+  "rows": 1320,
+  "run_at": "2026-10-13 17:09:45",
+  "seed": 20261013,
+  "sklearn_version": "0.19.2",
+  "split": {
+    "oot_vintages": [
+      "2025-08-31"
+    ],
+    "train_vintages": [
+      "2025-03-31",
+      "2025-04-30",
+      "2025-05-31",
+      "2025-06-30"
+    ],
+    "valid_vintages": [
+      "2025-07-31"
+    ]
+  },
+  "tree_algorithm": "gradient_boosting"
+}

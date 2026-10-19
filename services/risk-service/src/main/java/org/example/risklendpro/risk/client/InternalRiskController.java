@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.risklendpro.api.contract.RiskDecisionApi;
 import org.example.risklendpro.api.dto.BehaviorScoreSnapshot;
 import org.example.risklendpro.api.dto.BorrowGateResult;
+import org.example.risklendpro.api.dto.LimitMultiplierDecision;
 import org.example.risklendpro.api.dto.RiskAssessmentSummary;
 import org.example.risklendpro.api.dto.RiskOverviewCounts;
 import org.example.risklendpro.risk.entity.RiskAssessment;
@@ -111,13 +112,13 @@ public class InternalRiskController implements RiskDecisionApi {
         return new RiskOverviewCounts(total, pending);
     }
 
+    /**
+     * 额度系数必须按用户维度查询：可信度与系数在服务端同一决策点生成，
+     * 不可信时返回 decisionAllowed=false 且 multiplier=null。
+     */
     @Override
-    public double getLimitMultiplier(double score, Long userId) {
-        if (userId != null) {
-            Double reliable = behaviorScoreService.resolveLimitMultiplierForUser(userId, score);
-            return reliable == null ? 1.0 : reliable;
-        }
-        return behaviorScoreService.resolveLimitMultiplier(score);
+    public LimitMultiplierDecision getLimitMultiplierForUser(Long userId, double score) {
+        return behaviorScoreService.resolveLimitMultiplierForUser(userId, score);
     }
 
     @Override
@@ -145,7 +146,7 @@ public class InternalRiskController implements RiskDecisionApi {
                 && assessment.getIdCard() != null && !assessment.getIdCard().isBlank()) {
             CreditScoreEngine.BlacklistMatchResult hit =
                     creditScoreEngine.checkBlacklist(assessment.getName(), assessment.getIdCard());
-        if (hit != null && (hit.isReject() || hit.isNeedManualReview())) {
+            if (hit != null && (hit.isReject() || hit.isNeedManualReview())) {
                 return BorrowGateResult.deny(
                         "BLACKLIST_HIT",
                         "当前命中黑名单，无法借款",

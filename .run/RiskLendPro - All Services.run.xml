@@ -1,0 +1,9 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="RiskLendPro - All Services" type="CompoundRunConfigurationType" factoryName="Compound">
+    <toRun name="RiskLendPro - User Service" type="SpringBootApplicationConfigurationType" />
+    <toRun name="RiskLendPro - Risk Service" type="SpringBootApplicationConfigurationType" />
+    <toRun name="RiskLendPro - Loan Service" type="SpringBootApplicationConfigurationType" />
+    <toRun name="RiskLendPro - CS Service" type="SpringBootApplicationConfigurationType" />
+    <toRun name="RiskLendPro - Gateway" type="SpringBootApplicationConfigurationType" />
+  </configuration>
+</component>

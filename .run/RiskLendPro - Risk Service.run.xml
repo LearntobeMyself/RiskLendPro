@@ -1,0 +1,9 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="RiskLendPro - Risk Service" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="risk-service" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="org.example.risklendpro.risk.RiskServiceApplication" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

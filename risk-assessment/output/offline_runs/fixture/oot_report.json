@@ -1,0 +1,140 @@
+{
+  "calibration_oot": [
+    {
+      "avg_predicted": 0.071046,
+      "bucket": 1,
+      "count": 22,
+      "observed_bad_rate": 0.0
+    },
+    {
+      "avg_predicted": 0.105971,
+      "bucket": 2,
+      "count": 22,
+      "observed_bad_rate": 0.045455
+    },
+    {
+      "avg_predicted": 0.149225,
+      "bucket": 3,
+      "count": 22,
+      "observed_bad_rate": 0.045455
+    },
+    {
+      "avg_predicted": 0.219549,
+      "bucket": 4,
+      "count": 22,
+      "observed_bad_rate": 0.181818
+    },
+    {
+      "avg_predicted": 0.282584,
+      "bucket": 5,
+      "count": 22,
+      "observed_bad_rate": 0.090909
+    },
+    {
+      "avg_predicted": 0.334717,
+      "bucket": 6,
+      "count": 22,
+      "observed_bad_rate": 0.136364
+    },
+    {
+      "avg_predicted": 0.455819,
+      "bucket": 7,
+      "count": 22,
+      "observed_bad_rate": 0.181818
+    },
+    {
+      "avg_predicted": 0.601085,
+      "bucket": 8,
+      "count": 22,
+      "observed_bad_rate": 0.272727
+    },
+    {
+      "avg_predicted": 0.765635,
+      "bucket": 9,
+      "count": 22,
+      "observed_bad_rate": 0.454545
+    },
+    {
+      "avg_predicted": 0.906947,
+      "bucket": 10,
+      "count": 22,
+      "observed_bad_rate": 0.590909
+    }
+  ],
+  "catalog_version": "BCARD_FEATURE_CATALOG_V1",
+  "dataset": "fixture",
+  "dataset_path": "output\\fixture\\b_card_asof_training_fixture.csv",
+  "deployable": false,
+  "feature_version": "BF_V2.2",
+  "label_column": "label_30dpd_6m",
+  "label_version": "LBL_V1",
+  "max_feature_psi": 0.085621,
+  "periods": {
+    "oot": {
+      "auc": 0.792485,
+      "bad_rate": 0.2,
+      "brier": 0.175132,
+      "ks": 0.477273,
+      "lift_top10": 2.954545,
+      "pr_auc": 0.498029,
+      "rows": 220
+    },
+    "train": {
+      "auc": 0.842531,
+      "bad_rate": 0.226136,
+      "brier": 0.160813,
+      "ks": 0.529785,
+      "lift_top10": 3.61809,
+      "pr_auc": 0.675676,
+      "rows": 880
+    },
+    "valid": {
+      "auc": 0.832579,
+      "bad_rate": 0.231818,
+      "brier": 0.163741,
+      "ks": 0.543567,
+      "lift_top10": 3.137255,
+      "pr_auc": 0.623737,
+      "rows": 220
+    }
+  },
+  "psi": {
+    "features_train_vs_oot": {
+      "currentMaxDpd": 0.046465,
+      "latePaymentCount12m": 0.025807,
+      "onTimeRate12m": 0.069899,
+      "overdueAmount": 0.0377,
+      "partialPaymentRatio12m": 0.055849,
+      "recordCount": 0.009116,
+      "remainingLimit": 0.043934,
+      "tenureDays": 0.085621,
+      "utilizationRate": 0.021986
+    },
+    "score_train_vs_oot": 0.025604
+  },
+  "selected_features": [
+    "currentMaxDpd",
+    "onTimeRate12m",
+    "overdueAmount",
+    "latePaymentCount12m",
+    "partialPaymentRatio12m",
+    "utilizationRate",
+    "remainingLimit",
+    "recordCount",
+    "tenureDays"
+  ],
+  "split": {
+    "oot_vintages": [
+      "2025-08-31"
+    ],
+    "train_vintages": [
+      "2025-03-31",
+      "2025-04-30",
+      "2025-05-31",
+      "2025-06-30"
+    ],
+    "valid_vintages": [
+      "2025-07-31"
+    ]
+  }
+}
