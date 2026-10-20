@@ -9,7 +9,7 @@
   "label_version": "LBL_V1",
   "model_hash": "63513d8b381de7f873499f7876acf280d41cf56ded3ed018f458649b8071ed5e",
   "rows": 1320,
-  "run_at": "2026-10-13 17:09:45",
+  "run_at": "2026-10-20 09:08:16",
   "seed": 20261013,
   "sklearn_version": "0.19.2",
   "split": {

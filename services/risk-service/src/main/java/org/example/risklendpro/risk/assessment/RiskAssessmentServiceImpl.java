@@ -26,6 +26,7 @@ import org.example.risklendpro.risk.assessment.RiskAssessmentSubmitEligibilityRe
 import org.example.risklendpro.common.DuplicateApplyException;
 import org.example.risklendpro.risk.supplement.SupplementRequirement;
 import org.example.risklendpro.risk.score.CreditScoreEngine;
+import org.example.risklendpro.risk.fraud.FraudRiskService;
 import org.example.risklendpro.risk.assessment.RiskAssessmentService;
 import org.example.risklendpro.risk.admin.AdminReportDisplayBuilder;
 import org.example.risklendpro.risk.supplement.SupplementMaterialService;
@@ -54,10 +55,6 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
     private static final Logger log = LoggerFactory.getLogger(RiskAssessmentServiceImpl.class);
 
-    /** 信用分档位（须与 CreditScoreEngine 的 autoApprove/manualReview 阈值保持一致） */
-    private static final double AUTO_APPROVE_THRESHOLD = 720;
-    private static final double MANUAL_REVIEW_THRESHOLD = 580;
-
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
 
@@ -84,6 +81,9 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
 
     @Autowired
     private SupplementMaterialService supplementMaterialService;
+
+    @Autowired
+    private FraudRiskService fraudRiskService;
 
     @Override
     @Transactional
@@ -204,6 +204,38 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         if (verificationResult.getReason() != null && !verificationResult.isNeedManualReview()) {
             riskTags.add("收入偏差(已自动通过)");
             appendAuditRemark(riskAssessment, "INCOME_TOLERANCE: " + verificationResult.getReason());
+        }
+
+        // 反欺诈统一预检：黑名单 + 外部征信 + 收入偏差，输出可解释风险等级
+        FraudRiskService.Result fraudRisk = fraudRiskService.evaluateApplication(
+                request.getMonthlyIncome(), blacklistResult, externalFeatures);
+        if (fraudRisk.level() == FraudRiskService.Level.CRITICAL) {
+            riskAssessment.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            riskAssessment.setIsFinal(true);
+            riskAssessment.setAuditRemark("FRAUD_RISK_CRITICAL: " + fraudRisk.summary());
+            riskAssessmentMapper.insert(riskAssessment);
+            cacheSystemRejectReport(
+                    applyId, request, riskAssessment, riskTags,
+                    riskAssessment.getAuditRemark(), externalFeatures,
+                    "FRAUD_RISK", blacklistResult, verificationResult);
+            if (riskAssessment.getTotalScore() != null) {
+                riskAssessmentMapper.updateById(riskAssessment);
+            }
+            userServiceClient.updateAssessmentStatus(
+                    new UserAssessmentStatusCommand(userId, StatusEnum.SYSTEM_REJECT.getValue()));
+            RiskAssessmentResponse response = new RiskAssessmentResponse();
+            response.setApplyId(applyId);
+            response.setSubmitTime(new Date());
+            response.setStatus(StatusEnum.SYSTEM_REJECT.getValue());
+            return response;
+        }
+        if (fraudRisk.level() == FraudRiskService.Level.HIGH) {
+            forceManualReviewByRule = true;
+            riskTags.add("反欺诈高风险");
+            appendAuditRemark(riskAssessment, "FRAUD_RISK_HIGH: " + fraudRisk.summary());
+        } else if (fraudRisk.level() == FraudRiskService.Level.MEDIUM) {
+            riskTags.add("反欺诈中风险");
+            appendAuditRemark(riskAssessment, "FRAUD_RISK_MEDIUM: " + fraudRisk.summary());
         }
 
         riskAssessmentMapper.insert(riskAssessment);
@@ -419,7 +451,7 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                     if (!"NONE".equals(ruleGate)) {
                         report.put("ruleGate", ruleGate);
                     }
-                    report.put("outcomeSummary", "系统拒绝：虽命中规则闸，但信用分低于拒绝线（" + (int) MANUAL_REVIEW_THRESHOLD + "），分数闸优先拒绝");
+                    report.put("outcomeSummary", "系统拒绝：虽命中规则闸，但信用分低于拒绝线（" + (int) creditScoreEngine.getManualReviewThreshold() + "），分数闸优先拒绝");
                     riskAssessment.setSupplementStatus(SupplementMaterialService.STATUS_NONE);
                     riskAssessment.setSupplementRequirements(null);
                     notificationStatus = "评估拒绝";
@@ -441,11 +473,11 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
                     report.put("finalStatus", StatusEnum.FINAL_PASS.getValue());
                 } else if ("MANUAL_REVIEW".equals(decision)) {
                     report.put("finalStatus", StatusEnum.MANUAL_REVIEW.getValue());
-                    report.put("outcomeSummary", "进入人工复核：信用分处于人工审核档（" + (int) MANUAL_REVIEW_THRESHOLD + "–" + (int) AUTO_APPROVE_THRESHOLD + "），请结合评分明细审批");
+                    report.put("outcomeSummary", "进入人工复核：信用分处于人工审核档（" + (int) creditScoreEngine.getManualReviewThreshold() + "–" + (int) creditScoreEngine.getAutoApproveThreshold() + "），请结合评分明细审批");
                 } else if ("REJECT".equals(decision)) {
                     report.put("finalStatus", StatusEnum.SYSTEM_REJECT.getValue());
                     report.put("rejectGate", "SCORE_LOW");
-                    report.put("outcomeSummary", "系统拒绝：信用分低于拒绝线（" + (int) MANUAL_REVIEW_THRESHOLD + "），评分卡自动拒绝");
+                    report.put("outcomeSummary", "系统拒绝：信用分低于拒绝线（" + (int) creditScoreEngine.getManualReviewThreshold() + "），评分卡自动拒绝");
                 }
                 switch (decision) {
                     case "APPROVE":
@@ -975,9 +1007,9 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
     }
 
     private String getScoreTag(int score) {
-        if (score < MANUAL_REVIEW_THRESHOLD) {
+        if (score < creditScoreEngine.getManualReviewThreshold()) {
             return "SCORE_LOW: 信用分过低";
-        } else if (score < AUTO_APPROVE_THRESHOLD) {
+        } else if (score < creditScoreEngine.getAutoApproveThreshold()) {
             return "SCORE_MANUAL_REVIEW: 信用分区间需人工审核";
         } else {
             return "SCORE_MEDIUM: 信用分中等";
