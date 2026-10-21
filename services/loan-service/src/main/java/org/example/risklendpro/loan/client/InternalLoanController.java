@@ -90,9 +90,14 @@ public class InternalLoanController implements LoanApi {
             limit.setHasOverdue(false);
             limit.setBCardEnabled(false);
             limit.setLastUpdateTime(new Date());
-            userCreditLimitMapper.insert(limit);
+            try {
+                userCreditLimitMapper.insert(limit);
+            } catch (org.springframework.dao.DuplicateKeyException e) {
+                // 并发首插：另一个线程已建行，直接重读即可，保证幂等
+                limit = findLimit(userId);
+            }
         }
-        return toSnapshot(limit);
+        return limit == null ? null : toSnapshot(limit);
     }
 
     @Override
@@ -125,7 +130,23 @@ public class InternalLoanController implements LoanApi {
             limit.setHasOverdue(false);
             limit.setBCardEnabled(false);
             limit.setLastUpdateTime(new Date());
-            userCreditLimitMapper.insert(limit);
+            try {
+                userCreditLimitMapper.insert(limit);
+            } catch (org.springframework.dao.DuplicateKeyException e) {
+                // 并发首插：重读已存在的行，走更新分支
+                limit = findLimitForUpdate(command.userId());
+                if (limit == null) {
+                    throw e;
+                }
+                BigDecimal used = limit.getUsedLimit() != null ? limit.getUsedLimit() : BigDecimal.ZERO;
+                BigDecimal existed = limit.getTotalLimit() != null ? limit.getTotalLimit() : BigDecimal.ZERO;
+                BigDecimal newTotal = existed.add(approvedLimit);
+                BigDecimal newRemaining = newTotal.subtract(used).max(BigDecimal.ZERO);
+                limit.setTotalLimit(newTotal);
+                limit.setRemainingLimit(newRemaining);
+                limit.setLastUpdateTime(new Date());
+                userCreditLimitMapper.updateById(limit);
+            }
         } else {
             BigDecimal used = limit.getUsedLimit() != null ? limit.getUsedLimit() : BigDecimal.ZERO;
             BigDecimal newTotal = oldTotal.add(approvedLimit);
@@ -176,14 +197,14 @@ public class InternalLoanController implements LoanApi {
                         || LoanStatusEnum.OVERDUE.getCode().equals(l.getStatus()))
                 .count();
 
-        BigDecimal outstandingAmount = loans.stream()
-                .filter(l -> LoanStatusEnum.DISBURSED.getCode().equals(l.getStatus())
-                        || LoanStatusEnum.OVERDUE.getCode().equals(l.getStatus()))
-                .map(l -> l.getAmount() == null ? BigDecimal.ZERO : l.getAmount())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
         List<RepaymentPlan> plans = loanIds.isEmpty() ? Collections.emptyList()
                 : repaymentPlanMapper.selectList(new QueryWrapper<RepaymentPlan>().in("loan_id", loanIds));
+
+        // outstandingAmount = 未结清还款计划的剩余本金之和，而非原始放款金额。
+        BigDecimal outstandingAmount = plans.stream()
+                .filter(p -> !"COMPLETED".equals(p.getStatus()))
+                .map(p -> p.getRemainingAmount() == null ? BigDecimal.ZERO : p.getRemainingAmount())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         Date now = new Date();
         int maxOverdueDays = 0;
