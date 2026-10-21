@@ -2,6 +2,7 @@ package org.example.risklendpro.user.auth;
 
 import org.example.risklendpro.api.security.StaffRoles;
 import org.example.risklendpro.common.security.JwtConfig;
+import org.example.risklendpro.common.security.LoginAttemptLimiter;
 import org.example.risklendpro.user.entity.User;
 import org.example.risklendpro.user.mapper.UserMapper;
 import org.example.risklendpro.user.auth.UserRegisterRequest;
@@ -24,12 +25,15 @@ public class AuthServiceImpl implements AuthService {
     private final JwtConfig jwtConfig;
     private final PasswordEncoder passwordEncoder;
     private final UserMapper userMapper;
-    
+    private final LoginAttemptLimiter loginAttemptLimiter;
+
     @Autowired
-    public AuthServiceImpl(JwtConfig jwtConfig, PasswordEncoder passwordEncoder, UserMapper userMapper) {
+    public AuthServiceImpl(JwtConfig jwtConfig, PasswordEncoder passwordEncoder, UserMapper userMapper,
+                           LoginAttemptLimiter loginAttemptLimiter) {
         this.jwtConfig = jwtConfig;
         this.passwordEncoder = passwordEncoder;
         this.userMapper = userMapper;
+        this.loginAttemptLimiter = loginAttemptLimiter;
     }
     
     @Override
@@ -64,22 +68,29 @@ public class AuthServiceImpl implements AuthService {
     
     @Override
     public UserLoginResponse login(UserLoginRequest request) {
+        // 0. 暴力破解防护：连续失败达阈值后临时锁定
+        String attemptKey = "user:" + (request.getPhoneNumber() == null ? "" : request.getPhoneNumber());
+        loginAttemptLimiter.checkAllowed(attemptKey);
+
         // 1. 根据手机号查询用户
         User user = userMapper.selectByPhoneNumber(request.getPhoneNumber());
         if (user == null) {
+            loginAttemptLimiter.onFailure(attemptKey);
             throw new RuntimeException("手机号或密码错误");
         }
-        
+
         // 2. 验证密码
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            loginAttemptLimiter.onFailure(attemptKey);
             throw new RuntimeException("手机号或密码错误");
         }
-        
+
         // 2.1 校验账号状态
         if (user.getAccountStatus() != null && !"ACTIVE".equals(user.getAccountStatus())) {
             throw new RuntimeException("账号状态异常，已被禁用或冻结，请联系管理员");
         }
-        
+
+        loginAttemptLimiter.onSuccess(attemptKey);
         // 3. 生成JWT令牌（包含角色信息）
         String token = jwtConfig.generateToken(
                 user.getId().toString(),

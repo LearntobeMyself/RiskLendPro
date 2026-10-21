@@ -3,6 +3,7 @@ package org.example.risklendpro.user.admin;
 import org.example.risklendpro.api.security.RolePermissions;
 import org.example.risklendpro.api.security.StaffRoles;
 import org.example.risklendpro.common.security.JwtConfig;
+import org.example.risklendpro.common.security.LoginAttemptLimiter;
 import org.example.risklendpro.user.entity.Admin;
 import org.example.risklendpro.user.mapper.AdminMapper;
 import org.example.risklendpro.user.admin.AdminRegisterRequest;
@@ -21,16 +22,19 @@ import java.util.Map;
 
 @Service
 public class AdminAuthServiceImpl implements AdminAuthService {
-    
+
     private final JwtConfig jwtConfig;
     private final PasswordEncoder passwordEncoder;
     private final AdminMapper adminMapper;
-    
+    private final LoginAttemptLimiter loginAttemptLimiter;
+
     @Autowired
-    public AdminAuthServiceImpl(JwtConfig jwtConfig, PasswordEncoder passwordEncoder, AdminMapper adminMapper) {
+    public AdminAuthServiceImpl(JwtConfig jwtConfig, PasswordEncoder passwordEncoder, AdminMapper adminMapper,
+                                LoginAttemptLimiter loginAttemptLimiter) {
         this.jwtConfig = jwtConfig;
         this.passwordEncoder = passwordEncoder;
         this.adminMapper = adminMapper;
+        this.loginAttemptLimiter = loginAttemptLimiter;
     }
     
     @Override
@@ -63,17 +67,24 @@ public class AdminAuthServiceImpl implements AdminAuthService {
     
     @Override
     public AdminLoginResponse login(AdminLoginRequest request) {
+        // 0. 暴力破解防护：连续失败达阈值后临时锁定
+        String attemptKey = "admin:" + (request.getUsername() == null ? "" : request.getUsername());
+        loginAttemptLimiter.checkAllowed(attemptKey);
+
         // 1. 根据用户名查询管理员
         Admin admin = adminMapper.selectByUsername(request.getUsername());
         if (admin == null) {
+            loginAttemptLimiter.onFailure(attemptKey);
             throw new RuntimeException("用户名或密码错误");
         }
-        
+
         // 2. 验证密码
         if (!passwordEncoder.matches(request.getPassword(), admin.getPassword())) {
+            loginAttemptLimiter.onFailure(attemptKey);
             throw new RuntimeException("用户名或密码错误");
         }
-        
+
+        loginAttemptLimiter.onSuccess(attemptKey);
         // 3. 生成JWT令牌（包含角色信息）
         String role = resolveRole(admin);
         String token = jwtConfig.generateToken(admin.getId().toString(), role);
