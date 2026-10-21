@@ -41,6 +41,11 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** 黑名单全量缓存 60 秒，避免每次申请都全表扫描 credit_data_db.blacklist。 */
+    private static final long BLACKLIST_CACHE_TTL_MS = 60_000L;
+    private volatile List<Blacklist> blacklistCache;
+    private volatile long blacklistCacheLoadedAt;
+
     private static final class Pair<T, U> {
         private final T left;
         private final U right;
@@ -70,6 +75,30 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         return false;
     }
 
+    private List<Blacklist> loadBlacklist() {
+        long now = System.currentTimeMillis();
+        List<Blacklist> cache = blacklistCache;
+        if (cache != null && now - blacklistCacheLoadedAt < BLACKLIST_CACHE_TTL_MS) {
+            return cache;
+        }
+        synchronized (this) {
+            cache = blacklistCache;
+            if (cache != null && now - blacklistCacheLoadedAt < BLACKLIST_CACHE_TTL_MS) {
+                return cache;
+            }
+            List<Blacklist> fresh = blacklistMapper.selectAll();
+            blacklistCache = fresh;
+            blacklistCacheLoadedAt = now;
+            return fresh;
+        }
+    }
+
+    /** 黑名单同步完成后可主动清缓存。 */
+    public void clearBlacklistCache() {
+        blacklistCache = null;
+        blacklistCacheLoadedAt = 0L;
+    }
+
     @Override
     public CreditScoreEngine.BlacklistMatchResult checkBlacklist(String name, String idCard) {
         if (name == null || name.trim().isEmpty()) {
@@ -79,7 +108,7 @@ public class CreditScoreEngineImpl implements CreditScoreEngine {
         String areaCode = extractAreaCodeFromIdCard(idCard);
         Integer birthYear = extractBirthYearFromIdCard(idCard);
 
-        List<Blacklist> allBlacklist = blacklistMapper.selectAll();
+        List<Blacklist> allBlacklist = loadBlacklist();
 
         Blacklist bestNameArea = null;
         Blacklist bestNameOnly = null;

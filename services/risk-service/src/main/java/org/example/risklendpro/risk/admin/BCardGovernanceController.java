@@ -4,6 +4,7 @@ import org.example.risklendpro.risk.bcard.BCardModelRegistryService;
 import org.example.risklendpro.risk.bcard.BCardModelRegistryStore;
 import org.example.risklendpro.risk.bcard.BCardMonitorMetrics;
 import org.example.risklendpro.risk.bcard.BCardMonitorService;
+import org.example.risklendpro.risk.fraud.FraudMonitorService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,6 +33,9 @@ public class BCardGovernanceController {
 
     @Autowired
     private BCardMonitorService monitorService;
+
+    @Autowired
+    private FraudMonitorService fraudMonitorService;
 
     /** 注册候选模型（不激活）。 */
     @PostMapping("/models")
@@ -94,6 +98,25 @@ public class BCardGovernanceController {
             @RequestParam(value = "date", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return monitorService.runDaily(date == null ? LocalDate.now() : date);
+    }
+
+    /** 立即执行一次反欺诈扫描（黑名单 + 外部特征 + B 卡动态）。 */
+    @PostMapping("/fraud/scan")
+    public List<Map<String, Object>> scanFraud(
+            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit) {
+        return fraudMonitorService.scanHighRiskUsers(limit);
+    }
+
+    /** 近 30 天反欺诈/早期逾期预警列表。 */
+    @GetMapping("/fraud/warnings")
+    public List<Map<String, Object>> fraudWarnings() {
+        return fraudMonitorService.listWarnings();
+    }
+
+    @PostMapping("/fraud/warnings/{id}/ack")
+    public Map<String, Object> acknowledgeFraud(@PathVariable("id") long id,
+                                               @RequestParam(value = "actor", required = false) String actor) {
+        return Map.of("updated", fraudMonitorService.acknowledge(id, actor));
     }
 
     /** 注册请求体。 */
