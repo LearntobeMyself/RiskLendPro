@@ -169,8 +169,10 @@ public class InternalLoanController implements LoanApi {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public CreditLimitSnapshot upsertBehaviorScore(CreditBehaviorUpsertCommand command) {
-        UserCreditLimit limit = findLimit(command.userId());
+        // FOR UPDATE 行锁 + 事务：行为分/BCard 写入为读改写模式，无锁时并发调用会丢失更新
+        UserCreditLimit limit = findLimitForUpdate(command.userId());
         if (limit == null) {
             return null;
         }

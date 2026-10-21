@@ -21,6 +21,7 @@ import org.example.risklendpro.common.admin.AdminExportHelper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -107,12 +108,14 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         if (loanId != null) {
             qw.eq("loan_id", loanId);
         }
-        if (status != null && !status.isBlank()) {
-            if ("APPROVED".equals(status)) {
-                qw.eq("status", LoanStatusEnum.DISBURSED.getCode());
-            } else if ("REJECTED".equals(status)) {
-                qw.eq("status", LoanStatusEnum.REJECTED.getCode());
+        if (StringUtils.hasText(status)) {
+            // 白名单校验：未知过滤值直接拒绝，而非静默忽略让前端误以为过滤生效
+            if (!"APPROVED".equals(status) && !"REJECTED".equals(status)) {
+                throw new RuntimeException("不支持的状态过滤值，仅允许 APPROVED / REJECTED");
             }
+            qw.eq("status", "APPROVED".equals(status)
+                    ? LoanStatusEnum.DISBURSED.getCode()
+                    : LoanStatusEnum.REJECTED.getCode());
         }
         Date start = AdminDateHelper.parseDateStart(startDate);
         Date end = AdminDateHelper.parseDateEnd(endDate);

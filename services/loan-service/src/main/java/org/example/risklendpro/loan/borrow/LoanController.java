@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 
 @Tag(name = "借款/支用模块", description = "借款相关接口")
 @RestController
@@ -29,7 +30,7 @@ public class LoanController {
     
     @Operation(summary = "发起借款请求", description = "用户输入\"借款金额\"和\"还款期限\"，系统判断借款金额与用户剩余额度的关系")
     @PostMapping("/request")
-    public CommonResponse<LoanResponse> request(@RequestBody LoanRequest request, HttpServletRequest httpRequest) {
+    public CommonResponse<LoanResponse> request(@Valid @RequestBody LoanRequest request, HttpServletRequest httpRequest) {
         Long userId = SecurityUtils.getUserIdFromRequest(httpRequest);
         LoanResponse response = loanService.requestLoan(userId, request);
         if (response.getAutoApproved() != null && response.getAutoApproved()) {
@@ -46,9 +47,11 @@ public class LoanController {
             @RequestParam(required = false, defaultValue = "1") Integer pageNum,
             @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
         Long userId = SecurityUtils.getUserIdFromRequest(httpRequest);
-        return CommonResponse.success("获取借款记录成功", loanService.getUserLoanHistory(userId, pageNum, pageSize));
+        // 分页大小钳制，防止 pageSize=100000 拖垮 DB
+        return CommonResponse.success("获取借款记录成功",
+                loanService.getUserLoanHistory(userId, pageNum, Math.min(pageSize, 100)));
     }
-    
+
     @Operation(summary = "获取用户贷款申请记录", description = "获取用户提交的贷款申请记录，包含待审批和已审批结果")
     @GetMapping("/user/applications")
     public CommonResponse<Object> applications(
@@ -57,6 +60,7 @@ public class LoanController {
             @RequestParam(required = false, defaultValue = "1") Integer pageNum,
             @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
         Long userId = SecurityUtils.getUserIdFromRequest(httpRequest);
-        return CommonResponse.success("获取贷款申请记录成功", loanService.getUserLoanApplications(userId, status, pageNum, pageSize));
+        return CommonResponse.success("获取贷款申请记录成功",
+                loanService.getUserLoanApplications(userId, status, pageNum, Math.min(pageSize, 100)));
     }
 }
