@@ -231,12 +231,28 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
     public Map<String, Object> listMultiLoan(Integer page, Integer size, Integer minActiveLoans) {
         int threshold = minActiveLoans != null ? minActiveLoans : 2;
         List<UserSummary> users = userServiceClient.listAllUsers();
+        // 一次批量取回全部身份证号对应的外部特征，替代逐人单查的 N+1
+        List<String> idCards = users.stream()
+                .map(UserSummary::idCard)
+                .filter(c -> c != null && !c.isBlank())
+                .distinct()
+                .toList();
+        Map<String, UserExternalFeatures> extByIdCard = new HashMap<>();
+        if (!idCards.isEmpty()) {
+            List<UserExternalFeatures> exts = userExternalFeaturesMapper.selectByIdCards(idCards);
+            if (exts != null) {
+                for (UserExternalFeatures ext : exts) {
+                    // 与单查 LIMIT 1 语义一致：同证多行时取第一条
+                    extByIdCard.putIfAbsent(ext.getIdCard(), ext);
+                }
+            }
+        }
         List<Map<String, Object>> matched = new ArrayList<>();
         for (UserSummary user : users) {
             if (user.idCard() == null) {
                 continue;
             }
-            UserExternalFeatures ext = userExternalFeaturesMapper.selectByIdCard(user.idCard());
+            UserExternalFeatures ext = extByIdCard.get(user.idCard());
             if (ext != null && ext.getActiveLoansCount() != null && ext.getActiveLoansCount() >= threshold) {
                 Map<String, Object> item = new HashMap<>();
                 item.put("userId", user.id());
