@@ -306,15 +306,20 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
         List<RiskAssessment> list = riskAssessmentMapper.selectList(qw);
         List<String> headers = List.of("applyId", "userId", "name", "totalScore", "status", "submitTime");
         List<List<String>> rows = list.stream().map(a -> List.of(
-                a.getApplyId(),
-                String.valueOf(a.getUserId()),
-                a.getName(),
-                String.valueOf(a.getTotalScore()),
-                a.getStatus(),
-                AdminDateHelper.formatDateTime(a.getSubmitTime())
+                csvCell(a.getApplyId()),
+                csvCell(a.getUserId()),
+                csvCell(a.getName()),
+                csvCell(a.getTotalScore()),
+                csvCell(a.getStatus()),
+                csvCell(AdminDateHelper.formatDateTime(a.getSubmitTime()))
         )).toList();
         String path = adminExportHelper.writeCsv("risk-export", headers, rows);
         return adminExportHelper.downloadMeta(path);
+    }
+
+    /** CSV 单元格空值安全：null 输出空串而非字面量 "null" 或 NPE。 */
+    private String csvCell(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private Map<String, Object> toScoreItem(RiskAssessment a) {

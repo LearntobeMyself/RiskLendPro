@@ -306,12 +306,14 @@ public class RiskAssessmentServiceImpl implements RiskAssessmentService {
         return response;
     }
 
+    /** 冷却天数按自然日计算，避免毫秒除法随提交时刻漂移（±1 天）。 */
     private long calculateDaysSinceLastApply(Date lastSubmitTime) {
         if (lastSubmitTime == null) {
             return 30;
         }
-        long diff = new Date().getTime() - lastSubmitTime.getTime();
-        return diff / (1000 * 60 * 60 * 24);
+        java.time.LocalDate lastDate = Instant.ofEpochMilli(lastSubmitTime.getTime())
+                .atZone(java.time.ZoneId.systemDefault()).toLocalDate();
+        return java.time.temporal.ChronoUnit.DAYS.between(lastDate, java.time.LocalDate.now());
     }
 
     @Override

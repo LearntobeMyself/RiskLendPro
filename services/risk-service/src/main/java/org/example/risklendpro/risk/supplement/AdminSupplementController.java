@@ -65,8 +65,17 @@ public class AdminSupplementController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition)
                 .header("X-Content-Type-Options", "nosniff")
-                .contentType(MediaType.parseMediaType(contentType))
+                .contentType(parseSafely(contentType))
                 .body(resource);
+    }
+
+    /** 客户端上传的 MIME 可能含非法字符，解析失败时回退 octet-stream 而非抛 500。 */
+    private MediaType parseSafely(String contentType) {
+        try {
+            return MediaType.parseMediaType(contentType);
+        } catch (Exception e) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
     }
 
     /** 仅在白名单扩展名内采信 MIME，否则一律 octet-stream，避免上传时伪造 text/html 导致 XSS。 */
