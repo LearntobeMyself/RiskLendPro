@@ -79,6 +79,7 @@ public class CsSchemaInitializer implements ApplicationRunner {
                   category        VARCHAR(32)   NOT NULL COMMENT '问题分类：ACCOUNT/RISK/LOAN/REPAYMENT/OTHER',
                   description     VARCHAR(1000) NOT NULL COMMENT '用户描述',
                   involves_money  TINYINT       NOT NULL DEFAULT 0 COMMENT '是否涉及资金 0/1',
+                  priority        VARCHAR(16)   NOT NULL DEFAULT 'MEDIUM' COMMENT '优先级：LOW/MEDIUM/HIGH',
                   biz_id          VARCHAR(64)   NULL COMMENT '关联业务ID（申请编号/借款编号等）',
                   status          VARCHAR(16)   NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING=待处理, PROCESSING=处理中, CLOSED=已关闭',
                   handler_id      BIGINT        NULL COMMENT '处理人（管理员ID）',
@@ -104,5 +105,19 @@ public class CsSchemaInitializer implements ApplicationRunner {
                   KEY idx_create_time (create_time)
                 ) COMMENT '客服审计日志'
                 """);
+        ensureTicketPriorityColumn();
+    }
+
+    /** 已存在 cs_ticket 表时幂等补齐 priority 列（MySQL 8 无 ADD COLUMN IF NOT EXISTS）。 */
+    private void ensureTicketPriorityColumn() {
+        Integer cnt = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                        + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cs_ticket' AND COLUMN_NAME = 'priority'",
+                Integer.class);
+        if (cnt == null || cnt == 0) {
+            jdbcTemplate.execute("ALTER TABLE cs_ticket ADD COLUMN priority VARCHAR(16) NOT NULL DEFAULT 'MEDIUM' "
+                    + "COMMENT '优先级：LOW/MEDIUM/HIGH' AFTER involves_money");
+            log.info("cs_ticket 表已补齐 priority 列");
+        }
     }
 }

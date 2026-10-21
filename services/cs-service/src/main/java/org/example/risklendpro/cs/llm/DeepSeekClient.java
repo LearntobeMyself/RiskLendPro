@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -44,16 +45,28 @@ public class DeepSeekClient {
     }
 
     public LlmReply chat(String systemPrompt, String userMessage) {
+        return chatWithHistory(systemPrompt, List.of(), userMessage);
+    }
+
+    /**
+     * 多轮对话。history 为按时间顺序的 [role, content] 消息（role=user/assistant，不含 system），
+     * 末尾追加当前 user 消息，实现上下文记忆。
+     */
+    public LlmReply chatWithHistory(String systemPrompt, List<Map<String, String>> history, String userMessage) {
         if (props.getApiKey() == null || props.getApiKey().isBlank()) {
             throw new IllegalStateException("cs.llm.api-key 未配置，无法调用大模型");
         }
 
+        List<Map<String, String>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", systemPrompt));
+        for (Map<String, String> turn : history) {
+            messages.add(Map.of("role", turn.get("role"), "content", turn.get("content")));
+        }
+        messages.add(Map.of("role", "user", "content", userMessage));
+
         Map<String, Object> body = Map.of(
                 "model", props.getModel(),
-                "messages", List.of(
-                        Map.of("role", "system", "content", systemPrompt),
-                        Map.of("role", "user", "content", userMessage)
-                ),
+                "messages", messages,
                 "max_tokens", props.getMaxTokens(),
                 "temperature", props.getTemperature()
         );

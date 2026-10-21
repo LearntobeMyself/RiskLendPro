@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS cs_ticket (
   category        VARCHAR(32)   NOT NULL COMMENT '问题分类：ACCOUNT/RISK/LOAN/REPAYMENT/OTHER',
   description     VARCHAR(1000) NOT NULL COMMENT '用户描述',
   involves_money  TINYINT       NOT NULL DEFAULT 0 COMMENT '是否涉及资金 0/1',
+  priority        VARCHAR(16)   NOT NULL DEFAULT 'MEDIUM' COMMENT '优先级：LOW/MEDIUM/HIGH',
   biz_id          VARCHAR(64)   NULL COMMENT '关联业务ID（申请编号/借款编号等）',
   status          VARCHAR(16)   NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING=待处理, PROCESSING=处理中, CLOSED=已关闭',
   handler_id      BIGINT        NULL COMMENT '处理人（管理员ID）',

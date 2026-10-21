@@ -36,12 +36,29 @@ public class CsTicketService {
         ticket.setCategory(req.getCategory());
         ticket.setDescription(req.getDescription());
         ticket.setInvolvesMoney(req.getInvolvesMoney() == null ? 0 : req.getInvolvesMoney());
+        ticket.setPriority(req.getPriority() == null || req.getPriority().isBlank()
+                ? inferPriority(req) : req.getPriority());
         ticket.setBizId(req.getBizId());
         ticket.setStatus("PENDING");
         ticketMapper.insert(ticket);
         auditService.record(userId, CsAuditService.ACTION_TICKET_CREATE, "ticket",
                 String.valueOf(ticket.getId()), "category=" + req.getCategory());
         return ticket.getId();
+    }
+
+    /** 根据工单内容推断优先级：涉及资金或投诉/争议/逾期等 -> HIGH，否则 MEDIUM。 */
+    private String inferPriority(TicketCreateRequest req) {
+        if (req.getInvolvesMoney() != null && req.getInvolvesMoney() == 1) {
+            return "HIGH";
+        }
+        String desc = req.getDescription() == null ? "" : req.getDescription();
+        String[] highKeys = {"投诉", "争议", "逾期", "冻结", "资金", "退款", "到账", "诈骗", "泄露", "解冻"};
+        for (String key : highKeys) {
+            if (desc.contains(key)) {
+                return "HIGH";
+            }
+        }
+        return "MEDIUM";
     }
 
     public List<TicketVO> myTickets(Long userId) {
@@ -112,6 +129,7 @@ public class CsTicketService {
         vo.setCategory(t.getCategory());
         vo.setDescription(t.getDescription());
         vo.setInvolvesMoney(t.getInvolvesMoney());
+        vo.setPriority(t.getPriority());
         vo.setBizId(t.getBizId());
         vo.setStatus(t.getStatus());
         vo.setHandlerId(t.getHandlerId());

@@ -15,6 +15,7 @@ public class TicketVO {
     private String category;
     private String description;
     private Integer involvesMoney;
+    private String priority;
     private String bizId;
     private String status;
     private Long handlerId;

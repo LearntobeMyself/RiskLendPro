@@ -22,6 +22,9 @@ public class TicketCreateRequest {
     @Schema(description = "是否涉及资金 0/1")
     private Integer involvesMoney;
 
+    @Schema(description = "优先级：LOW/MEDIUM/HIGH（可留空，由系统按内容推断）")
+    private String priority;
+
     @Schema(description = "关联业务ID（申请编号/借款编号等）")
     private String bizId;
 }

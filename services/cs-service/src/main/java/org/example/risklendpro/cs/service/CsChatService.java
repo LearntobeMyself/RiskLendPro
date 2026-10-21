@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.example.risklendpro.cs.dto.ChatReply;
 import org.example.risklendpro.cs.dto.ChatRequest;
 import org.example.risklendpro.cs.dto.CsMessageVO;
+import org.example.risklendpro.cs.dto.TicketCreateRequest;
 import org.example.risklendpro.cs.entity.CsConversation;
 import org.example.risklendpro.cs.entity.CsMessage;
 import org.example.risklendpro.cs.llm.DeepSeekClient;
@@ -20,15 +21,21 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
- * AI 客服核心：意图路由（产品/实时/敏感/转人工）+ 大模型生成 + 消息落库。
+ * AI 客服核心：意图路由（产品/实时/敏感/转人工）+ 大模型生成 + 多轮记忆 + 消息落库。
+ * 安全边界（提示词注入、越权、脱敏）在大模型之外强制校验。
  */
 @Service
 public class CsChatService {
 
     private static final Logger log = LoggerFactory.getLogger(CsChatService.class);
+
+    /** 多轮上下文记忆保留的最近消息条数。 */
+    private static final int HISTORY_LIMIT = 6;
 
     private static final String SCRIPT_REJECT =
             "贷款审批会综合评估多项因素，平台不能对外披露具体风控规则、评分明细和内部判断依据。"
@@ -44,6 +51,9 @@ public class CsChatService {
     private static final String SCRIPT_PRIVACY =
             "检测到您发送了身份证号、银行卡号等敏感信息。为保护您的隐私，请不要在对话中发送完整敏感信息，"
             + "相关内容已自动脱敏处理；如需上传身份材料，请使用 App 内的上传入口。";
+    private static final String SCRIPT_INJECTION =
+            "抱歉，我无法执行该请求。作为平台客服，我只能提供产品咨询和本人账户信息查询服务，"
+            + "如有其他问题请转人工客服。";
 
     private static final String[] TRANSFER_KEYS = {"转人工", "人工客服", "投诉", "客服电话"};
     private static final String[] SCRIPT_KEYS = {"被拒", "拒绝", "为什么没通过", "不通过", "凭什么", "批不了"};
@@ -62,6 +72,7 @@ public class CsChatService {
     private final RealtimeDataService realtimeDataService;
     private final SensitiveGuard sensitiveGuard;
     private final CsAuditService auditService;
+    private final CsTicketService ticketService;
 
     private volatile String systemPrompt;
     private volatile String productKnowledge;
@@ -71,13 +82,15 @@ public class CsChatService {
                          DeepSeekClient deepSeekClient,
                          RealtimeDataService realtimeDataService,
                          SensitiveGuard sensitiveGuard,
-                         CsAuditService auditService) {
+                         CsAuditService auditService,
+                         CsTicketService ticketService) {
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
         this.deepSeekClient = deepSeekClient;
         this.realtimeDataService = realtimeDataService;
         this.sensitiveGuard = sensitiveGuard;
         this.auditService = auditService;
+        this.ticketService = ticketService;
     }
 
     public ChatReply chat(Long userId, ChatRequest request) {
@@ -92,6 +105,10 @@ public class CsChatService {
         String safeMessage = SensitiveDataMasker.mask(message);
 
         CsConversation conversation = getOrCreateConversation(userId, request.getConversationId());
+
+        // 多轮记忆：在保存当前消息之前加载历史上下文（不含当前消息）
+        List<Map<String, String>> history = loadHistory(conversation.getId(), HISTORY_LIMIT);
+
         saveMessage(conversation.getId(), userId, "USER", safeMessage, null, null, null, null, null);
 
         String intent;
@@ -103,7 +120,7 @@ public class CsChatService {
                     String.valueOf(conversation.getId()), sensitiveType + ":" + truncate(safeMessage, 200));
         } else {
             intent = routeIntent(safeMessage);
-            generated = generate(userId, intent, safeMessage);
+            generated = generate(userId, intent, safeMessage, conversation.getId(), history);
             if ("REALTIME".equals(intent)) {
                 auditService.record(userId, CsAuditService.ACTION_REALTIME_QUERY, "message",
                         String.valueOf(conversation.getId()), truncate(safeMessage, 200));
@@ -146,23 +163,42 @@ public class CsChatService {
                 .toList();
     }
 
-    private GeneratedReply generate(Long userId, String intent, String message) {
+    private GeneratedReply generate(Long userId, String intent, String message,
+                                    Long conversationId, List<Map<String, String>> history) {
         switch (intent) {
             case "TRANSFER":
-                return GeneratedReply.script(SCRIPT_TRANSFER);
+                return generateTransfer(userId, conversationId, message);
             case "SCRIPT":
                 return GeneratedReply.script(SCRIPT_REJECT);
             case "REALTIME":
                 return generateRealtime(userId, message);
             default:
                 try {
-                    LlmReply llm = deepSeekClient.chat(buildSystemPrompt(), message);
+                    LlmReply llm = deepSeekClient.chatWithHistory(buildSystemPrompt(), history, message);
                     return new GeneratedReply(llm.getContent(), llm.getModel(), llm.getRequestId(),
                             llm.getPromptTokens(), llm.getCompletionTokens());
                 } catch (Exception e) {
                     log.warn("大模型调用失败，降级为固定话术: {}", e.getMessage());
                     return GeneratedReply.script(SCRIPT_FALLBACK);
                 }
+        }
+    }
+
+    /** 转人工：自动创建工单，并把工单号返回给用户。 */
+    private GeneratedReply generateTransfer(Long userId, Long conversationId, String message) {
+        try {
+            TicketCreateRequest req = new TicketCreateRequest();
+            req.setConversationId(conversationId);
+            req.setCategory(inferCategory(message));
+            req.setDescription(message);
+            req.setInvolvesMoney(involvesMoney(message) ? 1 : 0);
+            Long ticketId = ticketService.create(userId, req);
+            String content = "正在为您转接人工客服，已为您生成工单（编号 #" + ticketId + "）。"
+                    + "请提供手机号和问题描述，人工客服会在服务时间内尽快处理。";
+            return GeneratedReply.script(content);
+        } catch (Exception e) {
+            log.warn("转人工自动建单失败，降级为引导话术: {}", e.getMessage());
+            return GeneratedReply.script(SCRIPT_TRANSFER);
         }
     }
 
@@ -178,6 +214,7 @@ public class CsChatService {
 
     private GeneratedReply sensitiveReply(String sensitiveType) {
         String content = switch (sensitiveType) {
+            case SensitiveGuard.PROMPT_INJECTION -> SCRIPT_INJECTION;
             case SensitiveGuard.UNAUTHORIZED -> SCRIPT_UNAUTHORIZED;
             case SensitiveGuard.PRIVACY_DATA -> SCRIPT_PRIVACY;
             default -> SCRIPT_REJECT;
@@ -191,6 +228,36 @@ public class CsChatService {
         if (containsAny(message, PRODUCT_NAME_KEYS)) return "PRODUCT";
         if (containsAny(message, REALTIME_KEYS)) return "REALTIME";
         return "PRODUCT";
+    }
+
+    /** 根据消息内容推断工单分类。 */
+    private String inferCategory(String message) {
+        if (containsAny(message, new String[]{"还款", "结清", "逾期", "账单", "扣款"})) return "REPAYMENT";
+        if (containsAny(message, new String[]{"额度", "借款", "放款", "到账", "提现"})) return "LOAN";
+        if (containsAny(message, new String[]{"评估", "审批", "拒绝", "风控"})) return "RISK";
+        if (containsAny(message, new String[]{"账号", "登录", "密码", "身份", "冻结"})) return "ACCOUNT";
+        return "OTHER";
+    }
+
+    private boolean involvesMoney(String message) {
+        return containsAny(message, new String[]{
+                "还款", "退款", "扣款", "金额", "到账", "额度", "利息", "费用", "结清", "提现"});
+    }
+
+    /** 加载会话最近 limit 条消息作为多轮上下文（不含当前消息），按时间正序返回。 */
+    private List<Map<String, String>> loadHistory(Long conversationId, int limit) {
+        LambdaQueryWrapper<CsMessage> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CsMessage::getConversationId, conversationId)
+                .orderByDesc(CsMessage::getCreateTime)
+                .last("LIMIT " + limit);
+        List<CsMessage> recent = messageMapper.selectList(wrapper);
+        List<Map<String, String>> history = new ArrayList<>();
+        for (int i = recent.size() - 1; i >= 0; i--) {
+            CsMessage m = recent.get(i);
+            String role = "USER".equalsIgnoreCase(m.getRole()) ? "user" : "assistant";
+            history.add(Map.of("role", role, "content", m.getContent() == null ? "" : m.getContent()));
+        }
+        return history;
     }
 
     private CsConversation getOrCreateConversation(Long userId, Long conversationId) {
