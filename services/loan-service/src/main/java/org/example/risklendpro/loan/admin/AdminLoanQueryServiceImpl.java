@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
@@ -124,17 +125,24 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
         qw.orderByDesc("approve_time");
 
         Page<Loan> result = loanMapper.selectPage(pageInfo, qw);
+        // 批量预取：用户信息一次、审批人姓名按去重后逐个解析，
+        // 替代原先每行 getUser + getAdmin 的 2N 次 Feign（单页 20 行即 40 次 HTTP）。
+        Map<Long, UserSummary> userCache = new HashMap<>();
+        prefetchRecords(result.getRecords(), userCache, new HashMap<>());
+        Map<Long, String> reviewerNames = resolveReviewerNames(result.getRecords());
         List<Map<String, Object>> list = new ArrayList<>();
         for (Loan loan : result.getRecords()) {
-            UserSummary user = userServiceClient.getUser(loan.getUserId());
-            AdminProfile reviewer = loan.getOperatorId() != null ? userServiceClient.getAdmin(loan.getOperatorId()) : null;
+            UserSummary user = userCache.get(loan.getUserId());
+            String reviewerName = loan.getOperatorId() != null
+                    ? reviewerNames.getOrDefault(loan.getOperatorId(), "admin")
+                    : "admin";
             String recordStatus = LoanStatusEnum.REJECTED.getCode().equals(loan.getStatus()) ? "REJECTED" : "APPROVED";
             Map<String, Object> item = new HashMap<>();
             item.put("id", loan.getLoanId() + "-" + AdminDateHelper.formatDateTime(loan.getApproveTime()).replaceAll("[^0-9]", ""));
             item.put("loanId", loan.getLoanId());
             item.put("userId", loan.getUserId());
             item.put("reviewerId", loan.getOperatorId() != null ? loan.getOperatorId() : 1L);
-            item.put("reviewerName", reviewer != null ? reviewer.username() : "admin");
+            item.put("reviewerName", reviewerName);
             item.put("applicantName", user != null ? user.realName() : "未知");
             item.put("status", recordStatus);
             item.put("comment", loan.getRejectReason() != null ? loan.getRejectReason() : "审批通过");
@@ -143,6 +151,28 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
             list.add(item);
         }
         return AdminPageHelper.toListPage(list, result.getTotal());
+    }
+
+    /** 按请求内去重解析审批人姓名：distinct(管理员数) 次 Feign，单个失败回退 "admin"。 */
+    private Map<Long, String> resolveReviewerNames(List<Loan> loans) {
+        Map<Long, String> names = new HashMap<>();
+        Set<Long> distinct = new HashSet<>();
+        for (Loan loan : loans) {
+            if (loan.getOperatorId() != null) {
+                distinct.add(loan.getOperatorId());
+            }
+        }
+        for (Long operatorId : distinct) {
+            try {
+                AdminProfile reviewer = userServiceClient.getAdmin(operatorId);
+                if (reviewer != null && reviewer.username() != null && !reviewer.username().isBlank()) {
+                    names.put(operatorId, reviewer.username());
+                }
+            } catch (Exception ignored) {
+                // 审批人不存在或用户域不可用时保持 "admin" 兜底
+            }
+        }
+        return names;
     }
 
     @Override
@@ -240,10 +270,15 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
     public Map<String, Object> exportRecords(String status, String userName, String startDate, String endDate) {
         QueryWrapper<Loan> qw = buildRecordQuery(status, userName, startDate, endDate);
         List<Loan> loans = loanMapper.selectList(qw);
+        // 批量预取用户与还款计划，替代逐行 getUser + plan 查询的 N+1（导出全量行时尤为致命）
+        Map<Long, UserSummary> userCache = new HashMap<>();
+        Map<Long, RepaymentPlan> planCache = new HashMap<>();
+        prefetchRecords(loans, userCache, planCache);
         List<String> headers = List.of("loanId", "userId", "userName", "loanAmount", "status", "loanTime");
         List<List<String>> rows = new ArrayList<>();
         for (Loan loan : loans) {
-            Map<String, Object> item = buildRecordItem(loan);
+            Map<String, Object> item = buildRecordItem(loan,
+                    userCache.get(loan.getUserId()), planCache.get(loan.getLoanId()));
             rows.add(List.of(
                     String.valueOf(item.get("loanId")),
                     String.valueOf(item.get("userId")),
