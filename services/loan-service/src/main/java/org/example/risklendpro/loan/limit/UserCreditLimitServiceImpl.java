@@ -73,8 +73,9 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
         queryWrapper.eq("user_id", userId);
         UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(queryWrapper);
 
+        // 尚未开通额度的用户直接返回零值快照，避免 500；读接口不应产生写副作用。
         if (creditLimit == null) {
-            throw new RuntimeException("用户额度信息不存在");
+            return zeroCreditLimit(userId);
         }
 
         UserCreditLimitResponse response = new UserCreditLimitResponse();
@@ -86,6 +87,17 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
         response.setHasOverdue(creditLimit.getHasOverdue());
         response.setLastUpdateTime(creditLimit.getLastUpdateTime());
 
+        return response;
+    }
+
+    private UserCreditLimitResponse zeroCreditLimit(Long userId) {
+        UserCreditLimitResponse response = new UserCreditLimitResponse();
+        response.setUserId(userId);
+        response.setTotalLimit(BigDecimal.ZERO);
+        response.setUsedLimit(BigDecimal.ZERO);
+        response.setRemainingLimit(BigDecimal.ZERO);
+        response.setOverdueAmount(BigDecimal.ZERO);
+        response.setHasOverdue(false);
         return response;
     }
 
