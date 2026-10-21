@@ -22,6 +22,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
@@ -112,10 +115,9 @@ public class RepaymentScheduleTask {
             return;
         }
 
-        long diffMillis = today.getTime() - dueDate.getTime();
-        long diffDays = diffMillis / (1000 * 60 * 60 * 24);
+        long diffDays = daysSinceDue(dueDate, today);
 
-        if (diffDays == 3) {
+        if (diffDays == -3) {
             sendReminderEmail(user, currentRecord, dueDate);
         } else if (diffDays == 0) {
             sendDueTodayEmail(user, currentRecord);
@@ -146,8 +148,7 @@ public class RepaymentScheduleTask {
             return;
         }
 
-        long diffMillis = today.getTime() - dueDate.getTime();
-        long diffDays = diffMillis / (1000 * 60 * 60 * 24);
+        long diffDays = daysSinceDue(dueDate, today);
 
         if (diffDays >= 1) {
             String oldLevel = plan.getOverdueLevel();
@@ -186,6 +187,16 @@ public class RepaymentScheduleTask {
     private static boolean isRepaid(RepaymentRecord record) {
         String status = record.getStatus();
         return "COMPLETED".equals(status) || "PAID".equals(status) || "SETTLED".equals(status);
+    }
+
+    /**
+     * 按自然日计算今天相对到期日的天数差（忽略时分秒）：
+     * 负数表示距到期还有几天（如 -3 即提前3天），0 表示到期当天，正数表示已逾期天数。
+     */
+    private static long daysSinceDue(Date dueDate, Date today) {
+        LocalDate due = dueDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate now = today.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        return ChronoUnit.DAYS.between(due, now);
     }
 
     private void sendReminderEmail(UserSummary user, RepaymentRecord record, Date dueDate) {
