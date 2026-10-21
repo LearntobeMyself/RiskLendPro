@@ -50,6 +50,9 @@ class OverdueLimitAdjustTaskTest {
     @Mock
     private RiskServiceClient riskServiceClient;
 
+    @Mock
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     @Test
     void skipsBcardAdjustmentWhenDecisionNotAllowed() {
         setSwitches(true, false);
