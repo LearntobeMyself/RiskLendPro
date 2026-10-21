@@ -9,11 +9,9 @@ import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -39,10 +37,10 @@ public class RepaymentScheduleTask {
     private RepaymentRecordMapper repaymentRecordMapper;
 
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
+    private LoanMapper loanMapper;
 
     @Autowired
-    private LoanMapper loanMapper;
+    private OverdueStateSync overdueStateSync;
 
     @Autowired
     private EmailUtil emailUtil;
@@ -158,6 +156,8 @@ public class RepaymentScheduleTask {
             String oldLevel = plan.getOverdueLevel();
             updateOverdueLevel(plan, (int) diffDays);
             markLoanOverdue(plan.getLoanId());
+            // 自愈：首逾当日若中断导致 hasOverdue/overdueAmount 缺失，这里按事实源重算补齐
+            overdueStateSync.syncUserOverdueState(plan.getUserId());
             riskServiceClient.recalculateBehaviorScore(plan.getUserId());
 
             // 逾期等级升级（M1→M2→M3→M4）时再次发送催收邮件，实现持续催收
@@ -235,7 +235,7 @@ public class RepaymentScheduleTask {
         repaymentPlanMapper.updateById(plan);
         markLoanOverdue(plan.getLoanId());
 
-        updateUserCreditLimit(plan.getUserId(), record.getAmount(), true);
+        overdueStateSync.syncUserOverdueState(plan.getUserId());
 
         riskServiceClient.recalculateBehaviorScore(plan.getUserId());
 
@@ -309,20 +309,5 @@ public class RepaymentScheduleTask {
         loan.setStatus(LoanStatusEnum.OVERDUE.getCode());
         loan.setUpdateTime(new Date());
         loanMapper.updateById(loan);
-    }
-
-    private void updateUserCreditLimit(Long userId, java.math.BigDecimal overdueAmount, boolean hasOverdue) {
-        UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId).last("FOR UPDATE")
-        );
-
-        if (creditLimit != null) {
-            if (overdueAmount != null && overdueAmount.compareTo(java.math.BigDecimal.ZERO) > 0) {
-                creditLimit.setOverdueAmount(creditLimit.getOverdueAmount().add(overdueAmount));
-            }
-            creditLimit.setHasOverdue(hasOverdue);
-            creditLimit.setLastUpdateTime(new Date());
-            userCreditLimitMapper.updateById(creditLimit);
-        }
     }
 }
