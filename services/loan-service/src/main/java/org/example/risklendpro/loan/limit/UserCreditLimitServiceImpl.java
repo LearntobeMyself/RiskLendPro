@@ -136,10 +136,13 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
     }
 
     private void autoDisbursePendingLoans(Long userId, UserCreditLimit creditLimit) {
+        // 仅信用类（无抵押物）申请可因额度上调自动放款；
+        // 抵押类 PENDING_APPROVAL 必须经管理员人工确认抵押物后放款，不得自动处理。
         List<Loan> pendingLoans = loanMapper.selectList(
                 new QueryWrapper<Loan>()
                         .eq("user_id", userId)
                         .eq("status", LoanStatusEnum.PENDING_APPROVAL.getCode())
+                        .isNull("collateral_type")
                         .orderByAsc("apply_time")
         );
         if (pendingLoans == null || pendingLoans.isEmpty()) {
