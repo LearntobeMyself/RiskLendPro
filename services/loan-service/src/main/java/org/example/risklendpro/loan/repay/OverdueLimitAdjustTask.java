@@ -17,7 +17,8 @@ import org.springframework.beans.factory.annotation.Value;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.Date;
@@ -47,6 +48,9 @@ public class OverdueLimitAdjustTask {
     @Autowired
     private RiskServiceClient riskServiceClient;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -63,22 +67,23 @@ public class OverdueLimitAdjustTask {
 
     @Scheduled(cron = "0 0 2 * * ?")
     @SchedulerLock(name = "overdueLimitAdjust", lockAtMostFor = "PT30M", lockAtLeastFor = "PT10S")
-    @Transactional
     public void autoAdjustOverdueUserLimit() {
         QueryWrapper<UserCreditLimit> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("has_overdue", true);
         List<UserCreditLimit> overdueUsers = userCreditLimitMapper.selectList(queryWrapper);
 
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
         for (UserCreditLimit creditLimit : overdueUsers) {
-            if (Boolean.TRUE.equals(creditLimit.getBCardEnabled())) {
-                riskServiceClient.recalculateBehaviorScore(creditLimit.getUserId());
-                // 重算后锁行读取，避免并发覆盖（上游 0ac6a2b）
-                creditLimit = userCreditLimitMapper.selectOne(
-                        new QueryWrapper<UserCreditLimit>()
-                                .eq("id", creditLimit.getId())
-                                .last("FOR UPDATE"));
+            try {
+                // Feign 调用放在事务外，避免长事务占用数据库连接与行锁
+                if (Boolean.TRUE.equals(creditLimit.getBCardEnabled())) {
+                    riskServiceClient.recalculateBehaviorScore(creditLimit.getUserId());
+                }
+                // 每用户独立事务：单个用户失败仅跳过本人，不再整批回滚
+                txTemplate.executeWithoutResult(status -> adjustUserLimitByOverdue(creditLimit));
+            } catch (Exception e) {
+                log.warn("逾期调额处理失败，跳过该用户 userId={}: {}", creditLimit.getUserId(), e.getMessage());
             }
-            adjustUserLimitByOverdue(creditLimit);
         }
     }
 
