@@ -110,19 +110,23 @@ public class RepaymentScheduleTask {
             return;
         }
 
+        long diffDays = daysSinceDue(dueDate, today);
+
+        if (diffDays >= 1) {
+            // 逾期落库不依赖用户信息：用户服务异常时状态机照常推进，仅跳过邮件
+            handleOverdue(plan, currentRecord, (int) diffDays, diffDays == 1);
+            return;
+        }
+
         UserSummary user = userServiceClient.getUser(plan.getUserId());
         if (user == null) {
             return;
         }
 
-        long diffDays = daysSinceDue(dueDate, today);
-
         if (diffDays == -3) {
             sendReminderEmail(user, currentRecord, dueDate);
         } else if (diffDays == 0) {
             sendDueTodayEmail(user, currentRecord);
-        } else if (diffDays >= 1) {
-            handleOverdue(plan, currentRecord, user, (int) diffDays, diffDays == 1);
         }
     }
 
@@ -218,7 +222,7 @@ public class RepaymentScheduleTask {
         );
     }
 
-    private void handleOverdue(RepaymentPlan plan, RepaymentRecord record, UserSummary user, int overdueDays, boolean isFirstOverdue) {
+    private void handleOverdue(RepaymentPlan plan, RepaymentRecord record, int overdueDays, boolean isFirstOverdue) {
         if (!"OVERDUE".equals(record.getStatus())) {
             record.setStatus("OVERDUE");
             repaymentRecordMapper.updateById(record);
@@ -236,13 +240,21 @@ public class RepaymentScheduleTask {
         riskServiceClient.recalculateBehaviorScore(plan.getUserId());
 
         if (isFirstOverdue) {
-            emailUtil.sendOverdueNotification(
-                    user.email(),
-                    user.realName(),
-                    record.getPeriod(),
-                    overdueDays,
-                    record.getAmount().toString()
-            );
+            try {
+                UserSummary user = userServiceClient.getUser(plan.getUserId());
+                if (user != null) {
+                    emailUtil.sendOverdueNotification(
+                            user.email(),
+                            user.realName(),
+                            record.getPeriod(),
+                            overdueDays,
+                            record.getAmount().toString()
+                    );
+                }
+            } catch (Exception e) {
+                // 首逾邮件失败不影响逾期落库结果，次日由逾期分支继续催收
+                log.warn("发送首逾催收邮件失败 userId={} planId={}: {}", plan.getUserId(), plan.getPlanId(), e.getMessage());
+            }
         }
     }
 
