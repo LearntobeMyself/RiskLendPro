@@ -65,7 +65,7 @@ spring:
             - id: cs-service
               uri: ${CS_SERVICE_URL:http://localhost:8084}
               predicates:
-                - Path=/api/v1/cs/**
+                - Path=/api/v1/cs/**,/api/v1/admin/cs/**
             - id: legacy-service
               uri: ${LEGACY_SERVICE_URL:http://localhost:8080}
               predicates:

@@ -44,6 +44,15 @@ storage:
   private-bucket: true
   presign-expire-minutes: 15
 
+# ---------- AI 客服大模型（DeepSeek / OpenAI 兼容）----------
+cs:
+  llm:
+    # DeepSeek 控制台 https://platform.deepseek.com 申请，形如 sk-xxx
+    api-key: ""
+    # 默认 DeepSeek；换成其他 OpenAI 兼容服务时改 base-url 和 model 即可
+    base-url: https://api.deepseek.com
+    model: deepseek-chat
+
 # ---------- 可选：覆盖云库 / 邮件 / Redis ----------
 # spring:
 #   datasource:

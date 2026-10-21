@@ -8,7 +8,8 @@ import org.springframework.context.annotation.Configuration;
     basePackages = {
         "org.example.risklendpro.user.mapper",
         "org.example.risklendpro.loan.mapper",
-        "org.example.risklendpro.risk.mapper"
+        "org.example.risklendpro.risk.mapper",
+        "org.example.risklendpro.cs.mapper"
     },
     sqlSessionFactoryRef = "primarySqlSessionFactory"
 )

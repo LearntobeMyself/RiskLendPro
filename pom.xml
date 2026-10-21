@@ -26,7 +26,7 @@
         <!-- <module>services/user-service</module> -->
         <module>services/risk-service</module>
         <!-- <module>services/loan-service</module> -->
-        <!-- <module>services/cs-service</module> -->
+        <module>services/cs-service</module>
         <!-- <module>services/legacy-service</module> -->
     </modules>
 
