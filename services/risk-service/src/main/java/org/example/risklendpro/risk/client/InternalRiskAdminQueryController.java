@@ -9,7 +9,11 @@ import org.example.risklendpro.risk.mapper.RiskAssessmentMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * risk-service 管理端操作日志契约实现（风控审批日志），供 user-service 聚合统一操作日志。
@@ -25,11 +29,25 @@ public class InternalRiskAdminQueryController implements RiskAdminQueryApi {
 
     @Override
     public List<OperationLogItem> listRiskApprovalLogs() {
-        return riskAssessmentMapper.selectList(
-                new QueryWrapper<RiskAssessment>().isNotNull("approval_time").orderByDesc("approval_time")
-        ).stream().map(ra -> {
+        List<RiskAssessment> assessments = riskAssessmentMapper.selectList(
+                new QueryWrapper<RiskAssessment>().isNotNull("approval_time").orderByDesc("approval_time"));
+        // 按 operatorId 去重后解析姓名，替代每行一次 getAdmin 的 N+1
+        Map<Long, String> operatorNames = new HashMap<>();
+        Set<Long> distinct = new HashSet<>();
+        for (RiskAssessment ra : assessments) {
             Long operatorId = ra.getOperatorId();
-            String operatorName = resolveOperatorName(operatorId);
+            if (operatorId != null && operatorId != 0L) {
+                distinct.add(operatorId);
+            }
+        }
+        for (Long operatorId : distinct) {
+            operatorNames.put(operatorId, resolveOperatorName(operatorId));
+        }
+        return assessments.stream().map(ra -> {
+            Long operatorId = ra.getOperatorId();
+            String operatorName = operatorId == null || operatorId == 0L
+                    ? "System"
+                    : operatorNames.getOrDefault(operatorId, "Admin#" + operatorId);
             return new OperationLogItem(
                     "RISK",
                     "风控终审",
@@ -42,9 +60,6 @@ public class InternalRiskAdminQueryController implements RiskAdminQueryApi {
     }
 
     private String resolveOperatorName(Long operatorId) {
-        if (operatorId == null || operatorId == 0L) {
-            return "System";
-        }
         try {
             AdminProfile admin = userServiceClient.getAdmin(operatorId);
             if (admin != null && admin.username() != null && !admin.username().isBlank()) {

@@ -33,6 +33,10 @@ public class JwtFilter extends OncePerRequestFilter {
     private final BlacklistSyncProperties blacklistSyncProperties;
     private final InternalApiProperties internalApiProperties;
 
+    /** 匿名演示接口开关：默认关闭，关闭时 /demo/** 与普通接口一样必须带 token。 */
+    @org.springframework.beans.factory.annotation.Value("${security.demo.image-verify-enabled:false}")
+    private boolean demoImageVerifyEnabled;
+
     @Autowired
     public JwtFilter(JwtConfig jwtConfig,
                      BlacklistSyncProperties blacklistSyncProperties,
@@ -122,7 +126,7 @@ public class JwtFilter extends OncePerRequestFilter {
     }
 
     private boolean isSyncBlacklistRequest(String requestURI, String method) {
-        return "POST".equalsIgnoreCase(method) && requestURI.endsWith(SYNC_BLACKLIST_PATH);
+        return "POST".equalsIgnoreCase(method) && SYNC_BLACKLIST_PATH.equals(requestURI);
     }
 
     private boolean isValidSyncToken(String token) {
@@ -143,19 +147,25 @@ public class JwtFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(authentication);
     }
 
+    /**
+     * 白名单采用精确路径或明确前缀匹配，禁止 contains 子串匹配，
+     * 防止未来新增包含相同子串的路径（如 /admin/loginX、/xxx/auth/yyy）被意外免鉴权。
+     */
     private boolean isWhitelisted(String requestURI) {
-        return requestURI.contains("/auth/")
-                || requestURI.contains("/actuator/health")
-                || requestURI.contains("/admin/login")
-                || requestURI.contains("/swagger-ui")
-                || requestURI.contains("/v3/api-docs")
-                || requestURI.contains("/swagger-resources/")
-                || requestURI.contains("/webjars/")
-                || requestURI.contains("/demo/image-verify");
+        return "/auth/login".equals(requestURI)
+                || "/auth/register".equals(requestURI)
+                || "/actuator/health".equals(requestURI)
+                || requestURI.startsWith("/actuator/health/")
+                || "/admin/login".equals(requestURI)
+                || requestURI.startsWith("/swagger-ui")
+                || requestURI.startsWith("/v3/api-docs")
+                || requestURI.startsWith("/swagger-resources/")
+                || requestURI.startsWith("/webjars/")
+                || (demoImageVerifyEnabled && requestURI.startsWith("/demo/image-verify"));
     }
 
     private boolean isInternalRequest(String requestURI) {
-        return requestURI != null && (requestURI.startsWith("/internal/") || requestURI.contains("/internal/"));
+        return requestURI != null && requestURI.startsWith("/internal/");
     }
 
     private boolean isValidInternalToken(String token) {

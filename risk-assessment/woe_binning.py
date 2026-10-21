@@ -260,3 +260,140 @@ def select_features(
         selected = [c for c in HC_WOE_DEFAULT_FEATURES if c in df.columns][:max_features]
 
     return selected, report
+
+
+# ---------------------------------------------------------------------------
+# 阶段 A3 新增：IV + 单调性 + 相关性 + 稳定性(PSI) 四道筛选
+# 说明：保留原 select_features 不变，供 A 卡链路继续使用；
+#       B 卡 as-of 特征走本函数，特征目录来源见 output/b_card_feature_catalog.json。
+# ---------------------------------------------------------------------------
+
+def _rank(values: np.ndarray) -> np.ndarray:
+    """平均秩（用于手算 Spearman，避免额外依赖 scipy）。"""
+    order = np.argsort(values)
+    ranks = np.empty(len(values), dtype=float)
+    ranks[order] = np.arange(1, len(values) + 1, dtype=float)
+    # 处理并列：同一取值取平均秩
+    unique, inverse, counts = np.unique(values, return_inverse=True, return_counts=True)
+    if len(unique) != len(values):
+        for idx, count in enumerate(counts):
+            if count > 1:
+                positions = np.where(inverse == idx)[0]
+                ranks[positions] = ranks[positions].mean()
+    return ranks
+
+
+def spearman_corr(a: np.ndarray, b: np.ndarray) -> float:
+    if len(a) < 3:
+        return 0.0
+    ra, rb = _rank(np.asarray(a, dtype=float)), _rank(np.asarray(b, dtype=float))
+    if ra.std() == 0 or rb.std() == 0:
+        return 0.0
+    return float(np.corrcoef(ra, rb)[0, 1])
+
+
+def bad_rate_monotonic(values: np.ndarray, y: np.ndarray, n_bins: int = 5) -> float:
+    """分箱坏账率与分箱序号的 Spearman 相关；绝对值越大越单调。"""
+    mask = ~np.isnan(values)
+    if mask.sum() < 50 or len(np.unique(values[mask])) < 3:
+        return 0.0
+    try:
+        binned = pd.qcut(pd.Series(values[mask]), q=min(n_bins, len(np.unique(values[mask]))),
+                         duplicates="drop")
+    except Exception:
+        return 0.0
+    frame = pd.DataFrame({"bin": np.asarray(binned), "y": np.asarray(y)[mask]})
+    rates = frame.groupby("bin")["y"].mean()
+    if len(rates) < 3:
+        return 0.0
+    return spearman_corr(np.arange(len(rates), dtype=float), rates.values.astype(float))
+
+
+def population_stability_index(expect: np.ndarray, actual: np.ndarray, n_bins: int = 10) -> float:
+    """分布稳定性：PSI = Σ (实际占比 - 期望占比) * ln(实际占比 / 期望占比)。"""
+    e = np.asarray(expect, dtype=float)
+    a = np.asarray(actual, dtype=float)
+    e = e[~np.isnan(e)]
+    a = a[~np.isnan(a)]
+    if len(e) < 30 or len(a) < 30:
+        return 0.0
+    edges = np.unique(np.quantile(e, np.linspace(0, 1, n_bins + 1)))
+    if len(edges) < 2:
+        return 0.0
+    edges[0], edges[-1] = -np.inf, np.inf
+    e_hist = np.histogram(e, bins=edges)[0].astype(float) / len(e)
+    a_hist = np.histogram(a, bins=edges)[0].astype(float) / len(a)
+    e_hist = np.clip(e_hist, 1e-6, None)
+    a_hist = np.clip(a_hist, 1e-6, None)
+    return float(np.sum((a_hist - e_hist) * np.log(a_hist / e_hist)))
+
+
+def select_features_with_governance(
+    train_df: pd.DataFrame,
+    oot_df: pd.DataFrame,
+    candidates: list,
+    y_train: pd.Series,
+    min_iv: float = 0.02,
+    max_features: int = 12,
+    corr_threshold: float = 0.8,
+    min_monotonic: float = 0.6,
+    max_psi: float = 0.25,
+) -> tuple:
+    """四道筛选：IV -> 单调性 -> 相关性 -> 稳定性(PSI)。返回 (selected, report)。"""
+    rows = []
+    for col in candidates:
+        if col not in train_df.columns:
+            continue
+        series = pd.to_numeric(train_df[col], errors="coerce")
+        if series.notna().sum() < 50:
+            continue
+        if series.nunique(dropna=True) <= 1:
+            rows.append({"feature": col, "selected": False, "reason": "常量特征(退化)",
+                         "iv": 0.0, "missing_rate": 0.0, "monotonic": 0.0, "psi": 0.0})
+            continue
+        iv = iv_numeric(series, y_train) if series.nunique(dropna=True) > 5 else iv_categorical(series, y_train)
+        mono = bad_rate_monotonic(series.values.astype(float), y_train.values.astype(float))
+        psi = population_stability_index(series.values.astype(float),
+                                        pd.to_numeric(oot_df.get(col), errors="coerce").values.astype(float))
+        rows.append({"feature": col, "iv": round(float(iv), 6), "monotonic": round(float(mono), 4),
+                     "psi": round(float(psi), 6),
+                     "missing_rate": round(float(1.0 - series.notna().mean()), 4)})
+
+    def _ordered():
+        return sorted([r for r in rows if "selected" not in r], key=lambda r: r["iv"], reverse=True)
+
+    selected = []
+    report = [r for r in rows if "selected" in r]
+    iv_map = {r["feature"]: r["iv"] for r in _ordered()}
+
+    for row in _ordered():
+        col = row["feature"]
+        if row["iv"] < min_iv:
+            report.append({**row, "selected": False, "reason": "IV<%.2f" % min_iv})
+            continue
+        if abs(row["monotonic"]) < min_monotonic:
+            report.append({**row, "selected": False, "reason": "单调性不足(|rho|<%.2f)" % min_monotonic})
+            continue
+        if row["psi"] > max_psi:
+            report.append({**row, "selected": False, "reason": "PSI>%.2f 不稳定" % max_psi})
+            continue
+        if len(selected) >= max_features:
+            report.append({**row, "selected": False, "reason": "已达上限"})
+            continue
+        redundant = False
+        for kept in selected:
+            a = pd.to_numeric(train_df[col], errors="coerce")
+            b = pd.to_numeric(train_df[kept], errors="coerce")
+            corr = a.corr(b)
+            if corr is not None and not np.isnan(corr) and abs(corr) > corr_threshold:
+                if row["iv"] <= iv_map.get(kept, 0):
+                    redundant = True
+                    report.append({**row, "selected": False,
+                                   "reason": "与%s相关>%.2f" % (kept, corr_threshold)})
+                    break
+        if redundant:
+            continue
+        selected.append(col)
+        report.append({**row, "selected": True, "reason": "入模"})
+
+    return selected, report

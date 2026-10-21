@@ -4,6 +4,8 @@ from mysql.connector import Error
 from dotenv import load_dotenv
 import os
 import json
+import hashlib
+import math
 from datetime import datetime
 
 load_dotenv()
@@ -390,18 +392,26 @@ def create_b_card_tables_if_not_exists():
             CREATE TABLE IF NOT EXISTS behavior_scoring_rules (
                 id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 version VARCHAR(32) NOT NULL,
-                rule_content JSON NOT NULL,
+                rule_content LONGTEXT NOT NULL COMMENT '规则内容原文（内容哈希的唯一依据）',
                 feature_weights JSON NOT NULL,
                 scorecard JSON NOT NULL,
                 intercept DECIMAL(16,8) NOT NULL,
                 threshold_watch DECIMAL(10,2) NOT NULL,
                 threshold_reduce_limit DECIMAL(10,2) NOT NULL,
-                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                is_active TINYINT(1) NOT NULL DEFAULT 0 COMMENT '发布时先写 0，激活事务内再置 1',
                 trained_at DATETIME NULL,
                 training_data_count INT NULL,
                 accuracy DECIMAL(10,6) NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE KEY uk_version (version)
+                rule_hash CHAR(64) NULL COMMENT '规则内容 SHA-256（对 rule_content 原文计算）',
+                activated_at DATETIME NULL COMMENT '激活时间，用于稳定的版本选择',
+                model_type VARCHAR(32) NULL,
+                card_type VARCHAR(8) NULL,
+                threshold_source VARCHAR(32) NULL,
+                active_slot TINYINT GENERATED ALWAYS AS (IF(is_active = 1, 1, NULL)) VIRTUAL,
+                UNIQUE KEY uk_version (version),
+                UNIQUE KEY uk_bsr_single_active (active_slot),
+                INDEX idx_bsr_active_activation (is_active, activated_at, id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """
         )
@@ -426,52 +436,300 @@ def normalize_id_card(val):
     return s
 
 
+REPLAY_MAX_DRIFT = 5.0
+REPLAY_SAMPLE_LIMIT = 500
+
+
+def canonical_rule_text(rules):
+    """规则原文规范文本：发布端与消费端（Java）对同一份文本计算 SHA-256。"""
+    return json.dumps(rules, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def rule_content_hash(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def validate_b_card_rule(rules):
+    """发布前结构校验，与 Java 端 BehaviorScoreEngineImpl.validateRuleContent 保持一致。"""
+    def fail(msg):
+        raise ValueError(f"规则校验失败: {msg}")
+
+    if not isinstance(rules, dict):
+        fail("规则根节点必须是 JSON 对象")
+    if rules.get("model_type") != "b_card_woe":
+        fail(f"model_type 期望 b_card_woe，实际 {rules.get('model_type')}")
+    if str(rules.get("card_type", "")).upper() != "B":
+        fail(f"card_type 期望 B，实际 {rules.get('card_type')}")
+
+    coefficients = rules.get("coefficients") or rules.get("feature_weights")
+    if not isinstance(coefficients, dict) or not coefficients:
+        fail("缺少非空的 coefficients/feature_weights")
+
+    features = rules.get("features")
+    if not isinstance(features, dict) or not features:
+        fail("缺少 features 特征定义")
+
+    selected = rules.get("selected_features")
+    if not isinstance(selected, list) or not selected:
+        fail("缺少 selected_features 特征列表")
+    if len(selected) != len(set(selected)):
+        fail("selected_features 存在重复特征")
+    if set(selected) != set(coefficients.keys()):
+        fail(f"selected_features 与 coefficients 不一致: {sorted(selected)} vs {sorted(coefficients)}")
+
+    for name, weight in coefficients.items():
+        definition = features.get(name)
+        if not isinstance(definition, dict):
+            fail(f"系数 {name} 缺少特征定义")
+        try:
+            float(weight)
+        except (TypeError, ValueError):
+            fail(f"系数 {name} 不是数值: {weight}")
+        if definition.get("type") == "categorical":
+            categories = definition.get("categories")
+            if not isinstance(categories, dict) or not categories:
+                fail(f"类别特征 {name} 缺少 categories")
+        else:
+            cuts = definition.get("cuts")
+            woe = definition.get("woe")
+            if not isinstance(cuts, list) or not cuts:
+                fail(f"数值特征 {name} 缺少 cuts")
+            if not isinstance(woe, list) or len(woe) < len(cuts):
+                fail(f"数值特征 {name} 的 woe 长度与 cuts 不一致")
+
+    thresholds = rules.get("thresholds")
+    if (
+        not isinstance(thresholds, dict)
+        or not isinstance(thresholds.get("watch"), (int, float))
+        or not isinstance(thresholds.get("reduce_limit"), (int, float))
+    ):
+        fail("缺少 thresholds.watch / thresholds.reduce_limit")
+    if not thresholds["reduce_limit"] < thresholds["watch"]:
+        fail("thresholds 需要满足 reduce_limit < watch")
+
+    scorecard = rules.get("scorecard")
+    if not isinstance(scorecard, dict):
+        fail("缺少 scorecard 评分配置")
+    for key in ("pdo", "target_score", "target_odds"):
+        value = scorecard.get(key)
+        if not isinstance(value, (int, float)) or value <= 0:
+            fail(f"scorecard.{key} 必须大于 0，实际 {value}")
+    for key in ("min_score", "max_score"):
+        if not isinstance(scorecard.get(key), (int, float)):
+            fail(f"scorecard 缺少 {key}")
+    if not scorecard["min_score"] < scorecard["max_score"]:
+        fail("scorecard.min_score 必须小于 max_score")
+
+
+def _woe_lookup(value, definition):
+    if not isinstance(definition, dict):
+        definition = {}
+    if value is None:
+        return float((definition.get("missing_bin") or {}).get("woe", 0.0) or 0.0)
+    if definition.get("type") == "categorical":
+        category = (definition.get("categories") or {}).get("1" if value >= 0.5 else "0")
+        if isinstance(category, dict) and "woe" in category:
+            return float(category["woe"])
+        return float((definition.get("missing_bin") or {}).get("woe", 0.0) or 0.0)
+    cuts = definition.get("cuts") or []
+    woe = definition.get("woe") or []
+    if not cuts or not woe:
+        return 0.0
+    for index, cut in enumerate(cuts):
+        if value <= cut:
+            return float(woe[min(index, len(woe) - 1)])
+    return float(woe[-1])
+
+
+def score_with_rule(rules, feature_values):
+    """按规则计算 B 卡基础分（与 Java 端算法一致，仅用于发布前回放校验）。"""
+    coefficients = rules.get("coefficients") or rules.get("feature_weights") or {}
+    features = rules.get("features") or {}
+    linear = float(rules.get("intercept", 0.0) or 0.0)
+    for name, weight in coefficients.items():
+        linear += float(weight) * _woe_lookup(feature_values.get(name), features.get(name))
+    linear = max(-30.0, min(30.0, linear))
+    probability = 1.0 / (1.0 + math.exp(-linear))
+    probability = min(max(probability, 1e-9), 1.0 - 1e-9)
+    scorecard = rules.get("scorecard") or {}
+    pdo = float(scorecard.get("pdo", 80))
+    target_score = float(scorecard.get("target_score", 650))
+    target_odds = float(scorecard.get("target_odds", 1))
+    min_score = float(scorecard.get("min_score", 350))
+    max_score = float(scorecard.get("max_score", 950))
+    odds = probability / (1.0 - probability)
+    factor = -pdo / math.log(2)
+    offset = target_score - factor * math.log(target_odds)
+    score = offset + factor * math.log(odds)
+    return round(max(min_score, min(max_score, score)), 1)
+
+
+def _replay_samples(rules, csv_path):
+    """回放样本：优先使用清洗后的特征 CSV；缺失时用规则分箱点构造确定性样本。"""
+    for path in (csv_path, "output/cleaned_behavior_features.csv"):
+        if path and os.path.isfile(path):
+            try:
+                frame = pd.read_csv(path)
+                samples = []
+                for _, row in frame.head(REPLAY_SAMPLE_LIMIT).iterrows():
+                    samples.append({
+                        str(key): (None if pd.isna(value) else float(value))
+                        for key, value in row.items()
+                    })
+                if samples:
+                    return samples
+            except Exception as exc:
+                print(f"回放样本读取失败({path})，改用分箱点构造样本: {exc}")
+    samples = []
+    for name in (rules.get("coefficients") or {}):
+        definition = (rules.get("features") or {}).get(name) or {}
+        for cut in (definition.get("cuts") or [])[:2]:
+            samples.append({name: float(cut)})
+    samples.append({})
+    return samples
+
+
+def replay_check(candidate_rules, baseline_rules, csv_path):
+    """回放校验：候选规则与当前 active 规则在同一批样本上的最大分数漂移。"""
+    samples = _replay_samples(candidate_rules, csv_path)
+    max_drift = 0.0
+    for sample in samples:
+        max_drift = max(
+            max_drift,
+            abs(score_with_rule(candidate_rules, sample) - score_with_rule(baseline_rules, sample)),
+        )
+    return max_drift
+
+
+def fetch_active_rule_content(cursor):
+    cursor.execute(
+        "SELECT rule_content FROM behavior_scoring_rules WHERE is_active = 1 "
+        "ORDER BY activated_at DESC, id DESC LIMIT 1"
+    )
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        return json.loads(row[0])
+    except Exception:
+        return None
+
+
+def publish_b_card_rule(cursor, rules, version):
+    """先写入 inactive 形态（已存在的同版本原地更新），激活由调用方在同一事务内完成。"""
+    text = canonical_rule_text(rules)
+    content_hash = rule_content_hash(text)
+    thresholds = rules.get("thresholds") or {}
+    scorecard = rules.get("scorecard") or {}
+    metrics = rules.get("model_metrics") or {}
+    training = rules.get("training_data") or {}
+
+    cursor.execute(
+        """
+        INSERT INTO behavior_scoring_rules (
+            version, rule_content, feature_weights, scorecard,
+            intercept, threshold_watch, threshold_reduce_limit,
+            is_active, trained_at, training_data_count, accuracy,
+            rule_hash, model_type, card_type, threshold_source
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, NOW(), %s, %s, %s, %s, %s, 'DB_COLUMN')
+        ON DUPLICATE KEY UPDATE
+            rule_content = VALUES(rule_content),
+            feature_weights = VALUES(feature_weights),
+            scorecard = VALUES(scorecard),
+            intercept = VALUES(intercept),
+            threshold_watch = VALUES(threshold_watch),
+            threshold_reduce_limit = VALUES(threshold_reduce_limit),
+            is_active = 0,
+            trained_at = VALUES(trained_at),
+            training_data_count = VALUES(training_data_count),
+            accuracy = VALUES(accuracy),
+            rule_hash = VALUES(rule_hash),
+            model_type = VALUES(model_type),
+            card_type = VALUES(card_type),
+            threshold_source = VALUES(threshold_source)
+        """,
+        (
+            version,
+            text,
+            json.dumps(rules.get("coefficients") or {}, ensure_ascii=False),
+            json.dumps(scorecard, ensure_ascii=False),
+            float(rules.get("intercept", 0) or 0),
+            float(thresholds.get("watch", 650)),
+            float(thresholds.get("reduce_limit", 550)),
+            int(training.get("total_count", 0) or 0),
+            float(metrics.get("accuracy", 0) or 0),
+            content_hash,
+            rules.get("model_type"),
+            rules.get("card_type"),
+        ),
+    )
+    return content_hash
+
+
 def load_b_card_to_mysql():
     create_b_card_tables_if_not_exists()
     rules_path = "output/b_scoring_rules.json"
     csv_path = "data/cleaned/cleaned_behavior_features.csv"
 
     if os.path.isfile(rules_path):
+        conn = None
         try:
             with open(rules_path, "r", encoding="utf-8") as f:
                 rules = json.load(f)
+            version = rules.get("version", "v1.0-b-woe")
+
+            # 1) 发布前结构校验：非法规则不允许进入评分链路
+            validate_b_card_rule(rules)
+
             conn = get_db_connection()
             cursor = conn.cursor()
-            version = rules.get("version", "v1.0-b-woe")
-            th = rules.get("thresholds") or {}
-            fw = rules.get("coefficients") or {}
-            sc = rules.get("scorecard") or {}
-            metrics = rules.get("model_metrics") or {}
-            train = rules.get("training_data") or {}
-            cursor.execute("DELETE FROM behavior_scoring_rules WHERE version = %s", (version,))
+
+            # 2) 与当前 active 版本回放对比，漂移超阈值拒绝发布
+            baseline = fetch_active_rule_content(cursor)
+            if baseline:
+                max_drift = replay_check(rules, baseline, csv_path)
+                print(f"回放校验：与当前 active 版本最大分数漂移 = {max_drift}")
+                if max_drift > REPLAY_MAX_DRIFT:
+                    raise ValueError(
+                        f"回放校验未通过：最大分数漂移 {max_drift} 超过阈值 {REPLAY_MAX_DRIFT}"
+                    )
+            else:
+                print("回放校验：当前无 active 版本，跳过对比")
+
+            # 3) 写入 inactive 形态 + 4) 单事务原子激活
+            content_hash = publish_b_card_rule(cursor, rules, version)
+            cursor.execute("UPDATE behavior_scoring_rules SET is_active = 0 WHERE is_active = 1")
             cursor.execute(
-                """
-                INSERT INTO behavior_scoring_rules (
-                    version, rule_content, feature_weights, scorecard,
-                    intercept, threshold_watch, threshold_reduce_limit,
-                    is_active, trained_at, training_data_count, accuracy
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, 1, NOW(), %s, %s)
-                """,
-                (
-                    version,
-                    json.dumps(rules, ensure_ascii=False),
-                    json.dumps(fw, ensure_ascii=False),
-                    json.dumps(sc, ensure_ascii=False),
-                    float(rules.get("intercept", 0)),
-                    float(th.get("watch", 650)),
-                    float(th.get("reduce_limit", 550)),
-                    int(train.get("total_count", 0)),
-                    float(metrics.get("accuracy", 0)),
-                ),
+                "UPDATE behavior_scoring_rules SET is_active = 1, activated_at = NOW() WHERE version = %s",
+                (version,),
             )
+            cursor.execute("SELECT COUNT(*) FROM behavior_scoring_rules WHERE is_active = 1")
+            active_count = cursor.fetchone()[0]
+            if active_count != 1:
+                raise ValueError(f"激活后 active 版本数应为 1，实际 {active_count}")
             conn.commit()
-            print(f"B 卡规则已写入: {version}")
-            cursor.close()
-            conn.close()
+
+            feature_count = len(rules.get("selected_features") or [])
+            print(f"B 卡规则已发布并激活: version={version} hash={content_hash} 入模特征数={feature_count}")
+            print("提示：服务端无需重启，TTL 到期后自动生效；"
+                  "如需立即生效请调用 POST /internal/behavior-scores/rules/refresh")
         except Exception as e:
-            print(f"写入 B 卡规则失败: {e}")
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            print(f"发布 B 卡规则失败（已回滚，历史版本与当前 active 版本未受影响）: {e}")
+        finally:
+            try:
+                if conn is not None and conn.is_connected():
+                    cursor.close()
+                    conn.close()
+            except Exception:
+                pass
     else:
         print("警告：未找到 output/b_scoring_rules.json")
+
 
     if not os.path.isfile(csv_path):
         print(f"警告：未找到 {csv_path}，跳过 B 卡特征（可先运行 clean_behavior_features.py）")

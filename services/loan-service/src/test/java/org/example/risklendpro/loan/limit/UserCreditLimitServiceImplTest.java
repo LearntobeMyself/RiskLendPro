@@ -58,6 +58,9 @@ class UserCreditLimitServiceImplTest {
     @Mock
     private RiskServiceClient riskServiceClient;
 
+    @Mock
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     private UserCreditLimit creditLimit(BigDecimal total, BigDecimal used, BigDecimal remaining) {
         UserCreditLimit cl = new UserCreditLimit();
         cl.setUserId(7L);

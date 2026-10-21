@@ -6,7 +6,6 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 
 @EnableFeignClients
 @SpringBootApplication(scanBasePackages = "org.example.risklendpro")
-@SpringBootApplication
 public class UserServiceApplication {
 
     public static void main(String[] args) {

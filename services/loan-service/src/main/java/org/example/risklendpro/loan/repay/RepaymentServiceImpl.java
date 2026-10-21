@@ -39,6 +39,9 @@ public class RepaymentServiceImpl implements RepaymentService {
     @Autowired
     private LoanMapper loanMapper;
 
+    @Autowired
+    private OverdueStateSync overdueStateSync;
+
     @Override
     public List<Object> getRepaymentPlans(Long userId) {
         QueryWrapper<RepaymentPlan> queryWrapper = new QueryWrapper<>();
@@ -194,23 +197,9 @@ public class RepaymentServiceImpl implements RepaymentService {
             }
         }
 
-        long overduePlans = nvlCount(repaymentPlanMapper.selectCount(
-                new QueryWrapper<RepaymentPlan>()
-                        .eq("user_id", plan.getUserId())
-                        .eq("status", "OVERDUE")));
-        UserCreditLimit limit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", plan.getUserId()).last("FOR UPDATE"));
-        if (limit == null) {
-            return;
-        }
-        if (overduePlans == 0) {
-            limit.setHasOverdue(false);
-            limit.setOverdueAmount(BigDecimal.ZERO);
-        } else {
-            limit.setHasOverdue(true);
-        }
-        limit.setLastUpdateTime(new Date());
-        userCreditLimitMapper.updateById(limit);
+        // 以 OVERDUE 计划+记录为事实源幂等回写 hasOverdue/overdueAmount：
+        // 还清部分逾期但仍有其它逾期时，逾期金额同步重算而非保持不变
+        overdueStateSync.syncUserOverdueState(plan.getUserId());
     }
 
     private void restoreLoanFromOverdue(Long loanId) {

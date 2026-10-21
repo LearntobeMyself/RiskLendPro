@@ -95,8 +95,16 @@ public class InternalUserController implements UserQueryApi {
         return new AdminProfile(admin.getId(), admin.getUsername());
     }
 
+    /** assessment_status 合法取值：注册默认值 + 风险域 StatusEnum 全集，防止脏状态污染风控判断。 */
+    private static final java.util.Set<String> ALLOWED_ASSESSMENT_STATUSES = java.util.Set.of(
+            "NOT_ASSESSED", "WAITING", "SYSTEM_REJECT", "MANUAL_REVIEW", "FINAL_PASS", "FINAL_REJECT");
+
     @Override
     public void updateAssessmentStatus(UserAssessmentStatusCommand command) {
+        if (command == null || command.status() == null
+                || !ALLOWED_ASSESSMENT_STATUSES.contains(command.status())) {
+            throw new RuntimeException("非法的评估状态: " + (command == null ? null : command.status()));
+        }
         User user = userMapper.selectById(command.userId());
         if (user == null) {
             return;

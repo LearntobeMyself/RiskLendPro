@@ -9,11 +9,9 @@ import org.example.risklendpro.loan.client.UserServiceClient;
 import org.example.risklendpro.loan.entity.Loan;
 import org.example.risklendpro.loan.entity.RepaymentPlan;
 import org.example.risklendpro.loan.entity.RepaymentRecord;
-import org.example.risklendpro.loan.entity.UserCreditLimit;
 import org.example.risklendpro.loan.mapper.LoanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentPlanMapper;
 import org.example.risklendpro.loan.mapper.RepaymentRecordMapper;
-import org.example.risklendpro.loan.mapper.UserCreditLimitMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,6 +20,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
@@ -36,10 +37,10 @@ public class RepaymentScheduleTask {
     private RepaymentRecordMapper repaymentRecordMapper;
 
     @Autowired
-    private UserCreditLimitMapper userCreditLimitMapper;
+    private LoanMapper loanMapper;
 
     @Autowired
-    private LoanMapper loanMapper;
+    private OverdueStateSync overdueStateSync;
 
     @Autowired
     private EmailUtil emailUtil;
@@ -107,20 +108,23 @@ public class RepaymentScheduleTask {
             return;
         }
 
+        long diffDays = daysSinceDue(dueDate, today);
+
+        if (diffDays >= 1) {
+            // 逾期落库不依赖用户信息：用户服务异常时状态机照常推进，仅跳过邮件
+            handleOverdue(plan, currentRecord, (int) diffDays, diffDays == 1);
+            return;
+        }
+
         UserSummary user = userServiceClient.getUser(plan.getUserId());
         if (user == null) {
             return;
         }
 
-        long diffMillis = today.getTime() - dueDate.getTime();
-        long diffDays = diffMillis / (1000 * 60 * 60 * 24);
-
-        if (diffDays == 3) {
+        if (diffDays == -3) {
             sendReminderEmail(user, currentRecord, dueDate);
         } else if (diffDays == 0) {
             sendDueTodayEmail(user, currentRecord);
-        } else if (diffDays >= 1) {
-            handleOverdue(plan, currentRecord, user, (int) diffDays, diffDays == 1);
         }
     }
 
@@ -146,13 +150,14 @@ public class RepaymentScheduleTask {
             return;
         }
 
-        long diffMillis = today.getTime() - dueDate.getTime();
-        long diffDays = diffMillis / (1000 * 60 * 60 * 24);
+        long diffDays = daysSinceDue(dueDate, today);
 
         if (diffDays >= 1) {
             String oldLevel = plan.getOverdueLevel();
             updateOverdueLevel(plan, (int) diffDays);
             markLoanOverdue(plan.getLoanId());
+            // 自愈：首逾当日若中断导致 hasOverdue/overdueAmount 缺失，这里按事实源重算补齐
+            overdueStateSync.syncUserOverdueState(plan.getUserId());
             riskServiceClient.recalculateBehaviorScore(plan.getUserId());
 
             // 逾期等级升级（M1→M2→M3→M4）时再次发送催收邮件，实现持续催收
@@ -188,6 +193,16 @@ public class RepaymentScheduleTask {
         return "COMPLETED".equals(status) || "PAID".equals(status) || "SETTLED".equals(status);
     }
 
+    /**
+     * 按自然日计算今天相对到期日的天数差（忽略时分秒）：
+     * 负数表示距到期还有几天（如 -3 即提前3天），0 表示到期当天，正数表示已逾期天数。
+     */
+    private static long daysSinceDue(Date dueDate, Date today) {
+        LocalDate due = dueDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate now = today.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        return ChronoUnit.DAYS.between(due, now);
+    }
+
     private void sendReminderEmail(UserSummary user, RepaymentRecord record, Date dueDate) {
         emailUtil.sendRepaymentReminderNotification(
                 user.email(),
@@ -207,7 +222,7 @@ public class RepaymentScheduleTask {
         );
     }
 
-    private void handleOverdue(RepaymentPlan plan, RepaymentRecord record, UserSummary user, int overdueDays, boolean isFirstOverdue) {
+    private void handleOverdue(RepaymentPlan plan, RepaymentRecord record, int overdueDays, boolean isFirstOverdue) {
         if (!"OVERDUE".equals(record.getStatus())) {
             record.setStatus("OVERDUE");
             repaymentRecordMapper.updateById(record);
@@ -220,18 +235,26 @@ public class RepaymentScheduleTask {
         repaymentPlanMapper.updateById(plan);
         markLoanOverdue(plan.getLoanId());
 
-        updateUserCreditLimit(plan.getUserId(), record.getAmount(), true);
+        overdueStateSync.syncUserOverdueState(plan.getUserId());
 
         riskServiceClient.recalculateBehaviorScore(plan.getUserId());
 
         if (isFirstOverdue) {
-            emailUtil.sendOverdueNotification(
-                    user.email(),
-                    user.realName(),
-                    record.getPeriod(),
-                    overdueDays,
-                    record.getAmount().toString()
-            );
+            try {
+                UserSummary user = userServiceClient.getUser(plan.getUserId());
+                if (user != null) {
+                    emailUtil.sendOverdueNotification(
+                            user.email(),
+                            user.realName(),
+                            record.getPeriod(),
+                            overdueDays,
+                            record.getAmount().toString()
+                    );
+                }
+            } catch (Exception e) {
+                // 首逾邮件失败不影响逾期落库结果，次日由逾期分支继续催收
+                log.warn("发送首逾催收邮件失败 userId={} planId={}: {}", plan.getUserId(), plan.getPlanId(), e.getMessage());
+            }
         }
     }
 
@@ -286,20 +309,5 @@ public class RepaymentScheduleTask {
         loan.setStatus(LoanStatusEnum.OVERDUE.getCode());
         loan.setUpdateTime(new Date());
         loanMapper.updateById(loan);
-    }
-
-    private void updateUserCreditLimit(Long userId, java.math.BigDecimal overdueAmount, boolean hasOverdue) {
-        UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(
-                new QueryWrapper<UserCreditLimit>().eq("user_id", userId).last("FOR UPDATE")
-        );
-
-        if (creditLimit != null) {
-            if (overdueAmount != null && overdueAmount.compareTo(java.math.BigDecimal.ZERO) > 0) {
-                creditLimit.setOverdueAmount(creditLimit.getOverdueAmount().add(overdueAmount));
-            }
-            creditLimit.setHasOverdue(hasOverdue);
-            creditLimit.setLastUpdateTime(new Date());
-            userCreditLimitMapper.updateById(creditLimit);
-        }
     }
 }

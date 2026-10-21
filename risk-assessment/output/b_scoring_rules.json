@@ -1,25 +1,21 @@
 {
-  "version": "v1.0-b-woe",
+  "version": "v1.1-b-woe",
   "model_type": "b_card_woe",
   "card_type": "B",
-  "description": "B卡：HC inst_/pos_ 行为特征 WOE+LR+PDO",
+  "description": "B卡：HC inst_/pos_ 行为特征 WOE+LR+PDO（v1.1 移除退化特征）",
   "selected_features": [
     "inst_amt_paid_1y",
     "inst_dbd_mean_total",
     "inst_dbd_mean_1y",
-    "pos_dpd_mean",
     "inst_late_ratio_total",
-    "inst_partial_payment_ratio",
-    "pos_dpd_def_mean"
+    "inst_partial_payment_ratio"
   ],
   "feature_derivation": {
     "inst_amt_paid_1y": "来源=HC行为聚合; B卡入模",
     "inst_dbd_mean_total": "来源=HC行为聚合; B卡入模",
     "inst_dbd_mean_1y": "来源=HC行为聚合; B卡入模",
-    "pos_dpd_mean": "来源=HC行为聚合; B卡入模",
     "inst_late_ratio_total": "来源=HC行为聚合; B卡入模",
-    "inst_partial_payment_ratio": "来源=HC行为聚合; B卡入模",
-    "pos_dpd_def_mean": "来源=HC行为聚合; B卡入模"
+    "inst_partial_payment_ratio": "来源=HC行为聚合; B卡入模"
   },
   "features": {
     "inst_amt_paid_1y": {
@@ -86,20 +82,6 @@
         "label": "缺失"
       }
     },
-    "pos_dpd_mean": {
-      "source": "external",
-      "type": "numeric",
-      "cuts": [
-        2622.078
-      ],
-      "woe": [
-        6.5e-05
-      ],
-      "missing_bin": {
-        "woe": 0.0,
-        "label": "缺失"
-      }
-    },
     "inst_late_ratio_total": {
       "source": "external",
       "type": "numeric",
@@ -135,30 +117,14 @@
         "woe": 0.0,
         "label": "缺失"
       }
-    },
-    "pos_dpd_def_mean": {
-      "source": "external",
-      "type": "numeric",
-      "cuts": [
-        1671.398
-      ],
-      "woe": [
-        6.5e-05
-      ],
-      "missing_bin": {
-        "woe": 0.0,
-        "label": "缺失"
-      }
     }
   },
   "coefficients": {
     "inst_amt_paid_1y": -1.554008917407066,
     "inst_dbd_mean_total": 0.16003520501157298,
     "inst_dbd_mean_1y": -0.8226406608723952,
-    "pos_dpd_mean": -2.8725527731060955e-08,
     "inst_late_ratio_total": -0.7327324648085771,
-    "inst_partial_payment_ratio": -0.32160906783900634,
-    "pos_dpd_def_mean": -2.8725527705283472e-08
+    "inst_partial_payment_ratio": -0.32160906783900634
   },
   "intercept": -0.0005089810929602766,
   "thresholds": {
@@ -209,7 +175,8 @@
     {
       "feature": "pos_dpd_mean",
       "iv": 4.198731002384748e-09,
-      "selected": true
+      "selected": false,
+      "removed_reason": "degenerate_zero_coefficient"
     },
     {
       "feature": "inst_late_ratio_total",
@@ -224,7 +191,24 @@
     {
       "feature": "pos_dpd_def_mean",
       "iv": 4.198731002384748e-09,
-      "selected": true
+      "selected": false,
+      "removed_reason": "degenerate_zero_coefficient"
     }
-  ]
+  ],
+  "rule_governance": {
+    "parent_version": "v1.0-b-woe",
+    "removed_features": [
+      "pos_dpd_mean",
+      "pos_dpd_def_mean"
+    ],
+    "removed_reason": "系数绝对值约 2.9e-08、IV 约 4.2e-09 的退化特征；移除后回放分数漂移 < 0.1 分",
+    "feature_review": {
+      "inst_amt_paid_1y": "IV 0.0006 偏低但系数 -1.554 非退化，移除会显著改变分数分布，A1 保留，留待 A3 特征工程阶段统一评估"
+    },
+    "formula_changed": false,
+    "thresholds_changed": false,
+    "scorecard_changed": false,
+    "note": "仅移除退化特征；WOE、系数、截距、阈值与 PDO 参数均未修改",
+    "published_by": "phase-a1"
+  }
 }

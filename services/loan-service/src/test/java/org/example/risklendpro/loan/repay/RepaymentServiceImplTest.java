@@ -43,6 +43,9 @@ class RepaymentServiceImplTest {
     @Mock
     private LoanMapper loanMapper;
 
+    @Mock
+    private OverdueStateSync overdueStateSync;
+
     private RepaymentPlan plan(Long ownerId) {
         RepaymentPlan p = new RepaymentPlan();
         p.setPlanId(1L);

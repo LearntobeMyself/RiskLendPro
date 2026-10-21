@@ -2,6 +2,7 @@ package org.example.risklendpro.api.contract;
 
 import org.example.risklendpro.api.dto.BehaviorScoreSnapshot;
 import org.example.risklendpro.api.dto.BorrowGateResult;
+import org.example.risklendpro.api.dto.LimitMultiplierDecision;
 import org.example.risklendpro.api.dto.RiskAssessmentSummary;
 import org.example.risklendpro.api.dto.RiskOverviewCounts;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,9 +39,16 @@ public interface RiskDecisionApi {
     @GetMapping("/internal/risk-assessments/overview-counts")
     RiskOverviewCounts getOverviewCounts();
 
-    @GetMapping("/internal/behavior-scores/limit-multiplier")
-    double getLimitMultiplier(@RequestParam("score") double score,
-                              @RequestParam(value = "userId", required = false) Long userId);
+    /**
+     * 查询指定用户的 B 卡额度系数决策。
+     *
+     * <p>额度系数查询必须携带 userId：可信度（scoreReliable）、数据状态（dataStatus）、
+     * 决策是否放行（decisionAllowed）与模型版本在同一决策点生成，
+     * 对外不再暴露无 userId 的裸系数接口，避免不可信 B 分进入额度流程。</p>
+     */
+    @GetMapping("/internal/behavior-scores/users/{userId}/limit-multiplier")
+    LimitMultiplierDecision getLimitMultiplierForUser(@PathVariable("userId") Long userId,
+                                                      @RequestParam("score") double score);
 
     /**
      * 借款前授信/黑名单门禁。实现可随风控升级替换，调用方只消费 allowed。

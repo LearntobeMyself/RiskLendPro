@@ -207,6 +207,9 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
 
     @Override
     public Map<String, Object> batchAdjust(BatchCreditAdjustRequest request, Long operatorId) {
+        if (request == null || request.getUserIds() == null || request.getUserIds().isEmpty()) {
+            throw new RuntimeException("批量调整参数不完整：userIds 为空");
+        }
         int success = 0;
         int fail = 0;
         List<Map<String, Object>> failed = new ArrayList<>();
@@ -226,7 +229,11 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
                 success++;
             } catch (Exception e) {
                 fail++;
-                failed.add(Map.of("userId", userId, "reason", e.getMessage()));
+                String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                Map<String, Object> item = new HashMap<>();
+                item.put("userId", userId);
+                item.put("reason", reason);
+                failed.add(item);
             }
         }
         return Map.of("successCount", success, "failCount", fail, "failedItems", failed);
@@ -276,6 +283,14 @@ public class AdminCreditQueryServiceImpl implements AdminCreditQueryService {
     private BigDecimal calcNewLimit(BigDecimal current, String mode, BigDecimal value) {
         if (mode == null || value == null) {
             throw new RuntimeException("批量调整参数不完整");
+        }
+        // INCREASE/DECREASE/PERCENT 的调整量必须为正；负值会导致反向调整（如 DECREASE 传负反而提额）。
+        boolean requiresPositive = "INCREASE".equals(mode) || "DECREASE".equals(mode) || "PERCENT".equals(mode);
+        if (requiresPositive && value.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RuntimeException("调整值必须大于 0");
+        }
+        if ("FIXED".equals(mode) && value.compareTo(BigDecimal.ZERO) < 0) {
+            throw new RuntimeException("调整值不能为负");
         }
         return switch (mode) {
             case "FIXED" -> value;

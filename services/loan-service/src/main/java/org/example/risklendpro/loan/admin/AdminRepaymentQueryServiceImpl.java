@@ -66,10 +66,13 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal pending = receivable.subtract(received).max(BigDecimal.ZERO);
 
-        List<RepaymentPlan> overduePlans = repaymentPlanMapper.selectList(
-                new QueryWrapper<RepaymentPlan>().eq("status", "OVERDUE"));
-        BigDecimal overdueAmount = overduePlans.stream()
-                .map(p -> p.getRemainingAmount() != null ? p.getRemainingAmount() : BigDecimal.ZERO)
+        // overdueAmount 口径与 OverdueStateSync 保持一致：
+        // 汇总所有状态为 OVERDUE 的还款记录的应还金额（period 级别），
+        // 而非 OVERDUE 还款计划的剩余本金（后者会把未到期期次也算进去，导致虚高）。
+        List<RepaymentRecord> overdueRecords = repaymentRecordMapper.selectList(
+                new QueryWrapper<RepaymentRecord>().eq("status", "OVERDUE"));
+        BigDecimal overdueAmount = overdueRecords.stream()
+                .map(r -> r.getAmount() != null ? r.getAmount() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         Map<String, Object> data = new HashMap<>();

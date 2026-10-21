@@ -1,0 +1,222 @@
+{
+  "algorithm": "logistic_regression_woe",
+  "coefficients": {
+    "currentMaxDpd": -0.5786356549396605,
+    "latePaymentCount12m": -0.41010740961291914,
+    "onTimeRate12m": -0.34694091543810573,
+    "overdueAmount": -0.04099456815704131,
+    "partialPaymentRatio12m": -0.21375603724183048,
+    "recordCount": -1.0167127808811496,
+    "remainingLimit": 0.2245896937959639,
+    "tenureDays": -0.9283656951144867,
+    "utilizationRate": -0.5511708593376382
+  },
+  "deployable": false,
+  "feature_defs": {
+    "currentMaxDpd": {
+      "cuts": [
+        3.0,
+        11.0,
+        19.0,
+        30.0,
+        101.0
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        2.307638,
+        0.989381,
+        0.612072,
+        -0.395876,
+        -1.582697
+      ]
+    },
+    "latePaymentCount12m": {
+      "cuts": [
+        1.0,
+        2.0,
+        7.0
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        0.697285,
+        -0.142541,
+        -1.745752
+      ]
+    },
+    "onTimeRate12m": {
+      "cuts": [
+        0.789,
+        0.874,
+        0.929,
+        0.996,
+        1.0
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        -1.476592,
+        0.027857,
+        0.375923,
+        0.601779,
+        1.760157
+      ]
+    },
+    "overdueAmount": {
+      "cuts": [
+        300.236,
+        699.47,
+        1438.212,
+        5015.37
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        1.284573,
+        0.228077,
+        -0.105372,
+        -1.430808
+      ]
+    },
+    "partialPaymentRatio12m": {
+      "cuts": [
+        0.0852,
+        0.126,
+        0.157,
+        0.199,
+        0.338
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        0.921272,
+        0.466398,
+        0.382726,
+        -0.135619,
+        -1.068189
+      ]
+    },
+    "recordCount": {
+      "cuts": [
+        7.0,
+        8.0,
+        9.0,
+        10.0,
+        11.0
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        -0.190204,
+        -0.090181,
+        0.036061,
+        -0.042333,
+        0.560974
+      ]
+    },
+    "remainingLimit": {
+      "cuts": [
+        6483.12,
+        9728.824,
+        12807.856,
+        16712.574,
+        30494.87
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        -0.495181,
+        -0.01169,
+        -0.01169,
+        0.303476,
+        0.303476
+      ]
+    },
+    "tenureDays": {
+      "cuts": [
+        155.26,
+        192.36,
+        222.98,
+        255.48,
+        425.8
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        -0.335988,
+        -0.043434,
+        0.087011,
+        0.121183,
+        0.19167
+      ]
+    },
+    "utilizationRate": {
+      "cuts": [
+        0.202,
+        0.339,
+        0.46,
+        0.614,
+        1.049
+      ],
+      "missing_bin": {
+        "label": "缺失",
+        "woe": 0.0
+      },
+      "source": "external",
+      "type": "numeric",
+      "woe": [
+        0.423969,
+        0.272224,
+        0.013312,
+        0.228077,
+        -0.742915
+      ]
+    }
+  },
+  "intercept": -0.029805221573593034,
+  "model_type": "b_card_asof",
+  "selected_features": [
+    "currentMaxDpd",
+    "onTimeRate12m",
+    "overdueAmount",
+    "latePaymentCount12m",
+    "partialPaymentRatio12m",
+    "utilizationRate",
+    "remainingLimit",
+    "recordCount",
+    "tenureDays"
+  ]
+}

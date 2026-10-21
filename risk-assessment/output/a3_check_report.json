@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "check": "特征一致性基准生成",
+      "detail": "3 个用例, 列数=40",
+      "passed": true
+    },
+    {
+      "check": "OOT 训练可重复",
+      "detail": "model_hash=63513d8b381de7f8 两次一致=True",
+      "passed": true
+    },
+    {
+      "check": "指标/PSI/校准输出完整",
+      "detail": "OOT AUC=0.7925 KS=0.4773 Lift@10%=2.95 score_PSI=0.0256 max_feature_PSI=0.0856",
+      "passed": true
+    },
+    {
+      "check": "退化/噪声/共线特征不入模",
+      "detail": "入模 9 个特征; 剔除示例: activeLoanCount=常量特征(退化), recentNewLoanCount90d=单调性不足(|rho|<0.60), cappedUtilizationRate=与utilizationRate相关>0.80",
+      "passed": true
+    },
+    {
+      "check": "入模特征全部在线可用",
+      "detail": "9 个入模特征均在目录中标记 available_online=true",
+      "passed": true
+    },
+    {
+      "check": "不产生可部署规则/不覆盖生产规则",
+      "detail": "真实数据缺失时退出码=2(应为非0), 生产规则文件未变=True, fixture 产物 deployable=False",
+      "passed": true
+    }
+  ],
+  "checks_failed": 0,
+  "checks_total": 6,
+  "passed": true,
+  "phase": "A3"
+}

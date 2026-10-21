@@ -24,15 +24,21 @@ import org.example.risklendpro.loan.repay.RepaymentCalculator;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 
 @Service
 public class UserCreditLimitServiceImpl implements UserCreditLimitService {
+
+    private static final Logger log = LoggerFactory.getLogger(UserCreditLimitServiceImpl.class);
 
     @Autowired
     private UserCreditLimitMapper userCreditLimitMapper;
@@ -58,14 +64,18 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
     @Autowired
     private RiskServiceClient riskServiceClient;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @Override
     public UserCreditLimitResponse getUserCreditLimit(Long userId) {
         QueryWrapper<UserCreditLimit> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("user_id", userId);
         UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(queryWrapper);
 
+        // 尚未开通额度的用户直接返回零值快照，避免 500；读接口不应产生写副作用。
         if (creditLimit == null) {
-            throw new RuntimeException("用户额度信息不存在");
+            return zeroCreditLimit(userId);
         }
 
         UserCreditLimitResponse response = new UserCreditLimitResponse();
@@ -80,9 +90,38 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
         return response;
     }
 
+    private UserCreditLimitResponse zeroCreditLimit(Long userId) {
+        UserCreditLimitResponse response = new UserCreditLimitResponse();
+        response.setUserId(userId);
+        response.setTotalLimit(BigDecimal.ZERO);
+        response.setUsedLimit(BigDecimal.ZERO);
+        response.setRemainingLimit(BigDecimal.ZERO);
+        response.setOverdueAmount(BigDecimal.ZERO);
+        response.setHasOverdue(false);
+        return response;
+    }
+
     @Override
-    @Transactional
     public LimitAdjustResponse adjustLimit(LimitAdjustRequest request, Long operatorId) {
+        // Feign 调用放在事务外，避免长事务占用数据库连接与 FOR UPDATE 行锁
+        UserSummary user = null;
+        try {
+            user = userServiceClient.getUser(request.getUserId());
+        } catch (Exception e) {
+            log.warn("调额前获取用户信息失败 userId={}, 将跳过放款通知: {}", request.getUserId(), e.getMessage());
+        }
+
+        // 用 TransactionTemplate 包裹纯数据库操作，确保事务生效（同类自调用不走 AOP 代理）
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+        AdjustResult result = txTemplate.execute(status -> doAdjustLimitInTx(request, operatorId));
+
+        // 事务提交后再发送外部通知：邮件/B 卡失败不影响已落库的调额结果
+        notifyDisbursedLoans(request.getUserId(), user, result.disbursedLoans());
+        return result.response();
+    }
+
+    /** 纯数据库操作：额度变更、日志、自动放款落库，不包含任何 Feign / 邮件调用。 */
+    private AdjustResult doAdjustLimitInTx(LimitAdjustRequest request, Long operatorId) {
         QueryWrapper<UserCreditLimit> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("user_id", request.getUserId()).last("FOR UPDATE");
         UserCreditLimit creditLimit = userCreditLimitMapper.selectOne(queryWrapper);
@@ -129,24 +168,28 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
         response.setNewLimit(newLimit);
         response.setAdjustTime(new Date());
 
-        // 额度上调后，自动处理原本因额度不足而挂起的申请
-        autoDisbursePendingLoans(request.getUserId(), creditLimit);
+        // 额度上调后，自动处理原本因额度不足而挂起的申请（仅落库）
+        List<Loan> disbursed = autoDisbursePendingLoansInTx(request.getUserId(), creditLimit);
 
-        return response;
+        return new AdjustResult(response, disbursed);
     }
 
-    private void autoDisbursePendingLoans(Long userId, UserCreditLimit creditLimit) {
+    /** 自动放款的数据库部分，返回已放款借据列表供事务后发送通知。 */
+    private List<Loan> autoDisbursePendingLoansInTx(Long userId, UserCreditLimit creditLimit) {
+        List<Loan> disbursed = new ArrayList<>();
+        // 仅信用类（无抵押物）申请可因额度上调自动放款；
+        // 抵押类 PENDING_APPROVAL 必须经管理员人工确认抵押物后放款，不得自动处理。
         List<Loan> pendingLoans = loanMapper.selectList(
                 new QueryWrapper<Loan>()
                         .eq("user_id", userId)
                         .eq("status", LoanStatusEnum.PENDING_APPROVAL.getCode())
+                        .isNull("collateral_type")
                         .orderByAsc("apply_time")
         );
         if (pendingLoans == null || pendingLoans.isEmpty()) {
-            return;
+            return disbursed;
         }
 
-        UserSummary user = userServiceClient.getUser(userId);
         for (Loan pending : pendingLoans) {
             Loan loan = loanMapper.selectOne(
                     new QueryWrapper<Loan>().eq("loan_id", pending.getLoanId()).last("FOR UPDATE"));
@@ -171,20 +214,37 @@ public class UserCreditLimitServiceImpl implements UserCreditLimitService {
 
             deductCreditLimit(creditLimit, loan.getAmount());
             generateRepaymentPlan(loan);
-
-            if (user != null && user.idCard() != null) {
-                riskServiceClient.activateBehaviorScore(userId, user.idCard());
-            }
-            if (user != null && user.email() != null) {
-                emailUtil.sendLoanSuccessNotification(
-                        user.email(),
-                        user.realName(),
-                        loan.getAmount().toString()
-                );
-            }
+            disbursed.add(loan);
         }
         creditLimit.setLastUpdateTime(new Date());
         userCreditLimitMapper.updateById(creditLimit);
+        return disbursed;
+    }
+
+    /** 事务提交后再发起 B 卡激活与放款成功邮件，失败仅告警不回滚。 */
+    private void notifyDisbursedLoans(Long userId, UserSummary user, List<Loan> disbursedLoans) {
+        if (disbursedLoans == null || disbursedLoans.isEmpty() || user == null) {
+            return;
+        }
+        for (Loan loan : disbursedLoans) {
+            try {
+                if (user.idCard() != null) {
+                    riskServiceClient.activateBehaviorScore(userId, user.idCard());
+                }
+                if (user.email() != null) {
+                    emailUtil.sendLoanSuccessNotification(
+                            user.email(),
+                            user.realName(),
+                            loan.getAmount().toString()
+                    );
+                }
+            } catch (Exception e) {
+                log.warn("自动放款通知失败 userId={} loanId={}: {}", userId, loan.getLoanId(), e.getMessage());
+            }
+        }
+    }
+
+    private record AdjustResult(LimitAdjustResponse response, List<Loan> disbursedLoans) {
     }
 
     private void deductCreditLimit(UserCreditLimit creditLimit, BigDecimal amount) {

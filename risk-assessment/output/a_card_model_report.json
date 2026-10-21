@@ -1,0 +1,710 @@
+{
+  "calibration": {
+    "a": 0.40015924,
+    "b": -2.27715219,
+    "method": "platt"
+  },
+  "cost_assumptions": {
+    "experience_cost_per_contract": 30.0,
+    "lgd": 0.65,
+    "revenue_margin_rate": 0.08,
+    "review_capacity": 0.1
+  },
+  "current_rule_reported_metrics": {
+    "accuracy": 0.66095,
+    "auc": 0.7138366770025718
+  },
+  "dataset": "fixture",
+  "deployable": false,
+  "feature_selection": [
+    {
+      "feature": "loan_overdue_max_6m",
+      "iv": 0.474374,
+      "missing_rate": 0.0,
+      "monotonic": 0.0,
+      "psi": 0.020688,
+      "reason": "单调性不足(|rho|<0.60)",
+      "selected": false
+    },
+    {
+      "feature": "prev_refused_count",
+      "iv": 0.259142,
+      "missing_rate": 0.0,
+      "monotonic": 0.0,
+      "psi": 0.002024,
+      "reason": "单调性不足(|rho|<0.60)",
+      "selected": false
+    },
+    {
+      "feature": "ext_source_3",
+      "iv": 0.191787,
+      "missing_rate": 0.0,
+      "monotonic": -0.9,
+      "psi": 0.036088,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "credit_bureau_week",
+      "iv": 0.170125,
+      "missing_rate": 0.0,
+      "monotonic": 1.0,
+      "psi": 0.005208,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "active_loans_count",
+      "iv": 0.140622,
+      "missing_rate": 0.0,
+      "monotonic": 1.0,
+      "psi": 0.008282,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "cc_utilization",
+      "iv": 0.109177,
+      "missing_rate": 0.0,
+      "monotonic": 0.7,
+      "psi": 0.017553,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "ext_source_2",
+      "iv": 0.101912,
+      "missing_rate": 0.0,
+      "monotonic": -0.9,
+      "psi": 0.03556,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "credit_bureau_mon",
+      "iv": 0.100828,
+      "missing_rate": 0.0,
+      "monotonic": 0.7,
+      "psi": 0.017766,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "days_last_phone_change",
+      "iv": 0.092615,
+      "missing_rate": 0.0,
+      "monotonic": -0.7,
+      "psi": 0.014026,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "employment_years",
+      "iv": 0.091392,
+      "missing_rate": 0.0,
+      "monotonic": -0.6,
+      "psi": 0.037203,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "age_years",
+      "iv": 0.062237,
+      "missing_rate": 0.0,
+      "monotonic": -0.9,
+      "psi": 0.02343,
+      "reason": "入模",
+      "selected": true
+    },
+    {
+      "feature": "has_car",
+      "iv": 0.048796,
+      "missing_rate": 0.0,
+      "monotonic": 0.0,
+      "psi": 0.0,
+      "reason": "单调性不足(|rho|<0.60)",
+      "selected": false
+    },
+    {
+      "feature": "income_deviation_ratio",
+      "iv": 0.019084,
+      "missing_rate": 0.0,
+      "monotonic": -0.3591,
+      "psi": 0.030316,
+      "reason": "IV<0.02",
+      "selected": false
+    },
+    {
+      "feature": "has_house",
+      "iv": 0.000898,
+      "missing_rate": 0.0,
+      "monotonic": 0.0,
+      "psi": 0.0,
+      "reason": "IV<0.02",
+      "selected": false
+    }
+  ],
+  "lift_table_oot": [
+    {
+      "lift": 2.15311,
+      "top_fraction": 0.05
+    },
+    {
+      "lift": 2.631579,
+      "top_fraction": 0.1
+    },
+    {
+      "lift": 1.578947,
+      "top_fraction": 0.2
+    },
+    {
+      "lift": 1.491228,
+      "top_fraction": 0.3
+    }
+  ],
+  "metrics": {
+    "lr_woe_calibrated_oot": {
+      "auc": 0.655851,
+      "bad_rate": 0.084444,
+      "brier": 0.075703,
+      "ks": 0.288324,
+      "lift_top10": 2.631579,
+      "pr_auc": 0.149077,
+      "rows": 450
+    },
+    "lr_woe_raw_oot": {
+      "auc": 0.655851,
+      "bad_rate": 0.084444,
+      "brier": 0.20641,
+      "ks": 0.288324,
+      "lift_top10": 2.631579,
+      "pr_auc": 0.149077,
+      "rows": 450
+    },
+    "tree_challenger_oot": {
+      "auc": 0.614653,
+      "bad_rate": 0.084444,
+      "brier": 0.082384,
+      "ks": 0.241185,
+      "lift_top10": 1.315789,
+      "pr_auc": 0.120487,
+      "rows": 450
+    }
+  },
+  "note": "fixture 为合成数据，仅验证 A 卡模型治理与优化流程；不覆盖线上 scoring_rules.json",
+  "pdo_mapping": {
+    "max_score": 950,
+    "min_score": 350,
+    "pdo": 80.0,
+    "target_odds": 1.0,
+    "target_score": 650.0
+  },
+  "periods_calibrated": {
+    "calib": {
+      "auc": 0.582678,
+      "bad_rate": 0.086667,
+      "brier": 0.078345,
+      "ks": 0.206064,
+      "lift_top10": 1.923077,
+      "pr_auc": 0.129409,
+      "rows": 300,
+      "score_psi_vs_train": 0.032166
+    },
+    "oot": {
+      "auc": 0.655851,
+      "bad_rate": 0.084444,
+      "brier": 0.075703,
+      "ks": 0.288324,
+      "lift_top10": 2.631579,
+      "pr_auc": 0.149077,
+      "rows": 450,
+      "score_psi_vs_train": 0.008098
+    },
+    "train": {
+      "auc": 0.758964,
+      "bad_rate": 0.080952,
+      "brier": 0.070498,
+      "ks": 0.400305,
+      "lift_top10": 3.764706,
+      "pr_auc": 0.280982,
+      "rows": 1050,
+      "score_psi_vs_train": 0.0
+    }
+  },
+  "reliability_curve_oot": [
+    {
+      "avg_predicted": 0.041699,
+      "bucket": 1,
+      "count": 45,
+      "observed_bad_rate": 0.0
+    },
+    {
+      "avg_predicted": 0.054228,
+      "bucket": 2,
+      "count": 45,
+      "observed_bad_rate": 0.022222
+    },
+    {
+      "avg_predicted": 0.063154,
+      "bucket": 3,
+      "count": 45,
+      "observed_bad_rate": 0.066667
+    },
+    {
+      "avg_predicted": 0.070349,
+      "bucket": 4,
+      "count": 45,
+      "observed_bad_rate": 0.066667
+    },
+    {
+      "avg_predicted": 0.076964,
+      "bucket": 5,
+      "count": 45,
+      "observed_bad_rate": 0.155556
+    },
+    {
+      "avg_predicted": 0.08348,
+      "bucket": 6,
+      "count": 45,
+      "observed_bad_rate": 0.066667
+    },
+    {
+      "avg_predicted": 0.091497,
+      "bucket": 7,
+      "count": 45,
+      "observed_bad_rate": 0.088889
+    },
+    {
+      "avg_predicted": 0.100825,
+      "bucket": 8,
+      "count": 45,
+      "observed_bad_rate": 0.111111
+    },
+    {
+      "avg_predicted": 0.114468,
+      "bucket": 9,
+      "count": 45,
+      "observed_bad_rate": 0.044444
+    },
+    {
+      "avg_predicted": 0.143282,
+      "bucket": 10,
+      "count": 45,
+      "observed_bad_rate": 0.222222
+    }
+  ],
+  "selected_features": [
+    "ext_source_3",
+    "credit_bureau_week",
+    "active_loans_count",
+    "cc_utilization",
+    "ext_source_2",
+    "credit_bureau_mon",
+    "days_last_phone_change",
+    "employment_years",
+    "age_years"
+  ],
+  "split": {
+    "calib_months": [
+      "2025-02",
+      "2025-03"
+    ],
+    "oot_months": [
+      "2025-04",
+      "2025-05",
+      "2025-06"
+    ],
+    "train_months": [
+      "2024-07",
+      "2024-08",
+      "2024-09",
+      "2024-10",
+      "2024-11",
+      "2024-12",
+      "2025-01"
+    ]
+  },
+  "threshold_policy": {
+    "chosen": {
+      "approve_below": 0.125,
+      "approve_rate": 0.944444,
+      "bad_debt_cost": 1447995.1785,
+      "bad_rate_in_fully_approved_group": 0.067164,
+      "bad_rate_in_reduced_group": 0.229167,
+      "capacity_ok": true,
+      "experience_cost": 1095.0,
+      "margin_cost": 203022.324,
+      "multipliers": {
+        "approve": 1.0,
+        "reduce": 0.5,
+        "reject": 0.0
+      },
+      "reject_above": 0.135,
+      "review_rate": 0.055556,
+      "total_cost": 1652112.5025
+    },
+    "selection_rule": "概率网格上最小化业务总成本，满足审核容量，非分位数",
+    "top_candidates": [
+      {
+        "approve_below": 0.115,
+        "approve_rate": 0.893333,
+        "bad_debt_cost": 1310282.649,
+        "bad_rate_in_fully_approved_group": 0.067532,
+        "bad_rate_in_reduced_group": 0.184615,
+        "capacity_ok": false,
+        "experience_cost": 1695.0,
+        "margin_cost": 310286.0928,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.125,
+        "review_rate": 0.106667,
+        "total_cost": 1622263.7418
+      },
+      {
+        "approve_below": 0.12,
+        "approve_rate": 0.893333,
+        "bad_debt_cost": 1333212.972,
+        "bad_rate_in_fully_approved_group": 0.068878,
+        "bad_rate_in_reduced_group": 0.189655,
+        "capacity_ok": false,
+        "experience_cost": 1590.0,
+        "margin_cost": 287808.9672,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.125,
+        "review_rate": 0.106667,
+        "total_cost": 1622611.9392
+      },
+      {
+        "approve_below": 0.115,
+        "approve_rate": 0.871111,
+        "bad_debt_cost": 1310282.649,
+        "bad_rate_in_fully_approved_group": 0.067532,
+        "bad_rate_in_reduced_group": 0.184615,
+        "capacity_ok": false,
+        "experience_cost": 1845.0,
+        "margin_cost": 337370.1384,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.12,
+        "review_rate": 0.128889,
+        "total_cost": 1649497.7874
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.944444,
+        "bad_debt_cost": 1447995.1785,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 1095.0,
+        "margin_cost": 203022.324,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.135,
+        "review_rate": 0.055556,
+        "total_cost": 1652112.5025
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.995556,
+        "bad_debt_cost": 1522900.5285,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 750.0,
+        "margin_cost": 135847.2312,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.185,
+        "review_rate": 0.004444,
+        "total_cost": 1659497.7597
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.995556,
+        "bad_debt_cost": 1522900.5285,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 750.0,
+        "margin_cost": 135847.2312,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.19,
+        "review_rate": 0.004444,
+        "total_cost": 1659497.7597
+      },
+      {
+        "approve_below": 0.11,
+        "approve_rate": 0.893333,
+        "bad_debt_cost": 1310282.649,
+        "bad_rate_in_fully_approved_group": 0.069519,
+        "bad_rate_in_reduced_group": 0.157895,
+        "capacity_ok": false,
+        "experience_cost": 1860.0,
+        "margin_cost": 347731.152,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.125,
+        "review_rate": 0.106667,
+        "total_cost": 1659873.801
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.962222,
+        "bad_debt_cost": 1482538.2585,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 975.0,
+        "margin_cost": 178461.5352,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.14,
+        "review_rate": 0.037778,
+        "total_cost": 1661974.7937
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.993333,
+        "bad_debt_cost": 1522900.5285,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 765.0,
+        "margin_cost": 138524.6784,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.18,
+        "review_rate": 0.006667,
+        "total_cost": 1662190.2069
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.991111,
+        "bad_debt_cost": 1522900.5285,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 780.0,
+        "margin_cost": 142432.6416,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.175,
+        "review_rate": 0.008889,
+        "total_cost": 1666113.1701
+      },
+      {
+        "approve_below": 0.1,
+        "approve_rate": 0.893333,
+        "bad_debt_cost": 1212154.476,
+        "bad_rate_in_fully_approved_group": 0.068452,
+        "bad_rate_in_reduced_group": 0.131579,
+        "capacity_ok": false,
+        "experience_cost": 2430.0,
+        "margin_cost": 453684.5544,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.125,
+        "review_rate": 0.106667,
+        "total_cost": 1668269.0304
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.988889,
+        "bad_debt_cost": 1522900.5285,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 795.0,
+        "margin_cost": 144907.0704,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.17,
+        "review_rate": 0.011111,
+        "total_cost": 1668602.5989
+      },
+      {
+        "approve_below": 0.095,
+        "approve_rate": 0.893333,
+        "bad_debt_cost": 1156287.1125,
+        "bad_rate_in_fully_approved_group": 0.066667,
+        "bad_rate_in_reduced_group": 0.125926,
+        "capacity_ok": false,
+        "experience_cost": 2745.0,
+        "margin_cost": 512821.572,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.125,
+        "review_rate": 0.106667,
+        "total_cost": 1671853.6845
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 0.986667,
+        "bad_debt_cost": 1522900.5285,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 810.0,
+        "margin_cost": 148414.896,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.165,
+        "review_rate": 0.013333,
+        "total_cost": 1672125.4245
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 1.0,
+        "bad_debt_cost": 1542120.645,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 720.0,
+        "margin_cost": 130362.4608,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.205,
+        "review_rate": 0.0,
+        "total_cost": 1673203.1058
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 1.0,
+        "bad_debt_cost": 1542120.645,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 720.0,
+        "margin_cost": 130362.4608,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.21,
+        "review_rate": 0.0,
+        "total_cost": 1673203.1058
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 1.0,
+        "bad_debt_cost": 1542120.645,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 720.0,
+        "margin_cost": 130362.4608,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.215,
+        "review_rate": 0.0,
+        "total_cost": 1673203.1058
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 1.0,
+        "bad_debt_cost": 1542120.645,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 720.0,
+        "margin_cost": 130362.4608,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.22,
+        "review_rate": 0.0,
+        "total_cost": 1673203.1058
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 1.0,
+        "bad_debt_cost": 1542120.645,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 720.0,
+        "margin_cost": 130362.4608,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.225,
+        "review_rate": 0.0,
+        "total_cost": 1673203.1058
+      },
+      {
+        "approve_below": 0.125,
+        "approve_rate": 1.0,
+        "bad_debt_cost": 1542120.645,
+        "bad_rate_in_fully_approved_group": 0.067164,
+        "bad_rate_in_reduced_group": 0.229167,
+        "capacity_ok": true,
+        "experience_cost": 720.0,
+        "margin_cost": 130362.4608,
+        "multipliers": {
+          "approve": 1.0,
+          "reduce": 0.5,
+          "reject": 0.0
+        },
+        "reject_above": 0.23,
+        "review_rate": 0.0,
+        "total_cost": 1673203.1058
+      }
+    ]
+  }
+}

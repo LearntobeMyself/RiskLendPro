@@ -34,12 +34,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 @Service
 public class AdminSystemServiceImpl implements AdminSystemService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminSystemServiceImpl.class);
+
+    /** 备份文件名白名单：仅允许字母、数字、下划线、连字符与点，杜绝路径穿越与目录分隔符。 */
+    private static final Pattern SAFE_BACKUP_ID = Pattern.compile("^[A-Za-z0-9._-]+$");
 
     private final Map<String, Object> configStore = new ConcurrentHashMap<>(Map.of(
             "emailEnabled", true,
@@ -236,7 +240,7 @@ public class AdminSystemServiceImpl implements AdminSystemService {
 
     @Override
     public Map<String, Object> restoreBackup(String backupId) {
-        Path file = Paths.get(backupDir, backupId);
+        Path file = resolveBackupFile(backupId);
         if (!Files.exists(file)) {
             throw new RuntimeException("备份文件不存在");
         }
@@ -245,12 +249,28 @@ public class AdminSystemServiceImpl implements AdminSystemService {
 
     @Override
     public byte[] downloadBackup(String backupId) {
-        Path file = Paths.get(backupDir, backupId);
+        Path file = resolveBackupFile(backupId);
         try {
             return Files.readAllBytes(file);
         } catch (IOException e) {
             throw new RuntimeException("下载备份失败", e);
         }
+    }
+
+    /**
+     * 将用户传入的 backupId 安全解析为备份目录下的文件路径。
+     * 双重防护：先做文件名白名单校验，再做规范化路径前缀校验，防止 ../../ 路径穿越。
+     */
+    private Path resolveBackupFile(String backupId) {
+        if (backupId == null || backupId.isBlank() || !SAFE_BACKUP_ID.matcher(backupId).matches()) {
+            throw new RuntimeException("非法的备份文件名");
+        }
+        Path baseDir = Paths.get(backupDir).toAbsolutePath().normalize();
+        Path target = baseDir.resolve(backupId).normalize();
+        if (!target.startsWith(baseDir)) {
+            throw new RuntimeException("非法的备份文件路径");
+        }
+        return target;
     }
 
     private void ensureBackupDir() {
