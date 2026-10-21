@@ -4,6 +4,7 @@ import org.example.risklendpro.common.api.CommonResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -62,6 +63,14 @@ public class GlobalExceptionHandler {
     public CommonResponse<Void> handleNotFound(Exception e) {
         log.warn("Not found: {}", e.getMessage());
         return CommonResponse.fail(404, "接口不存在");
+    }
+
+    @ExceptionHandler(DuplicateKeyException.class)
+    public CommonResponse<Void> handleDuplicateKey(DuplicateKeyException e) {
+        // MySQL 1062 / SQLState 23000 唯一键冲突：注册重名、并发首插额度等。
+        // 返回 409 而非 500，便于前端提示“已存在”。
+        log.warn("DuplicateKeyException: {}", e.getMessage());
+        return CommonResponse.fail(409, "数据已存在，请勿重复操作");
     }
 
     @ExceptionHandler(DataAccessException.class)
