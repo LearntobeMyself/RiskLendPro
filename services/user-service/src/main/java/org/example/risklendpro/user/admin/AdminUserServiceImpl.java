@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class AdminUserServiceImpl implements AdminUserService {
@@ -195,10 +196,19 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Override
     public Map<String, Object> exportUsers(String status, String name, String phone) {
         List<User> users = userMapper.selectList(buildUserQuery(status, name, phone));
+        // 批量预取额度/评估/贷款摘要，替代逐行 3 次 Feign（1 万用户即 3 万次 HTTP 的 N+1）
+        List<Long> userIds = users.stream().map(User::getId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, CreditLimitSnapshot> limitMap = batchSafely(
+                () -> loanServiceClient.listCreditLimits(userIds), Map.of());
+        Map<Long, RiskAssessmentSummary> assessmentMap = batchSafely(
+                () -> riskServiceClient.listLatestFinalAssessments(userIds), Map.of());
+        Map<Long, LoanUserSummaryItem> loanMap = batchSafely(
+                () -> loanServiceClient.listUserLoanSummaries(userIds), Map.of());
         List<String> headers = List.of("id", "name", "phone", "status", "creditScore", "creditLimit");
         List<List<String>> rows = new ArrayList<>();
         for (User user : users) {
-            Map<String, Object> item = toUserListItem(user);
+            Map<String, Object> item = AdminEntityMapper.toUserListItem(user,
+                    limitMap.get(user.getId()), assessmentMap.get(user.getId()), loanMap.get(user.getId()));
             rows.add(List.of(
                     String.valueOf(item.get("id")),
                     String.valueOf(item.get("name")),
@@ -210,6 +220,16 @@ public class AdminUserServiceImpl implements AdminUserService {
         }
         String path = adminExportHelper.writeCsv("users", headers, rows);
         return adminExportHelper.downloadMeta(path);
+    }
+
+    /** 批量调用失败时返回兜底空集合，不阻断导出主流程。 */
+    private <K, V> Map<K, V> batchSafely(java.util.function.Supplier<Map<K, V>> call, Map<K, V> fallback) {
+        try {
+            Map<K, V> result = call.get();
+            return result != null ? result : fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private QueryWrapper<User> buildUserQuery(String status, String name, String phone) {
