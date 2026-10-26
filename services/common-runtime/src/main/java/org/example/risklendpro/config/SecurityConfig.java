@@ -48,7 +48,8 @@ public class SecurityConfig {
                             "/swagger-ui/**",
                             "/swagger-ui.html",
                             "/swagger-resources/**",
-                            "/webjars/**"
+                            "/webjars/**",
+                            "/ai-cs-demo.html"
                         ).permitAll();
                     // 3. Demo 图片核验接口：仅当显式打开开关时匿名放行，默认走认证
                     if (demoImageVerifyEnabled) {

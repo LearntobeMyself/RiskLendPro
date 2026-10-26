@@ -117,7 +117,7 @@ risk:
 
 # 业务服务 CORS（SecurityConfig）。本地可在 application-local.yml 覆盖。
 cors:
-  allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*}
+  allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
 
 # 腾讯云 COS：密钥不要写进仓库。复制 config/application-local.yml.example 到 config/local/application-local.yml 后填写。
 storage:
