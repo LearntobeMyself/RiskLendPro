@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RiskLendPro 人工客服工作台</title>
+<style>
+  :root {
+    --bg: #f0f2f5; --card: #ffffff; --border: #e5e7eb;
+    --text: #1f2329; --sub: #8a919c; --blue: #1677ff; --blue-bg: #e8f1ff;
+    --green: #16a34a; --green-bg: #e7f6ec; --red: #dc2626; --red-bg: #fdeaea;
+    --amber: #d97706; --amber-bg: #fdf3e2; --purple: #7c3aed; --purple-bg: #f3e8ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; font-size: 14px; }
+  header { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .logo { width: 26px; height: 26px; border-radius: 7px; background: var(--purple); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .status { font-size: 12px; color: var(--sub); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; display: inline-block; }
+  .dot.on { background: var(--green); } .dot.off { background: var(--red); }
+
+  .wrap { flex: 1; display: flex; overflow: hidden; }
+  .side { width: 300px; background: var(--card); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  .side h2 { font-size: 13px; color: var(--sub); padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  #list { flex: 1; overflow-y: auto; }
+  .item { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .item:hover { background: var(--blue-bg); }
+  .item.active { background: var(--blue-bg); }
+  .item .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .item .uid { font-weight: 600; }
+  .item .last { font-size: 12px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .tag.TRANSFERRED { background: var(--amber-bg); color: var(--amber); }
+  .tag.AGENT { background: var(--green-bg); color: var(--green); }
+  .tag.CLOSED { background: #f3f4f6; color: #6b7280; }
+  .empty { text-align: center; color: var(--sub); padding: 40px 16px; font-size: 13px; }
+
+  .main { flex: 1; display: flex; flex-direction: column; }
+  .main .bar { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+  .main .bar .t { font-weight: 600; }
+  .main .bar button { border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 8px; padding: 7px 16px; font-size: 13px; cursor: pointer; }
+  .main .bar button.primary { background: var(--purple); color: #fff; border: none; }
+  .main .bar button:disabled { opacity: .5; cursor: not-allowed; }
+  #msg { flex: 1; overflow-y: auto; padding: 20px; }
+  .msg { display: flex; margin-bottom: 14px; }
+  .msg.user { justify-content: flex-end; }
+  .bubble { max-width: 72%; padding: 10px 14px; border-radius: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg.user .bubble { background: var(--blue); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.ai .bubble { background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg.agent .bubble { background: var(--purple-bg); border: 1px solid #d8b4fe; color: #4c1d95; border-bottom-left-radius: 4px; }
+  .meta { font-size: 12px; color: var(--sub); margin-top: 4px; }
+  .sysline { text-align: center; font-size: 12px; color: var(--sub); margin: 8px 0; }
+
+  footer { background: var(--card); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 10px; }
+  footer input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; color: var(--text); }
+  footer button { background: var(--purple); color: #fff; border: none; border-radius: 8px; padding: 0 22px; font-size: 14px; cursor: pointer; }
+  footer button:disabled { background: #c4b5fd; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <header>
+    <h1><span class="logo">服</span>RiskLendPro · 人工客服工作台</h1>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">检测中…</span>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="side">
+      <h2>转人工会话（待接入 / 接待中）</h2>
+      <div id="list"></div>
+    </div>
+    <div class="main">
+      <div class="bar">
+        <span class="t" id="convTitle">请选择左侧会话</span>
+        <button id="btnTakeover" class="primary" disabled>接入会话</button>
+        <button id="btnClose" disabled>结束会话</button>
+      </div>
+      <div id="msg"></div>
+      <footer>
+        <input id="input" placeholder="输入回复内容，回车发送…" disabled />
+        <button id="send" disabled>发送</button>
+      </footer>
+    </div>
+  </div>
+
+<script>
+const DEFAULT_BASE = "";
+const DEFAULT_AGENT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6IkNTX0FHRU5UIiwiYWNjb3VudFN0YXR1cyI6IkFDVElWRSIsImlhdCI6MTc5MzAyMjE2NSwiZXhwIjoxODI0NTU4MTY1fQ.LalYSSeZrfk09bl8Okc6RrTuR0KB9d-l7yzmvB9MaaQ";
+
+const $ = id => document.getElementById(id);
+const list = $("list"), msgBox = $("msg");
+let token = DEFAULT_AGENT;
+let currentConvId = null;
+let currentStatus = null;
+let renderedCount = 0;
+let timer = null;
+
+function base() { return DEFAULT_BASE; }
+function authHeaders() { return { "Authorization": "Bearer " + token }; }
+
+async function healthCheck() {
+  try {
+    const r = await fetch(base() + "/v3/api-docs");
+    $("dot").className = "dot " + (r.ok ? "on" : "off");
+    $("statusText").textContent = r.ok ? "服务在线" : "服务异常";
+  } catch (e) {
+    $("dot").className = "dot off";
+    $("statusText").textContent = "服务未连接";
+  }
+}
+
+function statusTag(s) {
+  const map = { "TRANSFERRED": "待接入", "AGENT": "接待中", "CLOSED": "已结束", "OPEN": "AI接待" };
+  return `<span class="tag ${s}">${map[s] || s}</span>`;
+}
+
+async function loadList() {
+  try {
+    const r = await fetch(base() + "/api/v1/admin/cs/conversations", { headers: authHeaders() });
+    const j = await r.json();
+    const arr = (j && j.data) || [];
+    list.innerHTML = "";
+    if (!arr.length) {
+      list.innerHTML = '<div class="empty">暂无转人工会话<br><br>用户说「转人工」或 AI 答不上时，<br>会出现在这里</div>';
+      return;
+    }
+    arr.forEach(c => {
+      const d = document.createElement("div");
+      d.className = "item" + (c.id === currentConvId ? " active" : "");
+      d.innerHTML = `<div class="top"><span class="uid">会话 #${c.id}（用户 ${c.userId}）</span>${statusTag(c.status)}</div>
+                     <div class="last">${c.lastMessage || "(无消息)"}</div>`;
+      d.addEventListener("click", () => select(c.id));
+      list.appendChild(d);
+    });
+  } catch (e) { /* 静默 */ }
+}
+
+async function select(id) {
+  currentConvId = id;
+  renderedCount = 0;
+  msgBox.innerHTML = "";
+  await syncStatus();
+  updateBar();
+  try {
+    const r = await fetch(base() + "/api/v1/admin/cs/conversations/" + id + "/messages", { headers: authHeaders() });
+    const j = await r.json();
+    renderMessages((j && j.data) || []);
+  } catch (e) {
+    $("convTitle").textContent = "会话 #" + id + "（加载失败）";
+  }
+  loadList();
+}
+
+function renderMessages(arr) {
+  for (let i = renderedCount; i < arr.length; i++) {
+    const m = arr[i];
+    const role = m.role === "USER" ? "user" : (m.role === "AGENT" ? "agent" : "ai");
+    addMsg(role, m.content, role === "ai" ? (m.intent || "") : "");
+  }
+  renderedCount = arr.length;
+}
+
+function addMsg(role, text, meta) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+  const b = document.createElement("div");
+  b.className = "bubble";
+  b.textContent = text;
+  wrap.appendChild(b);
+  if (meta) {
+    const m = document.createElement("div");
+    m.className = "meta";
+    m.textContent = meta;
+    wrap.appendChild(m);
+  }
+  msgBox.appendChild(wrap);
+  msgBox.scrollTop = msgBox.scrollHeight;
+}
+
+function addSys(text) {
+  const d = document.createElement("div");
+  d.className = "sysline";
+  d.textContent = text;
+  msgBox.appendChild(d);
+  msgBox.scrollTop = msgBox.scrollHeight;
+}
+
+// 维护一个会话状态缓存，避免重复拉列表
+const statusCache = {};
+async function syncStatus() {
+  try {
+    const r = await fetch(base() + "/api/v1/admin/cs/conversations", { headers: authHeaders() });
+    const j = await r.json();
+    (j.data || []).forEach(c => { statusCache[c.id] = c.status; });
+    if (currentConvId != null) {
+      currentStatus = statusCache[currentConvId];
+      updateBar();
+    }
+  } catch (e) {}
+}
+
+function updateBar() {
+  const canTakeover = currentStatus === "TRANSFERRED";
+  const canChat = currentStatus === "AGENT";
+  $("btnTakeover").disabled = !canTakeover;
+  $("btnClose").disabled = !(currentStatus === "TRANSFERRED" || currentStatus === "AGENT");
+  $("input").disabled = !canChat;
+  $("send").disabled = !canChat;
+  const label = { "TRANSFERRED": "待接入", "AGENT": "接待中", "CLOSED": "已结束", "OPEN": "AI接待" };
+  $("convTitle").textContent = currentConvId ? `会话 #${currentConvId} · ${label[currentStatus] || currentStatus}` : "请选择左侧会话";
+}
+
+async function takeover() {
+  if (!currentConvId) return;
+  await fetch(base() + "/api/v1/admin/cs/conversations/" + currentConvId + "/takeover", { method: "POST", headers: authHeaders() });
+  await poll();
+}
+
+async function reply() {
+  const v = $("input").value.trim();
+  if (!v || !currentConvId) return;
+  $("input").value = "";
+  await fetch(base() + "/api/v1/admin/cs/conversations/" + currentConvId + "/reply", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ content: v })
+  });
+  await poll();
+}
+
+async function closeConv() {
+  if (!currentConvId) return;
+  await fetch(base() + "/api/v1/admin/cs/conversations/" + currentConvId + "/close", { method: "POST", headers: authHeaders() });
+  currentConvId = null;
+  currentStatus = null;
+  msgBox.innerHTML = "";
+  await poll();
+}
+
+async function poll() {
+  await loadList();
+  await syncStatus();
+  if (currentConvId != null) {
+    try {
+      const r = await fetch(base() + "/api/v1/admin/cs/conversations/" + currentConvId + "/messages", { headers: authHeaders() });
+      const j = await r.json();
+      renderMessages((j && j.data) || []);
+    } catch (e) {}
+  }
+}
+
+$("btnTakeover").addEventListener("click", takeover);
+$("btnClose").addEventListener("click", closeConv);
+$("send").addEventListener("click", reply);
+$("input").addEventListener("keydown", e => { if (e.key === "Enter") reply(); });
+
+healthCheck();
+loadList();
+timer = setInterval(poll, 3000);
+</script>
+</body>
+</html>

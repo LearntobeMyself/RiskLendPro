@@ -24,6 +24,9 @@ public class CsAuditService {
     public static final String ACTION_TICKET_CREATE = "TICKET_CREATE";
     public static final String ACTION_TICKET_PROCESS = "TICKET_PROCESS";
     public static final String ACTION_TICKET_CLOSE = "TICKET_CLOSE";
+    public static final String ACTION_AGENT_TAKEOVER = "AGENT_TAKEOVER";
+    public static final String ACTION_AGENT_REPLY = "AGENT_REPLY";
+    public static final String ACTION_AGENT_CLOSE = "AGENT_CLOSE";
 
     private final CsAuditLogMapper auditLogMapper;
 

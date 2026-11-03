@@ -64,6 +64,15 @@ public class CsChatService {
     /** 大模型拒答后转人工时，回复使用的模型标注（区别于 fixed-script 与普通 deepseek 回答）。 */
     private static final String MODEL_HANDOFF = "deepseek-handoff";
 
+    /** 会话状态：AI 接待中 / 已转人工待接入 / 人工接待中 / 已结束。 */
+    public static final String STATUS_OPEN = "OPEN";
+    public static final String STATUS_TRANSFERRED = "TRANSFERRED";
+    public static final String STATUS_AGENT = "AGENT";
+    public static final String STATUS_CLOSED = "CLOSED";
+    /** 人工接待中，用户继续发消息时的固定提示（不调用大模型，等待人工回复）。 */
+    private static final String SCRIPT_AGENT_MODE =
+            "您已接入人工客服，请直接描述您的问题，客服会尽快回复。";
+
     private static final String[] TRANSFER_KEYS = {"转人工", "人工客服", "投诉", "客服电话"};
     private static final String[] SCRIPT_KEYS = {"被拒", "拒绝", "为什么没通过", "不通过", "凭什么", "批不了"};
     private static final String[] PRODUCT_NAME_KEYS = {
@@ -127,6 +136,10 @@ public class CsChatService {
             generated = sensitiveReply(sensitiveType);
             auditService.record(userId, CsAuditService.ACTION_SENSITIVE_BLOCK, "message",
                     String.valueOf(conversation.getId()), sensitiveType + ":" + truncate(safeMessage, 200));
+        } else if (STATUS_AGENT.equals(conversation.getStatus())) {
+            // 人工接待中：不再调用大模型，用户消息已落库，由人工客服在管理端回复
+            intent = "HANDOFF";
+            generated = GeneratedReply.script(SCRIPT_AGENT_MODE);
         } else {
             intent = routeIntent(safeMessage);
             generated = generate(userId, intent, safeMessage, conversation.getId(), history);
@@ -145,6 +158,10 @@ public class CsChatService {
         saveMessage(conversation.getId(), userId, "ASSISTANT", safeReply, intent,
                 generated.model, generated.requestId, generated.promptTokens, generated.completionTokens);
 
+        // 触发转人工（用户主动或 AI 拒答）时，会话进入待接入状态，等待管理端客服接管
+        if ("TRANSFER".equals(intent) && !STATUS_TRANSFERRED.equals(conversation.getStatus())) {
+            conversation.setStatus(STATUS_TRANSFERRED);
+        }
         conversation.setLastMessage(truncate(safeReply, 500));
         conversationMapper.updateById(conversation);
 
@@ -153,6 +170,7 @@ public class CsChatService {
         reply.setReply(safeReply);
         reply.setIntent(intent);
         reply.setModel(generated.model);
+        reply.setStatus(conversation.getStatus());
         return reply;
     }
 

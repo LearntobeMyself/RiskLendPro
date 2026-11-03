@@ -113,6 +113,19 @@ public class CsTicketService {
         return toVO(ticket);
     }
 
+    /** 查找某会话最新的一张未关闭工单（人工接管/结束会话时联动工单状态用）。 */
+    public CsTicket findOpenTicketByConversation(Long conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        LambdaQueryWrapper<CsTicket> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CsTicket::getConversationId, conversationId)
+                .ne(CsTicket::getStatus, "CLOSED")
+                .orderByDesc(CsTicket::getCreateTime)
+                .last("LIMIT 1");
+        return ticketMapper.selectOne(wrapper);
+    }
+
     private CsTicket require(Long ticketId) {
         CsTicket ticket = ticketMapper.selectById(ticketId);
         if (ticket == null) {

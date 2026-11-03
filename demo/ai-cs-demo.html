@@ -76,6 +76,7 @@
   }
   .msg.user .bubble { background: var(--blue); color: #fff; border-bottom-right-radius: 4px; }
   .msg.ai .bubble { background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg.agent .bubble { background: #f3e8ff; border: 1px solid #d8b4fe; color: #4c1d95; border-bottom-left-radius: 4px; }
   .meta { font-size: 12px; color: var(--sub); margin-top: 5px; display: flex; gap: 6px; flex-wrap: wrap; }
   .msg.user .meta { justify-content: flex-end; }
   .tag {
@@ -85,6 +86,7 @@
   .tag.script { background: var(--amber-bg); color: var(--amber); }
   .tag.realtime { background: var(--green-bg); color: var(--green); }
   .tag.transfer { background: #f3e8ff; color: #7c3aed; }
+  .tag.agent { background: #f3e8ff; color: #7c3aed; }
   .tag.sys { background: #f3f4f6; color: #6b7280; }
   .sysline { text-align: center; font-size: 12px; color: var(--sub); margin: 8px 0; }
 
@@ -190,7 +192,8 @@ function intentTag(intent) {
 
 function addMsg(role, text, meta) {
   const wrap = document.createElement("div");
-  wrap.className = "msg " + (role === "user" ? "user" : "ai");
+  const cls = role === "user" ? "user" : (role === "agent" ? "agent" : "ai");
+  wrap.className = "msg " + cls;
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   bubble.textContent = text;
@@ -218,6 +221,40 @@ async function healthCheck() {
   }
 }
 
+let convId = null;
+let convStatus = null;
+let renderedCount = 0;
+let pollTimer = null;
+
+function startPolling() {
+  if (pollTimer) return;
+  renderedCount = 0;
+  chat.innerHTML = "";  // 进入人工模式后，改用 messages 接口全量同步渲染
+  addSys("已转人工，等待客服接入…客服回复会实时显示在下方");
+  pollMessages();
+  pollTimer = setInterval(pollMessages, 3000);
+}
+
+async function pollMessages() {
+  if (!convId) return;
+  try {
+    const r = await fetch(base() + "/api/v1/cs/conversations/" + convId + "/messages", {
+      headers: { "Authorization": "Bearer " + userTok() }
+    });
+    const j = await r.json();
+    const list = (j && j.data) || [];
+    for (let i = renderedCount; i < list.length; i++) {
+      const m = list[i];
+      const role = m.role === "USER" ? "user" : (m.role === "AGENT" ? "agent" : "ai");
+      const meta = role === "agent"
+        ? `<span class="tag agent">人工客服</span>`
+        : (role === "ai" ? intentTag(m.intent) : "");
+      addMsg(role, m.content, meta);
+    }
+    renderedCount = list.length;
+  } catch (e) { /* 轮询失败静默，避免刷屏 */ }
+}
+
 async function sendChat(msg) {
   addMsg("user", msg);
   try {
@@ -229,7 +266,12 @@ async function sendChat(msg) {
     const j = await r.json();
     if (j && j.success && j.data) {
       const d = j.data;
+      convId = d.conversationId;
+      convStatus = d.status;
       addMsg("ai", d.reply || "(空回复)", intentTag(d.intent) + `<span class="tag sys">model=${d.model || "-"}</span>`);
+      if (d.status === "TRANSFERRED" || d.status === "AGENT") {
+        startPolling();
+      }
     } else {
       addMsg("ai", "请求失败：" + (j && j.message ? j.message : "未知错误"), `<span class="tag script">ERROR</span>`);
     }

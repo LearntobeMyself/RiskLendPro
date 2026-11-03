@@ -18,4 +18,7 @@ public class ChatReply {
 
     @Schema(description = "生成回复的模型；fixed-script 表示规则话术，非大模型")
     private String model;
+
+    @Schema(description = "会话状态：OPEN=AI接待中, TRANSFERRED=已转人工待接入, AGENT=人工接待中, CLOSED=已结束")
+    private String status;
 }

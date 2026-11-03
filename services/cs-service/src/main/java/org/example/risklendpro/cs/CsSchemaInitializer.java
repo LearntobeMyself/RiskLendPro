@@ -46,7 +46,7 @@ public class CsSchemaInitializer implements ApplicationRunner {
                 CREATE TABLE IF NOT EXISTS cs_conversation (
                   id            BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
                   user_id       BIGINT       NOT NULL COMMENT '发起会话的用户ID',
-                  status        VARCHAR(16)  NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN=进行中, CLOSED=已结束, TRANSFERRED=已转人工',
+                  status        VARCHAR(16)  NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN=AI接待中, TRANSFERRED=已转人工待接入, AGENT=人工接待中, CLOSED=已结束',
                   last_message  VARCHAR(500) NULL COMMENT '最近一条消息摘要（列表展示用）',
                   create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   update_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -59,7 +59,7 @@ public class CsSchemaInitializer implements ApplicationRunner {
                   id                BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
                   conversation_id   BIGINT       NOT NULL COMMENT '所属会话ID',
                   user_id           BIGINT       NULL COMMENT '冗余：发送方用户ID（管理员回复时为NULL）',
-                  role              VARCHAR(16)  NOT NULL COMMENT 'USER=用户, ASSISTANT=客服/大模型',
+                  role              VARCHAR(16)  NOT NULL COMMENT 'USER=用户, ASSISTANT=AI客服, AGENT=人工客服',
                   content           TEXT         NOT NULL COMMENT '消息内容',
                   intent            VARCHAR(32)  NULL COMMENT '意图路由：PRODUCT/REALTIME/SCRIPT/TRANSFER',
                   model             VARCHAR(64)  NULL COMMENT '生成该消息的大模型名称；规则话术为 fixed-script',

@@ -162,6 +162,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 || requestURI.startsWith("/swagger-resources/")
                 || requestURI.startsWith("/webjars/")
                 || "/ai-cs-demo.html".equals(requestURI)
+                || "/admin-cs-console.html".equals(requestURI)
                 || (demoImageVerifyEnabled && requestURI.startsWith("/demo/image-verify"));
     }
 
