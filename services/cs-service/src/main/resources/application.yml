@@ -12,7 +12,7 @@ server:
 
 service:
   risk:
-    url: ${RISK_SERVICE_URL:http://localhost:8082}
+    url: ${RISK_SERVICE_URL:http://localhost:18082}
   loan:
     url: ${LOAN_SERVICE_URL:http://localhost:8083}
 

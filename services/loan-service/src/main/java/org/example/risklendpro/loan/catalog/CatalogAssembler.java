@@ -7,6 +7,8 @@ import org.example.risklendpro.loan.catalog.entity.LoanTag;
 import org.example.risklendpro.loan.catalog.vo.ImageVO;
 import org.example.risklendpro.loan.catalog.vo.TagVO;
 import org.example.risklendpro.storage.StorageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -16,6 +18,8 @@ import java.util.Map;
 
 @Component
 public class CatalogAssembler {
+
+    private static final Logger log = LoggerFactory.getLogger(CatalogAssembler.class);
 
     private final StorageService storageService;
 
@@ -31,7 +35,12 @@ public class CatalogAssembler {
         vo.setImageId(image.getId());
         vo.setImageType(image.getImageType());
         vo.setSort(image.getSort());
-        vo.setUrl(storageService.accessUrl(image.getObjectKey()));
+        try {
+            vo.setUrl(storageService.accessUrl(image.getObjectKey()));
+        } catch (RuntimeException e) {
+            // 图片签名失败不应阻断产品列表、详情和推荐；前端可用占位图。
+            log.debug("Skip unavailable catalog image {}: {}", image.getObjectKey(), e.getMessage());
+        }
         if (includeKey) {
             vo.setObjectKey(image.getObjectKey());
         }

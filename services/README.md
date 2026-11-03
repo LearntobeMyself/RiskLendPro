@@ -13,7 +13,7 @@
 | `common-api` | 无 | 跨服务 DTO 与 HTTP 契约，不含数据库代码 |
 | `gateway` | 8088 | JWT 校验、管理员权限隔离、统一路由 |
 | `user-service` | 8081 | 用户与认证迁移目标 |
-| `risk-service` | 8082 | 风控迁移目标 |
+| `risk-service` | 18082 | 风控迁移目标 |
 | `loan-service` | 8083 | 消费贷及借还款迁移目标 |
 | `cs-service` | 8084 | 智能客服独立服务 |
 | `legacy-service` | 8080 | 迁移期间保留的综设 II 功能 |
