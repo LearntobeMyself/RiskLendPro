@@ -20,6 +20,7 @@ public class CsAuditService {
 
     public static final String ACTION_SENSITIVE_BLOCK = "SENSITIVE_BLOCK";
     public static final String ACTION_REALTIME_QUERY = "REALTIME_QUERY";
+    public static final String ACTION_LLM_HANDOFF = "LLM_HANDOFF";
     public static final String ACTION_TICKET_CREATE = "TICKET_CREATE";
     public static final String ACTION_TICKET_PROCESS = "TICKET_PROCESS";
     public static final String ACTION_TICKET_CLOSE = "TICKET_CLOSE";

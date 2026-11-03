@@ -27,7 +27,8 @@ import java.util.Map;
 
 /**
  * AI 客服核心：意图路由（产品/实时/敏感/转人工）+ 大模型生成 + 多轮记忆 + 消息落库。
- * 安全边界（提示词注入、越权、脱敏）在大模型之外强制校验。
+ * 安全边界（提示词注入、越权、脱敏）在大模型之外强制校验；
+ * 大模型判定知识库无依据（NO_ANSWER）时，在模型之外代码级强制转人工建单，防止编造业务信息。
  */
 @Service
 public class CsChatService {
@@ -54,6 +55,14 @@ public class CsChatService {
     private static final String SCRIPT_INJECTION =
             "抱歉，我无法执行该请求。作为平台客服，我只能提供产品咨询和本人账户信息查询服务，"
             + "如有其他问题请转人工客服。";
+
+    /** 大模型判定「知识库无依据」时必须输出的拒答标记（由系统提示词约定，代码检测强制转人工）。 */
+    private static final String NO_ANSWER_MARK = "NO_ANSWER";
+    /** 拒答转人工时的回复引导语。 */
+    private static final String NO_ANSWER_LEAD =
+            "您咨询的问题超出了我的解答范围，为保证信息准确，已为您转接人工客服。";
+    /** 大模型拒答后转人工时，回复使用的模型标注（区别于 fixed-script 与普通 deepseek 回答）。 */
+    private static final String MODEL_HANDOFF = "deepseek-handoff";
 
     private static final String[] TRANSFER_KEYS = {"转人工", "人工客服", "投诉", "客服电话"};
     private static final String[] SCRIPT_KEYS = {"被拒", "拒绝", "为什么没通过", "不通过", "凭什么", "批不了"};
@@ -121,6 +130,10 @@ public class CsChatService {
         } else {
             intent = routeIntent(safeMessage);
             generated = generate(userId, intent, safeMessage, conversation.getId(), history);
+            // 大模型判定知识库无依据而转人工时，intent 归为 TRANSFER，便于前端与审计区分
+            if (MODEL_HANDOFF.equals(generated.model())) {
+                intent = "TRANSFER";
+            }
             if ("REALTIME".equals(intent)) {
                 auditService.record(userId, CsAuditService.ACTION_REALTIME_QUERY, "message",
                         String.valueOf(conversation.getId()), truncate(safeMessage, 200));
@@ -167,7 +180,7 @@ public class CsChatService {
                                     Long conversationId, List<Map<String, String>> history) {
         switch (intent) {
             case "TRANSFER":
-                return generateTransfer(userId, conversationId, message);
+                return generateTransfer(userId, conversationId, message, null);
             case "SCRIPT":
                 return GeneratedReply.script(SCRIPT_REJECT);
             case "REALTIME":
@@ -175,7 +188,17 @@ public class CsChatService {
             default:
                 try {
                     LlmReply llm = deepSeekClient.chatWithHistory(buildSystemPrompt(), history, message);
-                    return new GeneratedReply(llm.getContent(), llm.getModel(), llm.getRequestId(),
+                    String content = llm.getContent() == null ? "" : llm.getContent().trim();
+                    // 防编造收口：大模型按系统提示词约定输出 NO_ANSWER 表示知识库无依据，
+                    // 此处在模型之外代码级强制转人工建单，杜绝模型自行编造业务信息。
+                    if (content.startsWith(NO_ANSWER_MARK)) {
+                        log.info("大模型判定知识库无依据，自动转人工。userId={}, conversationId={}",
+                                userId, conversationId);
+                        auditService.record(userId, CsAuditService.ACTION_LLM_HANDOFF, "message",
+                                String.valueOf(conversationId), truncate(message, 200));
+                        return generateTransfer(userId, conversationId, message, NO_ANSWER_LEAD);
+                    }
+                    return new GeneratedReply(content, llm.getModel(), llm.getRequestId(),
                             llm.getPromptTokens(), llm.getCompletionTokens());
                 } catch (Exception e) {
                     log.warn("大模型调用失败，降级为固定话术: {}", e.getMessage());
@@ -184,8 +207,12 @@ public class CsChatService {
         }
     }
 
-    /** 转人工：自动创建工单，并把工单号返回给用户。 */
-    private GeneratedReply generateTransfer(Long userId, Long conversationId, String message) {
+    /**
+     * 转人工：自动创建工单，并把工单号返回给用户。
+     *
+     * @param lead 回复引导语；null 表示用户主动转人工，使用默认引导语
+     */
+    private GeneratedReply generateTransfer(Long userId, Long conversationId, String message, String lead) {
         try {
             TicketCreateRequest req = new TicketCreateRequest();
             req.setConversationId(conversationId);
@@ -193,9 +220,15 @@ public class CsChatService {
             req.setDescription(message);
             req.setInvolvesMoney(involvesMoney(message) ? 1 : 0);
             Long ticketId = ticketService.create(userId, req);
-            String content = "正在为您转接人工客服，已为您生成工单（编号 #" + ticketId + "）。"
+            String head = (lead == null || lead.isBlank())
+                    ? "正在为您转接人工客服，已为您生成工单（编号 #" + ticketId + "）。"
+                    : lead + "已为您生成工单（编号 #" + ticketId + "）。";
+            String content = head
                     + "请提供手机号和问题描述，人工客服会在服务时间内尽快处理。";
-            return GeneratedReply.script(content);
+            // 拒答转人工（lead 非空）标注 deepseek-handoff，供上层把 intent 归为 TRANSFER
+            boolean llmHandoff = lead != null && !lead.isBlank();
+            return new GeneratedReply(content, llmHandoff ? MODEL_HANDOFF : "fixed-script",
+                    null, null, null);
         } catch (Exception e) {
             log.warn("转人工自动建单失败，降级为引导话术: {}", e.getMessage());
             return GeneratedReply.script(SCRIPT_TRANSFER);
