@@ -8,7 +8,9 @@ spring:
   datasource:
     # 主数据源 - RiskLendPro（业务数据）
     primary:
-      jdbc-url: ${PRIMARY_DB_URL:jdbc:mysql://47.109.109.231:3306/RiskLendPro?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+      # connectTimeout/socketTimeout 必须显式指定：公网库网络抖动时，默认值会让
+      # 建连/读操作无限悬挂，连接卡在半开状态占用服务端 slot（是上次打满 500 的诱因之一）。
+      jdbc-url: ${PRIMARY_DB_URL:jdbc:mysql://47.109.109.231:3306/RiskLendPro?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=30000}
       username: ${PRIMARY_DB_USERNAME:admin}
       password: ${PRIMARY_DB_PASSWORD:admin}
       driver-class-name: com.mysql.cj.jdbc.Driver
@@ -18,26 +20,34 @@ spring:
       # HikariDataSource 上并没有 setHikari(...) 方法，所以 hikari.* 会被静默忽略，
       # 最终退回 Hikari 默认值 maximumPoolSize=10 / minimumIdle=10（一启动就占满且不释放）。
       # 扁平键才能正确绑定到 HikariDataSource.setMaximumPoolSize() 等方法。
-      connection-timeout: 30000
+      connection-timeout: 10000
       # 数据库在公网（47.109.109.231），单次往返约 8ms，连接过少会导致请求排队、
       # 表现为「均值高、最小值低」的抖动；主库提到 12，从库提到 6。
       maximum-pool-size: 12
-      minimum-idle: 2
-      idle-timeout: 600000
-      max-lifetime: 1800000
+      # minimum-idle 置 0：空闲连接最容易被云库 wait_timeout=600s 杀掉，变成半死连接；
+      # 不预热空闲连接，按需创建、用完回收，从根本上减少僵尸连接占用 slot。
+      minimum-idle: 0
+      # idle-timeout 必须 < 云库 wait_timeout(600s)：让连接池主动回收，永远先于服务端断开。
+      # 原来设 600000(600s) 与 wait_timeout 相同，两者赛跑，是「Lost connection」的根因。
+      idle-timeout: 300000
+      # max-lifetime 降到 10 分钟，让连接定期轮换，避免长期挂在公网 NAT 上被静默切断。
+      max-lifetime: 600000
+      # keepalive-time 定期探活：对空闲连接发轻量 ping，避免被服务端/中间设备当作死连接回收。
+      keepalive-time: 120000
       leak-detection-threshold: 60000
       validation-timeout: 5000
     # 从数据源 - credit_data_db（Python同步的风控数据）
     credit:
-      jdbc-url: ${CREDIT_DB_URL:jdbc:mysql://47.109.109.231:3306/credit_data_db?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+      jdbc-url: ${CREDIT_DB_URL:jdbc:mysql://47.109.109.231:3306/credit_data_db?useUnicode=true&characterEncoding=UTF-8&allowMultiQueries=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&connectTimeout=5000&socketTimeout=30000}
       username: ${CREDIT_DB_USERNAME:admin}
       password: ${CREDIT_DB_PASSWORD:admin}
       driver-class-name: com.mysql.cj.jdbc.Driver
-      connection-timeout: 30000
+      connection-timeout: 10000
       maximum-pool-size: 6
-      minimum-idle: 1
-      idle-timeout: 600000
-      max-lifetime: 1800000
+      minimum-idle: 0
+      idle-timeout: 300000
+      max-lifetime: 600000
+      keepalive-time: 120000
       leak-detection-threshold: 60000
       validation-timeout: 5000
 
