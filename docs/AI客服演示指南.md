@@ -20,7 +20,7 @@
 |------|------|------|
 | gateway | 8088 | 统一入口 |
 | user-service | 8081 | 登录、用户 |
-| risk-service | 18082 | 评估状态 |
+| risk-service | 8082 | 评估状态 |
 | loan-service | 8083 | 额度、还款 |
 | cs-service | 8084 | AI 客服（主角） |
 

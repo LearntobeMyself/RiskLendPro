@@ -3,9 +3,9 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
-set "JAVA_HOME=F:\IntelliJ IDEA 2025.3.1\jbr"
-set "RISK_SERVICE_PORT=18082"
-set "RISK_SERVICE_URL=http://localhost:18082"
+set "JAVA_HOME=D:\Java"
+set "RISK_SERVICE_PORT=8082"
+set "RISK_SERVICE_URL=http://localhost:8082"
 
 if not exist "%JAVA_HOME%\bin\java.exe" (
     echo [ERROR] JDK 21 not found at:

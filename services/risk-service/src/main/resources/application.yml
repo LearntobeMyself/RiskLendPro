@@ -9,7 +9,7 @@ spring:
       - optional:file:../../config/local/application-local.yml
 
 server:
-  port: ${RISK_SERVICE_PORT:18082}
+  port: ${RISK_SERVICE_PORT:8082}
 
 service:
   user:

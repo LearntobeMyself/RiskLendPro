@@ -191,9 +191,9 @@ if ($LASTEXITCODE -ne 0) {
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
-# QQ 等桌面程序经常占用 8082，risk-service 默认使用 18082。
+# risk-service 默认使用 8082。
 if ([string]::IsNullOrWhiteSpace($env:RISK_SERVICE_PORT)) {
-    $env:RISK_SERVICE_PORT = '18082'
+    $env:RISK_SERVICE_PORT = '8082'
 }
 if ([string]::IsNullOrWhiteSpace($env:RISK_SERVICE_URL)) {
     $env:RISK_SERVICE_URL = "http://localhost:$($env:RISK_SERVICE_PORT)"
