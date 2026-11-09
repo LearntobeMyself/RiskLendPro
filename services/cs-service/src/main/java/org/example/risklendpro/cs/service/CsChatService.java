@@ -75,12 +75,6 @@ public class CsChatService {
     public static final String STATUS_TRANSFERRED = "TRANSFERRED";
     public static final String STATUS_AGENT = "AGENT";
     public static final String STATUS_CLOSED = "CLOSED";
-    /** 人工接待中，用户继续发消息时的固定提示（不调用大模型，等待人工回复）。 */
-    private static final String SCRIPT_AGENT_MODE =
-            "您已接入人工客服，请直接描述您的问题，客服会尽快回复。";
-    /** 已转人工待接入期间，用户补充信息的固定提示（不调用大模型）。 */
-    private static final String SCRIPT_WAITING_AGENT =
-            "您的问题已提交人工客服，请耐心等待，客服接入后会在本窗口直接回复您。";
 
     private static final String[] TRANSFER_KEYS = {"转人工", "人工客服", "投诉", "客服电话"};
     private static final String[] SCRIPT_KEYS = {"被拒", "拒绝", "为什么没通过", "不通过", "凭什么", "批不了"};
@@ -150,11 +144,10 @@ public class CsChatService {
                     String.valueOf(conversation.getId()), sensitiveType + ":" + truncate(safeMessage, 200));
         } else if (STATUS_AGENT.equals(conversation.getStatus())
                 || STATUS_TRANSFERRED.equals(conversation.getStatus())) {
-            // 转人工待接入/人工接待中：不再调用大模型，用户消息已落库，由人工客服回复；
-            // 避免用户在等待期间补充的信息被 AI「抢答」或重复建单
+            // 转人工待接入/人工接待中：用户消息只落库，不再自动回复固定话术，
+            // 由人工客服在同一会话窗口直接回复（贴近真实客服体验）
             intent = "HANDOFF";
-            generated = GeneratedReply.script(STATUS_AGENT.equals(conversation.getStatus())
-                    ? SCRIPT_AGENT_MODE : SCRIPT_WAITING_AGENT);
+            generated = new GeneratedReply("", "fixed-script", null, null, null);
         } else {
             intent = routeIntent(safeMessage);
             generated = generate(userId, intent, safeMessage, conversation.getId(), history);
@@ -170,14 +163,18 @@ public class CsChatService {
 
         // 返回前对 AI 回复再做一次脱敏兜底
         String safeReply = SensitiveDataMasker.mask(generated.content);
-        saveMessage(conversation.getId(), userId, "ASSISTANT", safeReply, intent,
-                generated.model, generated.requestId, generated.promptTokens, generated.completionTokens);
+        // 人工会话（HANDOFF）不再落自动回复：空回复表示「等人工直接回复」，仅用户消息入库
+        if (!safeReply.isBlank()) {
+            saveMessage(conversation.getId(), userId, "ASSISTANT", safeReply, intent,
+                    generated.model, generated.requestId, generated.promptTokens, generated.completionTokens);
+        }
 
         // 触发转人工（用户主动或 AI 拒答）时，会话进入待接入状态，等待管理端客服接管
         if ("TRANSFER".equals(intent) && !STATUS_TRANSFERRED.equals(conversation.getStatus())) {
             conversation.setStatus(STATUS_TRANSFERRED);
         }
-        conversation.setLastMessage(truncate(safeReply, 500));
+        // 摘要：有人工/AI 回复用回复；人工会话期间用用户最新发言（客服列表直接看到用户诉求）
+        conversation.setLastMessage(truncate(safeReply.isBlank() ? safeMessage : safeReply, 500));
         conversationMapper.updateById(conversation);
 
         ChatReply reply = new ChatReply();

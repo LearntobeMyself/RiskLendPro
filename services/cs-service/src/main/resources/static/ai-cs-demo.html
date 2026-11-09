@@ -271,9 +271,9 @@ async function sendChat(msg) {
       convId = d.conversationId;
       convStatus = d.status;
       if (agentMode) {
-        pollMessages();  // 立即拉取，把本轮用户消息与服务提示渲染出来
-      } else {
-        addMsg("ai", d.reply || "(空回复)", intentTag(d.intent) + `<span class="tag sys">model=${d.model || "-"}</span>`);
+        pollMessages();  // 立即拉取，把本轮用户消息渲染出来（人工会话无自动回复）
+      } else if (d.reply) {
+        addMsg("ai", d.reply, intentTag(d.intent) + `<span class="tag sys">model=${d.model || "-"}</span>`);
       }
       if (d.status === "TRANSFERRED" || d.status === "AGENT") {
         startPolling();

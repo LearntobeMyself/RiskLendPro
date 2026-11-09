@@ -44,12 +44,15 @@
   .main .bar button:disabled { opacity: .5; cursor: not-allowed; }
   #msg { flex: 1; overflow-y: auto; padding: 20px; }
   .msg { display: flex; margin-bottom: 14px; }
-  .msg.user { justify-content: flex-end; }
+  .msg.me { justify-content: flex-end; }
+  .msg.them { justify-content: flex-start; }
   .bubble { max-width: 72%; padding: 10px 14px; border-radius: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-  .msg.user .bubble { background: var(--blue); color: #fff; border-bottom-right-radius: 4px; }
-  .msg.ai .bubble { background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-  .msg.agent .bubble { background: var(--purple-bg); border: 1px solid #d8b4fe; color: #4c1d95; border-bottom-left-radius: 4px; }
+  /* 客服视角：右边=自己(AGENT)发的紫色气泡；左边=用户(蓝)/AI(白)的历史消息 */
+  .msg.me .bubble { background: #7c3aed; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.them .bubble { background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg.them .bubble.user { background: var(--blue); color: #fff; border: none; border-bottom-left-radius: 4px; }
   .meta { font-size: 12px; color: var(--sub); margin-top: 4px; }
+  .msg.me .meta { text-align: right; }
   .sysline { text-align: center; font-size: 12px; color: var(--sub); margin: 8px 0; }
 
   footer { background: var(--card); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 10px; }
@@ -157,23 +160,28 @@ async function select(id) {
 function renderMessages(arr) {
   for (let i = renderedCount; i < arr.length; i++) {
     const m = arr[i];
-    const role = m.role === "USER" ? "user" : (m.role === "AGENT" ? "agent" : "ai");
-    addMsg(role, m.content, role === "ai" ? (m.intent || "") : "");
+    if (m.role === "AGENT") {
+      addMsg("me", m.content, "我（客服）");          // 自己发的在右
+    } else if (m.role === "USER") {
+      addMsg("them", m.content, "用户", "user");      // 用户消息在左
+    } else {
+      addMsg("them", m.content, "AI 客服");           // 接管前的 AI 历史也在左
+    }
   }
   renderedCount = arr.length;
 }
 
-function addMsg(role, text, meta) {
+function addMsg(side, text, label, bubbleType) {
   const wrap = document.createElement("div");
-  wrap.className = "msg " + role;
+  wrap.className = "msg " + side;
   const b = document.createElement("div");
-  b.className = "bubble";
+  b.className = "bubble" + (bubbleType ? " " + bubbleType : "");
   b.textContent = text;
   wrap.appendChild(b);
-  if (meta) {
+  if (label) {
     const m = document.createElement("div");
     m.className = "meta";
-    m.textContent = meta;
+    m.textContent = label;
     wrap.appendChild(m);
   }
   msgBox.appendChild(wrap);
