@@ -52,6 +52,19 @@ class SensitiveGuardTest {
     }
 
     @Test
+    void 辱骂违规内容应命中辱骂() {
+        assertEquals(SensitiveGuard.ABUSIVE, guard.detect("你们就是垃圾客服"));
+        assertEquals(SensitiveGuard.ABUSIVE, guard.detect("傻逼平台，滚蛋"));
+        assertEquals(SensitiveGuard.ABUSIVE, guard.detect("去死吧"));
+    }
+
+    @Test
+    void 正常内容不应误判为辱骂() {
+        assertNull(guard.detect("滚存是什么意思"));
+        assertNull(guard.detect("请问怎么还款"));
+    }
+
+    @Test
     void 普通产品咨询不应命中任何敏感() {
         assertNull(guard.detect("薪金闪贷的利率是多少"));
         assertNull(guard.detect("公职优待贷适合我吗"));

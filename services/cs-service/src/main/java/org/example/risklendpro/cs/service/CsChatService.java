@@ -55,6 +55,11 @@ public class CsChatService {
     private static final String SCRIPT_INJECTION =
             "抱歉，我无法执行该请求。作为平台客服，我只能提供产品咨询和本人账户信息查询服务，"
             + "如有其他问题请转人工客服。";
+    private static final String SCRIPT_ABUSIVE =
+            "请您注意文明用语。我是来帮您解决问题的，请描述您遇到的具体业务问题，我会尽力协助。";
+
+    /** 单条消息最大长度（字符），超长直接友好拒绝，避免撑爆大模型上下文或刷屏。 */
+    private static final int MAX_MESSAGE_LENGTH = 500;
 
     /** 大模型判定「知识库无依据」时必须输出的拒答标记（由系统提示词约定，代码检测强制转人工）。 */
     private static final String NO_ANSWER_MARK = "NO_ANSWER";
@@ -115,6 +120,9 @@ public class CsChatService {
         String message = request.getMessage() == null ? "" : request.getMessage().trim();
         if (message.isEmpty()) {
             throw new IllegalArgumentException("消息内容不能为空");
+        }
+        if (message.length() > MAX_MESSAGE_LENGTH) {
+            throw new IllegalArgumentException("消息内容过长，请精简后重试（最多 " + MAX_MESSAGE_LENGTH + " 字）");
         }
 
         // 敏感检测用原始消息，先于脱敏判断是否命中隐私数据
@@ -266,6 +274,7 @@ public class CsChatService {
     private GeneratedReply sensitiveReply(String sensitiveType) {
         String content = switch (sensitiveType) {
             case SensitiveGuard.PROMPT_INJECTION -> SCRIPT_INJECTION;
+            case SensitiveGuard.ABUSIVE -> SCRIPT_ABUSIVE;
             case SensitiveGuard.UNAUTHORIZED -> SCRIPT_UNAUTHORIZED;
             case SensitiveGuard.PRIVACY_DATA -> SCRIPT_PRIVACY;
             default -> SCRIPT_REJECT;

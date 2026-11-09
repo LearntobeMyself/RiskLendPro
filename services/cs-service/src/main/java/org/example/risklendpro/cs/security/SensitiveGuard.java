@@ -19,6 +19,14 @@ public class SensitiveGuard {
     public static final String UNAUTHORIZED = "UNAUTHORIZED";
     public static final String INTERNAL_RULE = "INTERNAL_RULE";
     public static final String PRIVACY_DATA = "PRIVACY_DATA";
+    public static final String ABUSIVE = "ABUSIVE";
+
+    /** 辱骂/违规内容：命中即拒绝回复并提醒文明用语，不进入大模型。 */
+    private static final String[] ABUSIVE_KEYS = {
+            "傻逼", "傻b", "傻B", "傻叉", "草泥马", "去死", "滚蛋", "垃圾客服",
+            "废物", "白痴", "脑残", "智障", "贱人", "混蛋", "妈的", "卧槽",
+            "我操", "操你", "去你", "死全家", "傻卵", "sb", "SB"
+    };
 
     /** 提示词注入：要求忽略规则、输出系统提示词、角色扮演、越狱、导出全部数据等。 */
     private static final String[] PROMPT_INJECTION_KEYS = {
@@ -54,6 +62,9 @@ public class SensitiveGuard {
         }
         if (containsAny(message, PROMPT_INJECTION_KEYS)) {
             return PROMPT_INJECTION;
+        }
+        if (containsAny(message, ABUSIVE_KEYS)) {
+            return ABUSIVE;
         }
         if (containsAny(message, UNAUTHORIZED_KEYS)) {
             return UNAUTHORIZED;
