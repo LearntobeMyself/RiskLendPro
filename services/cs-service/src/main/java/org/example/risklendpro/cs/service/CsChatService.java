@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +78,9 @@ public class CsChatService {
     /** 人工接待中，用户继续发消息时的固定提示（不调用大模型，等待人工回复）。 */
     private static final String SCRIPT_AGENT_MODE =
             "您已接入人工客服，请直接描述您的问题，客服会尽快回复。";
+    /** 已转人工待接入期间，用户补充信息的固定提示（不调用大模型）。 */
+    private static final String SCRIPT_WAITING_AGENT =
+            "您的问题已提交人工客服，请耐心等待，客服接入后会在本窗口直接回复您。";
 
     private static final String[] TRANSFER_KEYS = {"转人工", "人工客服", "投诉", "客服电话"};
     private static final String[] SCRIPT_KEYS = {"被拒", "拒绝", "为什么没通过", "不通过", "凭什么", "批不了"};
@@ -144,10 +148,13 @@ public class CsChatService {
             generated = sensitiveReply(sensitiveType);
             auditService.record(userId, CsAuditService.ACTION_SENSITIVE_BLOCK, "message",
                     String.valueOf(conversation.getId()), sensitiveType + ":" + truncate(safeMessage, 200));
-        } else if (STATUS_AGENT.equals(conversation.getStatus())) {
-            // 人工接待中：不再调用大模型，用户消息已落库，由人工客服在管理端回复
+        } else if (STATUS_AGENT.equals(conversation.getStatus())
+                || STATUS_TRANSFERRED.equals(conversation.getStatus())) {
+            // 转人工待接入/人工接待中：不再调用大模型，用户消息已落库，由人工客服回复；
+            // 避免用户在等待期间补充的信息被 AI「抢答」或重复建单
             intent = "HANDOFF";
-            generated = GeneratedReply.script(SCRIPT_AGENT_MODE);
+            generated = GeneratedReply.script(STATUS_AGENT.equals(conversation.getStatus())
+                    ? SCRIPT_AGENT_MODE : SCRIPT_WAITING_AGENT);
         } else {
             intent = routeIntent(safeMessage);
             generated = generate(userId, intent, safeMessage, conversation.getId(), history);
@@ -327,11 +334,37 @@ public class CsChatService {
                 return existing;
             }
         }
+        // 兜底：前端未回传会话ID时，续接该用户最近的活跃会话（按状态给不同有效期），
+        // 避免多轮上下文与人工接管被「新会话」打断；过期会话不再续接，防止永久卡在人工模式
+        CsConversation active = conversationMapper.selectOne(
+                new LambdaQueryWrapper<CsConversation>()
+                        .eq(CsConversation::getUserId, userId)
+                        .in(CsConversation::getStatus, STATUS_OPEN, STATUS_TRANSFERRED, STATUS_AGENT)
+                        .orderByDesc(CsConversation::getUpdateTime)
+                        .last("LIMIT 1"));
+        if (active != null && stillActive(active)) {
+            return active;
+        }
         CsConversation conversation = new CsConversation();
         conversation.setUserId(userId);
-        conversation.setStatus("OPEN");
+        conversation.setStatus(STATUS_OPEN);
         conversationMapper.insert(conversation);
         return conversation;
+    }
+
+    /** 活跃会话有效期：AI 接待 24h；待接入 30 分钟（超时视为放弃等待）；人工接待 2 小时（无消息视为搁置）。 */
+    private boolean stillActive(CsConversation c) {
+        LocalDateTime last = c.getUpdateTime();
+        if (last == null) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        return switch (c.getStatus()) {
+            case STATUS_OPEN -> last.isAfter(now.minusHours(24));
+            case STATUS_TRANSFERRED -> last.isAfter(now.minusMinutes(30));
+            case STATUS_AGENT -> last.isAfter(now.minusHours(2));
+            default -> false;
+        };
     }
 
     private void saveMessage(Long conversationId, Long userId, String role, String content, String intent,

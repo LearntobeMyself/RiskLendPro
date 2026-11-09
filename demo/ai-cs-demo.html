@@ -256,19 +256,25 @@ async function pollMessages() {
 }
 
 async function sendChat(msg) {
-  addMsg("user", msg);
+  // 轮询（人工）模式下消息由 pollMessages 统一渲染，避免重复；AI 模式下手动渲染
+  const agentMode = !!pollTimer;
+  if (!agentMode) addMsg("user", msg);
   try {
     const r = await fetch(base() + "/api/v1/cs/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + userTok() },
-      body: JSON.stringify({ message: msg })
+      body: JSON.stringify({ message: msg, conversationId: convId || undefined })
     });
     const j = await r.json();
     if (j && j.success && j.data) {
       const d = j.data;
       convId = d.conversationId;
       convStatus = d.status;
-      addMsg("ai", d.reply || "(空回复)", intentTag(d.intent) + `<span class="tag sys">model=${d.model || "-"}</span>`);
+      if (agentMode) {
+        pollMessages();  // 立即拉取，把本轮用户消息与服务提示渲染出来
+      } else {
+        addMsg("ai", d.reply || "(空回复)", intentTag(d.intent) + `<span class="tag sys">model=${d.model || "-"}</span>`);
+      }
       if (d.status === "TRANSFERRED" || d.status === "AGENT") {
         startPolling();
       }
