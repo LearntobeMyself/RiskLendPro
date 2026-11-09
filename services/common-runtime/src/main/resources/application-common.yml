@@ -69,7 +69,7 @@ spring:
           timeout: 5000
           connectiontimeout: 5000
           writetimeout: 5000
-        debug: true
+        debug: ${MAIL_SMTP_DEBUG:false}
 
   # Redis配置
   data:
@@ -85,6 +85,13 @@ spring:
           max-idle: 8
           min-idle: 0
           max-wait: -1
+
+management:
+  health:
+    mail:
+      enabled: false
+    redis:
+      enabled: false
 
 security:
   jwt:

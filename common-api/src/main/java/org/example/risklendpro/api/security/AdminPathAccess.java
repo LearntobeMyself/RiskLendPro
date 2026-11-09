@@ -125,6 +125,9 @@ public final class AdminPathAccess {
         if (path.startsWith("/admin/credit")) {
             return Permissions.CREDIT_ADJUST;
         }
+        if (path.startsWith("/admin/loan/recommendation")) {
+            return Permissions.SYS_PRODUCT;
+        }
         if (path.startsWith("/admin/loan") || path.equals("/admin/loan/pending-list")) {
             return Permissions.LOAN_APPROVE;
         }

@@ -70,6 +70,8 @@ class AdminPathAccessTest {
 
     @Test
     void productCatalogAdminAccess() {
+        assertTrue(AdminPathAccess.allows("/api/v1/admin/loan/recommendation/metrics", "GET", StaffRoles.SYS_ADMIN));
+        assertFalse(AdminPathAccess.allows("/api/v1/admin/loan/recommendation/metrics", "GET", StaffRoles.RISK_MANAGER));
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "GET", StaffRoles.SYS_ADMIN));
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products", "POST", StaffRoles.SYS_ADMIN));
         assertTrue(AdminPathAccess.allows("/api/v1/admin/products/knowledge/export", "GET", StaffRoles.SYS_ADMIN));
