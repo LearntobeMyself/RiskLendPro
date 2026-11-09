@@ -160,7 +160,9 @@ async function select(id) {
 function renderMessages(arr) {
   for (let i = renderedCount; i < arr.length; i++) {
     const m = arr[i];
-    if (m.role === "AGENT") {
+    if (m.role === "SYSTEM") {
+      addSys(m.content);                             // 系统提示（如会话结束）居中展示
+    } else if (m.role === "AGENT") {
       addMsg("me", m.content, "我（客服）");          // 自己发的在右
     } else if (m.role === "USER") {
       addMsg("them", m.content, "用户", "user");      // 用户消息在左

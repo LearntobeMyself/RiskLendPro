@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @Schema(description = "历史消息视图（不暴露模型与 token 等内部字段）")
 public class CsMessageVO {
 
-    @Schema(description = "消息角色：USER/ASSISTANT")
+    @Schema(description = "消息角色：USER/ASSISTANT/AGENT/SYSTEM")
     private String role;
 
     private String content;

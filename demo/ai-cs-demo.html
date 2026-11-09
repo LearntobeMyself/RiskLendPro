@@ -243,8 +243,15 @@ async function pollMessages() {
     });
     const j = await r.json();
     const list = (j && j.data) || [];
+    let ended = false;
     for (let i = renderedCount; i < list.length; i++) {
       const m = list[i];
+      // 系统提示（如客服结束会话）：居中灰字展示，并触发结束处理
+      if (m.role === "SYSTEM") {
+        addSys(m.content);
+        ended = true;
+        continue;
+      }
       const role = m.role === "USER" ? "user" : (m.role === "AGENT" ? "agent" : "ai");
       const meta = role === "agent"
         ? `<span class="tag agent">人工客服</span>`
@@ -252,7 +259,15 @@ async function pollMessages() {
       addMsg(role, m.content, meta);
     }
     renderedCount = list.length;
+    if (ended) stopPolling();
   } catch (e) { /* 轮询失败静默，避免刷屏 */ }
+}
+
+// 会话已结束：停止轮询并清空会话ID，用户再次发言将自动开启新一轮咨询
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  convId = null;
+  addSys("本次会话已结束，您可以继续输入新问题，将开启新一轮咨询。");
 }
 
 async function sendChat(msg) {

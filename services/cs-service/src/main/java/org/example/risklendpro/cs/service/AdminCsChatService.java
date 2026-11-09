@@ -29,6 +29,8 @@ public class AdminCsChatService {
 
     private static final String TAKEOVER_NOTICE = "人工客服已接入，请问有什么可以帮您？";
     private static final String CLOSE_RESULT = "人工客服已处理完毕";
+    /** 客服结束会话时写给用户看的系统提示（以 role=SYSTEM 落库，用户端居中展示并停止轮询）。 */
+    private static final String CLOSE_NOTICE = "客服已结束本次会话，感谢您的咨询。如有其他问题，欢迎再次发起咨询。";
 
     private final CsConversationMapper conversationMapper;
     private final CsMessageMapper messageMapper;
@@ -113,7 +115,11 @@ public class AdminCsChatService {
             throw new IllegalArgumentException("AI 接待中的会话无需人工结束");
         }
         conversation.setStatus(STATUS_CLOSED);
+        conversation.setLastMessage(CLOSE_NOTICE);
         conversationMapper.updateById(conversation);
+
+        // 写入一条系统提示消息，用户端轮询看到后即提示「会话已结束」并停止等待
+        saveSystemMessage(conversationId, adminId, CLOSE_NOTICE);
 
         CsTicket ticket = ticketService.findOpenTicketByConversation(conversationId);
         if (ticket != null) {
@@ -134,6 +140,18 @@ public class AdminCsChatService {
         msg.setContent(content);
         msg.setIntent(intent);
         msg.setModel("agent");
+        messageMapper.insert(msg);
+    }
+
+    /** 写入系统提示（如会话结束），用户端与客服端均以居中系统行展示。 */
+    private void saveSystemMessage(Long conversationId, Long adminId, String content) {
+        CsMessage msg = new CsMessage();
+        msg.setConversationId(conversationId);
+        msg.setUserId(adminId);
+        msg.setRole("SYSTEM");
+        msg.setContent(content);
+        msg.setIntent("SYSTEM");
+        msg.setModel("system");
         messageMapper.insert(msg);
     }
 
