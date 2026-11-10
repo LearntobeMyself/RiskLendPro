@@ -19,9 +19,12 @@ import java.util.Map;
 public class ProductPopularityService {
 
     private final ProductPopularityMapper popularityMapper;
+    private final RecommendationCache cache;
 
-    public ProductPopularityService(ProductPopularityMapper popularityMapper) {
+    public ProductPopularityService(ProductPopularityMapper popularityMapper,
+                                    RecommendationCache cache) {
         this.popularityMapper = popularityMapper;
+        this.cache = cache;
     }
 
     @Transactional
@@ -62,6 +65,14 @@ public class ProductPopularityService {
         if (productIds == null || productIds.isEmpty()) {
             return Map.of();
         }
+        // 热门分是场景级全局共享数据，按场景 + 产品集缓存 30 秒，避免每次推荐都全量查库。
+        // key 使用排序后的产品 id 拼接，确保不同产品集不会互相污染。
+        String cacheKey = "pop:" + scene + ":" + productIds.stream().sorted().map(String::valueOf)
+                .reduce((a, b) -> a + "," + b).orElse("");
+        Map<Long, Double> cached = cache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
         List<ProductPopularity> rows = popularityMapper.selectList(new LambdaQueryWrapper<ProductPopularity>()
                 .eq(ProductPopularity::getScene, scene)
                 .in(ProductPopularity::getProductId, productIds));
@@ -69,6 +80,7 @@ public class ProductPopularityService {
         for (ProductPopularity row : rows) {
             result.put(row.getProductId(), row.getScore() == null ? 0 : row.getScore().doubleValue());
         }
+        cache.put(cacheKey, result, 30_000L);
         return result;
     }
 

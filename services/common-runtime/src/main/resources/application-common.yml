@@ -23,7 +23,9 @@ spring:
       connection-timeout: 10000
       # 数据库在公网（47.109.109.231），单次往返约 8ms，连接过少会导致请求排队、
       # 表现为「均值高、最小值低」的抖动；主库提到 12，从库提到 6。
-      maximum-pool-size: 12
+      # 性能优化：获客推荐等读多接口在并发下需要更多连接，主库从 12 提到 40，
+      # 避免 20 并发 × 多查询时连接池打满触发 getConnection 阻塞（是 P95 6.5s 的诱因之一）。
+      maximum-pool-size: 40
       # minimum-idle 置 0：空闲连接最容易被云库 wait_timeout=600s 杀掉，变成半死连接；
       # 不预热空闲连接，按需创建、用完回收，从根本上减少僵尸连接占用 slot。
       minimum-idle: 0
@@ -43,7 +45,7 @@ spring:
       password: ${CREDIT_DB_PASSWORD:admin}
       driver-class-name: com.mysql.cj.jdbc.Driver
       connection-timeout: 10000
-      maximum-pool-size: 6
+      maximum-pool-size: 15
       minimum-idle: 0
       idle-timeout: 300000
       max-lifetime: 600000

@@ -28,13 +28,16 @@ public class ProductSimilarityService {
     private final ProductSimilarityMapper similarityMapper;
     private final LoanProductMapper productMapper;
     private final LoanProductTagMapper productTagMapper;
+    private final RecommendationCache cache;
 
     public ProductSimilarityService(ProductSimilarityMapper similarityMapper,
                                     LoanProductMapper productMapper,
-                                    LoanProductTagMapper productTagMapper) {
+                                    LoanProductTagMapper productTagMapper,
+                                    RecommendationCache cache) {
         this.similarityMapper = similarityMapper;
         this.productMapper = productMapper;
         this.productTagMapper = productTagMapper;
+        this.cache = cache;
     }
 
     public Map<Long, Double> scores(Collection<Long> seedProductIds, List<LoanProduct> candidates) {
@@ -46,6 +49,16 @@ public class ProductSimilarityService {
         for (LoanProduct candidate : candidates) {
             candidateIds.add(candidate.getId());
         }
+        // 相似分是基于内容特征的静态数据（首次计算后落库 product_similarity 表），
+        // 按「种子集 + 候选集」缓存 30 秒，避免每次推荐重复查 product_similarity。
+        String cacheKey = "sim:" + seedIds.stream().sorted().map(String::valueOf)
+                .reduce((a, b) -> a + "," + b).orElse("")
+                + "|" + candidateIds.stream().sorted().map(String::valueOf)
+                .reduce((a, b) -> a + "," + b).orElse("");
+        Map<Long, Double> cached = cache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
         List<ProductSimilarity> stored = similarityMapper.selectList(new LambdaQueryWrapper<ProductSimilarity>()
                 .in(ProductSimilarity::getProductId, seedIds)
                 .in(ProductSimilarity::getSimilarProductId, candidateIds));
@@ -54,9 +67,12 @@ public class ProductSimilarityService {
             for (ProductSimilarity row : stored) {
                 result.merge(row.getSimilarProductId(), row.getScore().doubleValue(), Math::max);
             }
+            cache.put(cacheKey, result, 30_000L);
             return result;
         }
-        return computeAndStore(seedIds, candidates);
+        Map<Long, Double> computed = computeAndStore(seedIds, candidates);
+        cache.put(cacheKey, computed, 30_000L);
+        return computed;
     }
 
     @Transactional
