@@ -4,9 +4,13 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.common.security.SecurityUtils;
+import org.example.risklendpro.loan.catalog.dto.ImpressionRequest;
+import org.example.risklendpro.loan.catalog.dto.ProductEventBatchRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,11 +28,14 @@ public class UserLoanProductController {
 
     private final LoanCatalogService loanCatalogService;
     private final LoanRecommendationService loanRecommendationService;
+    private final ProductEventService productEventService;
 
     public UserLoanProductController(LoanCatalogService loanCatalogService,
-                                     LoanRecommendationService loanRecommendationService) {
+                                     LoanRecommendationService loanRecommendationService,
+                                     ProductEventService productEventService) {
         this.loanCatalogService = loanCatalogService;
         this.loanRecommendationService = loanRecommendationService;
+        this.productEventService = productEventService;
     }
 
     @Operation(summary = "U1 获取分类与筛选项")
@@ -79,11 +86,32 @@ public class UserLoanProductController {
         return CommonResponse.success("查询成功", loanCatalogService.similar(productId, size));
     }
 
-    @Operation(summary = "U7 授信通过弹窗推荐")
-    @GetMapping("/recommendations")
-    public CommonResponse<Map<String, Object>> recommendations(HttpServletRequest request) {
+    @Operation(summary = "上报获客行为事件，支持批量")
+    @PostMapping("/events")
+    public CommonResponse<Map<String, Object>> events(
+            @RequestBody ProductEventBatchRequest batch, HttpServletRequest request) {
         Long userId = SecurityUtils.getUserIdFromRequest(request);
-        return CommonResponse.success("查询成功", loanRecommendationService.recommendations(userId));
+        return CommonResponse.success("上报成功", productEventService.ingest(userId, batch));
+    }
+
+    @Operation(summary = "确认推荐曝光，按 requestId 幂等")
+    @PostMapping("/impressions")
+    public CommonResponse<Map<String, Object>> impressions(
+            @RequestBody ImpressionRequest impression, HttpServletRequest request) {
+        Long userId = SecurityUtils.getUserIdFromRequest(request);
+        return CommonResponse.success("记录成功", productEventService.recordImpressions(userId, impression));
+    }
+
+    @Operation(summary = "四场景获客推荐")
+    @GetMapping("/recommendations")
+    public CommonResponse<Map<String, Object>> recommendations(
+            @RequestParam(required = false) String scene,
+            @RequestParam(required = false) Long productId,
+            @RequestParam(required = false) Integer limit,
+            HttpServletRequest request) {
+        Long userId = SecurityUtils.getUserIdFromRequest(request);
+        return CommonResponse.success("查询成功",
+                loanRecommendationService.recommendations(userId, scene, productId, limit));
     }
 
     @Operation(summary = "U8 成功页再推荐")

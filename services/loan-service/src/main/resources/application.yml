@@ -6,6 +6,15 @@ spring:
       - classpath:application-common.yml
       - optional:file:./config/local/application-local.yml
       - optional:file:../../config/local/application-local.yml
+  # Feign 跨服务调用超时收紧：避免风控服务抖动时，获客推荐等接口等满默认 60s 读超时才降级。
+  # connect 2s / read 3s，RPC 失败会快速抛出异常，由调用方缓存 + 降级兜底。
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 3000
 
 server:
   port: ${LOAN_SERVICE_PORT:8083}

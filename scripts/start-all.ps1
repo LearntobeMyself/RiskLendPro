@@ -1,4 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = [Console]::OutputEncoding
 
 $root = Split-Path -Parent $PSScriptRoot
 $logsDir = Join-Path $root 'logs'
@@ -56,6 +58,35 @@ function Test-TcpPort {
         return $false
     } finally {
         $client.Close()
+    }
+}
+
+function Stop-ProjectJavaProcesses {
+    param([string]$ProjectRoot)
+
+    $stopped = New-Object System.Collections.ArrayList
+    try {
+        $rootMarker = $ProjectRoot.TrimEnd('\')
+        $processes = Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and
+                $_.CommandLine.IndexOf($rootMarker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                $_.CommandLine -match 'risklendpro|RiskLendPro'
+            }
+        foreach ($process in $processes) {
+            try {
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+                [void]$stopped.Add($process.ProcessId)
+            } catch {
+                Write-Warning "无法停止旧的 Java 进程 PID $($process.ProcessId)：$($_.Exception.Message)"
+            }
+        }
+    } catch {
+        Write-Warning "检查旧 Java 进程失败：$($_.Exception.Message)"
+    }
+    if ($stopped.Count -gt 0) {
+        Write-Host "已停止旧的 RiskLendPro Java 进程：$($stopped -join ', ')"
+        Start-Sleep -Seconds 2
     }
 }
 
@@ -142,28 +173,36 @@ if (-not (Test-Path -LiteralPath $mvnCmd)) {
     throw "找不到 Maven Wrapper：$mvnCmd"
 }
 
+$stopScript = Join-Path $PSScriptRoot 'stop-all.ps1'
+if (Test-Path -LiteralPath $pidFile) {
+    & $stopScript -Quiet
+}
+Stop-ProjectJavaProcesses -ProjectRoot $root
+
 Write-Host ''
 Write-Host '正在编译项目（首次运行可能需要下载依赖）...'
-& $mvnCmd '-DskipTests' 'package'
+& $mvnCmd '-DskipTests' 'install'
 if ($LASTEXITCODE -ne 0) {
     throw "项目编译失败，退出码：$LASTEXITCODE"
 }
 
-# 根 pom 的 <modules> 只聚合了 common-api / common-runtime / risk-service，
-# gateway、user-service、loan-service、cs-service 需要单独打包，否则下面找不到 jar。
-foreach ($module in @('gateway', 'user-service', 'loan-service', 'cs-service')) {
-    Write-Host "正在编译 services/$module ..."
-    & $mvnCmd '-DskipTests' '-f' "services/$module/pom.xml" 'package'
-    if ($LASTEXITCODE -ne 0) {
-        throw "services/$module 编译失败，退出码：$LASTEXITCODE"
-    }
-}
+# 根 reactor 已聚合全部业务模块，一次 install 即生成所有可执行 jar。
+# 避免各模块使用不同版本的 common-api / common-runtime。
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
+# risk-service 默认使用 8082。
+if ([string]::IsNullOrWhiteSpace($env:RISK_SERVICE_PORT)) {
+    $env:RISK_SERVICE_PORT = '8082'
+}
+if ([string]::IsNullOrWhiteSpace($env:RISK_SERVICE_URL)) {
+    $env:RISK_SERVICE_URL = "http://localhost:$($env:RISK_SERVICE_PORT)"
+}
+$riskServicePort = [int]$env:RISK_SERVICE_PORT
+
 $services = @(
     [PSCustomObject]@{ Name = 'user-service'; Port = 8081; Jar = 'services\user-service\target\user-service-0.0.1-SNAPSHOT.jar' },
-    [PSCustomObject]@{ Name = 'risk-service'; Port = 8082; Jar = 'services\risk-service\target\risk-service-0.0.1-SNAPSHOT.jar' },
+    [PSCustomObject]@{ Name = 'risk-service'; Port = $riskServicePort; Jar = 'services\risk-service\target\risk-service-0.0.1-SNAPSHOT.jar' },
     [PSCustomObject]@{ Name = 'loan-service'; Port = 8083; Jar = 'services\loan-service\target\loan-service-0.0.1-SNAPSHOT.jar' },
     [PSCustomObject]@{ Name = 'cs-service'; Port = 8084; Jar = 'services\cs-service\target\cs-service-0.0.1-SNAPSHOT.jar' },
     [PSCustomObject]@{ Name = 'gateway'; Port = 8088; Jar = 'services\gateway\target\gateway-0.0.1-SNAPSHOT.jar' }
@@ -173,6 +212,7 @@ $stopScript = Join-Path $PSScriptRoot 'stop-all.ps1'
 if (Test-Path -LiteralPath $pidFile) {
     & $stopScript -Quiet
 }
+Stop-ProjectJavaProcesses -ProjectRoot $root
 
 foreach ($service in $services) {
     if (Test-TcpPort $service.Port) {
