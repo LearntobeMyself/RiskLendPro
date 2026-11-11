@@ -34,23 +34,25 @@
 | 15 | 借贷产品目录（用户端） | GET | `/loan/products/compare` | 登录 + 角色 USER | U6 产品对比 |
 | 16 | 借贷产品目录（用户端） | GET | `/loan/products/institutions/{institutionId}` | 登录 + 角色 USER | U4 机构详情 |
 | 17 | 借贷产品目录（用户端） | GET | `/loan/products/{productId}/similar` | 登录 + 角色 USER | U5 相似产品 |
-| 18 | 借贷产品目录（用户端） | GET | `/loan/products/recommendations` | 登录 + 角色 USER | U7 授信通过弹窗推荐 |
-| 19 | 借贷产品目录（用户端） | GET | `/loan/products/{productId}/post-loan-recommendations` | 登录 + 角色 USER | U8 成功页再推荐 |
-| 20 | 借贷产品目录（用户端） | GET | `/loan/products/{productId}` | 登录 + 角色 USER | U3 产品详情 |
-| 21 | 账务与还款模块 | GET | `/repayment/plans` | 登录 + 角色 USER | 查看还款计划 |
-| 22 | 账务与还款模块 | POST | `/repayment/execute` | 登录 + 角色 USER | 执行还款 |
-| 23 | 账务与还款模块 | GET | `/repayment/record/{planId}` | 登录 + 角色 USER | 获取还款记录详情 |
-| 24 | 账务与还款模块 | GET | `/repayment/statistics` | 登录（未限角色） | 获取还款统计 |
-| 25 | 账务与还款模块 | GET | `/repayment/overdue` | 登录（未限角色） | 获取逾期统计 |
+| 18 | 借贷产品目录（用户端） | POST | `/loan/products/events` | 登录 + 角色 USER | 上报获客行为事件，支持批量 |
+| 19 | 借贷产品目录（用户端） | POST | `/loan/products/impressions` | 登录 + 角色 USER | 确认推荐曝光，按 requestId 幂等 |
+| 20 | 借贷产品目录（用户端） | GET | `/loan/products/recommendations` | 登录 + 角色 USER | 四场景获客推荐 |
+| 21 | 借贷产品目录（用户端） | GET | `/loan/products/{productId}/post-loan-recommendations` | 登录 + 角色 USER | U8 成功页再推荐 |
+| 22 | 借贷产品目录（用户端） | GET | `/loan/products/{productId}` | 登录 + 角色 USER | U3 产品详情 |
+| 23 | 账务与还款模块 | GET | `/repayment/plans` | 登录 + 角色 USER | 查看还款计划 |
+| 24 | 账务与还款模块 | POST | `/repayment/execute` | 登录 + 角色 USER | 执行还款 |
+| 25 | 账务与还款模块 | GET | `/repayment/record/{planId}` | 登录 + 角色 USER | 获取还款记录详情 |
+| 26 | 账务与还款模块 | GET | `/repayment/statistics` | 登录（未限角色） | 获取还款统计 |
+| 27 | 账务与还款模块 | GET | `/repayment/overdue` | 登录（未限角色） | 获取逾期统计 |
 ### cs-service — AI客服服务（8084）
 
 | # | 接口 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|---|---|
-| 26 | CsStatusController | GET | `/api/v1/cs/status` | 登录（未限角色） | status |
-| 27 | AI 客服（用户端） | POST | `/api/v1/cs/chat` | 登录 + 角色 USER | AI 客服对话 |
-| 28 | AI 客服（用户端） | GET | `/api/v1/cs/conversations/{conversationId}/messages` | 登录 + 角色 USER | 会话历史消息 |
-| 29 | 转人工工单（用户端） | POST | `/api/v1/cs/tickets` | 登录 + 角色 USER | 提交转人工工单 |
-| 30 | 转人工工单（用户端） | GET | `/api/v1/cs/tickets` | 登录 + 角色 USER | 我的工单列表 |
+| 28 | CsStatusController | GET | `/api/v1/cs/status` | 登录（未限角色） | status |
+| 29 | AI 客服（用户端） | POST | `/api/v1/cs/chat` | 登录 + 角色 USER | AI 客服对话 |
+| 30 | AI 客服（用户端） | GET | `/api/v1/cs/conversations/{conversationId}/messages` | 登录 + 角色 USER | 会话历史消息 |
+| 31 | 转人工工单（用户端） | POST | `/api/v1/cs/tickets` | 登录 + 角色 USER | 提交转人工工单 |
+| 32 | 转人工工单（用户端） | GET | `/api/v1/cs/tickets` | 登录 + 角色 USER | 我的工单列表 |
 
 ## 二、管理员端接口（管理后台调用）
 
@@ -154,25 +156,28 @@
 | 86 | 借贷产品目录（管理端） | PUT | `/admin/products/{productId}` | 权限点 sys:product:write | A6 编辑产品 |
 | 87 | 借贷产品目录（管理端） | POST | `/admin/products/shelf` | 权限点 sys:product:write | A7 上架/下架 |
 | 88 | 借贷产品目录（管理端） | DELETE | `/admin/products/{productId}` | 权限点 sys:product:write | A8 删除产品 |
-| 89 | 信用额度 | GET | `/admin/credit/stats` | 权限点 credit:adjust | 额度统计 |
-| 90 | 信用额度 | GET | `/admin/credit/limits` | 权限点 credit:adjust | 额度列表 |
-| 91 | 信用额度 | POST | `/admin/credit/limits/{userId}/adjust` | 权限点 credit:adjust:write | 调整用户额度 |
-| 92 | 信用额度 | POST | `/admin/credit/limits/batch-adjust` | 权限点 credit:adjust:write | 批量调整额度 |
-| 93 | 信用额度 | GET | `/admin/credit/limits/{userId}/history` | 权限点 credit:adjust | 额度调整历史 |
-| 94 | 信用额度 | GET | `/admin/credit/overdue-rules` | 权限点 credit:adjust | 逾期调额规则 |
+| 89 | 获客推荐（管理端） | GET | `/admin/products/recommendation/metrics` | 权限点 sys:product | 获客推荐漏斗指标 |
+| 90 | 获客推荐（管理端） | GET | `/admin/products/recommendation/config` | 权限点 sys:product | 获取推荐场景配置 |
+| 91 | 获客推荐（管理端） | PUT | `/admin/products/recommendation/config` | 权限点 sys:product | 保存推荐场景配置 |
+| 92 | 信用额度 | GET | `/admin/credit/stats` | 权限点 credit:adjust | 额度统计 |
+| 93 | 信用额度 | GET | `/admin/credit/limits` | 权限点 credit:adjust | 额度列表 |
+| 94 | 信用额度 | POST | `/admin/credit/limits/{userId}/adjust` | 权限点 credit:adjust:write | 调整用户额度 |
+| 95 | 信用额度 | POST | `/admin/credit/limits/batch-adjust` | 权限点 credit:adjust:write | 批量调整额度 |
+| 96 | 信用额度 | GET | `/admin/credit/limits/{userId}/history` | 权限点 credit:adjust | 额度调整历史 |
+| 97 | 信用额度 | GET | `/admin/credit/overdue-rules` | 权限点 credit:adjust | 逾期调额规则 |
 ### cs-service — AI客服服务（8084）
 
 | # | 接口 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|---|---|
-| 95 | 人工客服接管（管理端） | GET | `/api/v1/admin/cs/conversations` | 权限点 cs:ticket | 待接入/接待中的会话列表 |
-| 96 | 人工客服接管（管理端） | GET | `/api/v1/admin/cs/conversations/{conversationId}/messages` | 权限点 cs:ticket | 会话聊天记录 |
-| 97 | 人工客服接管（管理端） | POST | `/api/v1/admin/cs/conversations/{conversationId}/takeover` | 权限点 cs:ticket:write | 接管会话（转人工后由人工接入） |
-| 98 | 人工客服接管（管理端） | POST | `/api/v1/admin/cs/conversations/{conversationId}/reply` | 权限点 cs:ticket:write | 人工回复用户 |
-| 99 | 人工客服接管（管理端） | POST | `/api/v1/admin/cs/conversations/{conversationId}/close` | 权限点 cs:ticket:write | 结束会话 |
-| 100 | 转人工工单（管理端） | GET | `/api/v1/admin/cs/tickets` | 权限点 cs:ticket | 工单列表 |
-| 101 | 转人工工单（管理端） | GET | `/api/v1/admin/cs/tickets/{ticketId}` | 权限点 cs:ticket | 工单详情 |
-| 102 | 转人工工单（管理端） | POST | `/api/v1/admin/cs/tickets/{ticketId}/process` | 权限点 cs:ticket:write | 领取工单（开始处理） |
-| 103 | 转人工工单（管理端） | POST | `/api/v1/admin/cs/tickets/{ticketId}/close` | 权限点 cs:ticket:write | 关闭工单 |
+| 98 | 人工客服接管（管理端） | GET | `/api/v1/admin/cs/conversations` | 权限点 cs:ticket | 待接入/接待中的会话列表 |
+| 99 | 人工客服接管（管理端） | GET | `/api/v1/admin/cs/conversations/{conversationId}/messages` | 权限点 cs:ticket | 会话聊天记录 |
+| 100 | 人工客服接管（管理端） | POST | `/api/v1/admin/cs/conversations/{conversationId}/takeover` | 权限点 cs:ticket:write | 接管会话（转人工后由人工接入） |
+| 101 | 人工客服接管（管理端） | POST | `/api/v1/admin/cs/conversations/{conversationId}/reply` | 权限点 cs:ticket:write | 人工回复用户 |
+| 102 | 人工客服接管（管理端） | POST | `/api/v1/admin/cs/conversations/{conversationId}/close` | 权限点 cs:ticket:write | 结束会话 |
+| 103 | 转人工工单（管理端） | GET | `/api/v1/admin/cs/tickets` | 权限点 cs:ticket | 工单列表 |
+| 104 | 转人工工单（管理端） | GET | `/api/v1/admin/cs/tickets/{ticketId}` | 权限点 cs:ticket | 工单详情 |
+| 105 | 转人工工单（管理端） | POST | `/api/v1/admin/cs/tickets/{ticketId}/process` | 权限点 cs:ticket:write | 领取工单（开始处理） |
+| 106 | 转人工工单（管理端） | POST | `/api/v1/admin/cs/tickets/{ticketId}/close` | 权限点 cs:ticket:write | 关闭工单 |
 
 ## 三、内部 / Demo 接口（不交付前端，供参考）
 
@@ -189,7 +194,7 @@
 
 | 分类 | 接口数 |
 |---|---|
-| 用户端接口 | 30 |
-| 管理员端接口 | 103 |
+| 用户端接口 | 32 |
+| 管理员端接口 | 106 |
 | 内部 / Demo 接口 | 4 |
-| **合计** | **137** |
+| **合计** | **142** |
