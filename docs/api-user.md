@@ -30,16 +30,14 @@
 | 500 | 服务器内部错误 |
 
 ### 鉴权方式
-- 登录后，请求头携带 `Authorization: Bearer <JWT>`（登录/注册接口返回 `token`）。
-- 本端接口均需登录，角色为 `USER`（个别开放接口如注册、登录本身无需携带 token）。
+- 登录后，请求头携带 `Authorization: Bearer <JWT>`（登录接口返回 `token`）。
+- 本端接口均需登录，角色为 `USER`（注册、登录本身无需携带 token）。
 
 ### 分页结构
 - 部分列表接口返回 `{ "list": [ ... ], "total": N }`；
 - 部分返回 `{ "records": [ ... ], "total": N, "size": N, "current": N, "pages": N }`；
 - 产品列表返回 `{ "list": [ ... ], "total": N, "pageNum": N, "pageSize": N }`。
 - 具体以各接口「响应体」说明为准。
-
-
 
 
 ## user-service
@@ -533,11 +531,23 @@
 
 ---
 
-### 18. U7 授信通过弹窗推荐
+### 18. 上报获客行为事件，支持批量
 
-- **方法**：`GET`　**路径**：`/loan/products/recommendations`
+- **方法**：`POST`　**路径**：`/loan/products/events`
 - **鉴权**：需登录（角色 USER）
 - **所属模块**：借贷产品目录（用户端）
+
+**请求参数**
+
+| 参数 | 位置 | 类型 | 必填 |
+|---|---|---|---|
+| `batch` | body | ProductEventBatchRequest | 是 |
+
+**请求体**（`application/json`，类型 `ProductEventBatchRequest`）
+
+| 字段 | 类型 | 必填 | 说明 | 示例 |
+|---|---|---|---|---|
+| `events` | array<ProductEventRequest> | 否 | — | — |
 
 **响应体**
 
@@ -545,13 +555,82 @@
 
 | 字段 | 类型 |
 |---|---|
-| `assessmentId` | 见联调 |
-| `items` | 见联调 |
-| `missingProofMaterials` | 见联调 |
+| `accepted` | 见联调 |
+| `deduplicated` | 见联调 |
 
 ---
 
-### 19. U8 成功页再推荐
+### 19. 确认推荐曝光，按 requestId 幂等
+
+- **方法**：`POST`　**路径**：`/loan/products/impressions`
+- **鉴权**：需登录（角色 USER）
+- **所属模块**：借贷产品目录（用户端）
+
+**请求参数**
+
+| 参数 | 位置 | 类型 | 必填 |
+|---|---|---|---|
+| `impression` | body | ImpressionRequest | 是 |
+
+**请求体**（`application/json`，类型 `ImpressionRequest`）
+
+| 字段 | 类型 | 必填 | 说明 | 示例 |
+|---|---|---|---|---|
+| `requestId` | string | 否 | — | — |
+| `scene` | string | 否 | — | — |
+| `sessionId` | string | 否 | — | — |
+| `source` | string | 否 | — | — |
+| `abGroup` | string | 否 | — | — |
+| `modelVersion` | string | 否 | — | — |
+| `productIds` | array<number> | 否 | — | — |
+
+**响应体**
+
+`data` 为 JSON 对象，字段如下（类型以实际联调为准）：
+
+| 字段 | 类型 |
+|---|---|
+| `requestId` | 见联调 |
+
+---
+
+### 20. 四场景获客推荐
+
+- **方法**：`GET`　**路径**：`/loan/products/recommendations`
+- **鉴权**：需登录（角色 USER）
+- **所属模块**：借贷产品目录（用户端）
+
+**请求参数**
+
+| 参数 | 位置 | 类型 | 必填 |
+|---|---|---|---|
+| `scene` | query | string | 是 |
+| `productId` | query | number | 否 |
+| `limit` | query | number | 否 |
+
+**响应体**
+
+`data` 为 JSON 对象，字段如下（类型以实际联调为准）：
+
+| 字段 | 类型 |
+|---|---|
+| `abGroup` | 见联调 |
+| `assessmentId` | 见联调 |
+| `coldStart` | 见联调 |
+| `fallbackUsed` | 见联调 |
+| `items` | 见联调 |
+| `missingProofMaterials` | 见联调 |
+| `modelVersion` | 见联调 |
+| `recallSources` | 见联调 |
+| `recommendationReason` | 见联调 |
+| `recommendationScore` | 见联调 |
+| `requestId` | 见联调 |
+| `riskCheckDegraded` | 见联调 |
+| `scene` | 见联调 |
+
+---
+
+### 21. U8 成功页再推荐
 
 - **方法**：`GET`　**路径**：`/loan/products/{productId}/post-loan-recommendations`
 - **鉴权**：需登录（角色 USER）
@@ -569,12 +648,22 @@
 
 | 字段 | 类型 |
 |---|---|
+| `abGroup` | 见联调 |
+| `assessmentId` | 见联调 |
+| `coldStart` | 见联调 |
+| `emptyReason` | 见联调 |
+| `emptyReasonCode` | 见联调 |
+| `fallbackUsed` | 见联调 |
 | `items` | 见联调 |
+| `modelVersion` | 见联调 |
+| `requestId` | 见联调 |
+| `riskBlocked` | 见联调 |
+| `scene` | 见联调 |
 | `shouldRecommend` | 见联调 |
 
 ---
 
-### 20. U3 产品详情
+### 22. U3 产品详情
 
 - **方法**：`GET`　**路径**：`/loan/products/{productId}`
 - **鉴权**：需登录（角色 USER）
@@ -643,7 +732,7 @@
 
 ---
 
-### 21. 查看还款计划
+### 23. 查看还款计划
 
 - **方法**：`GET`　**路径**：`/repayment/plans`
 - **鉴权**：需登录（角色 USER）
@@ -667,7 +756,7 @@
 
 ---
 
-### 22. 执行还款
+### 24. 执行还款
 
 - **方法**：`POST`　**路径**：`/repayment/execute`
 - **鉴权**：需登录（角色 USER）
@@ -702,7 +791,7 @@
 
 ---
 
-### 23. 获取还款记录详情
+### 25. 获取还款记录详情
 
 - **方法**：`GET`　**路径**：`/repayment/record/{planId}`
 - **鉴权**：需登录（角色 USER）
@@ -734,7 +823,7 @@
 
 ---
 
-### 24. 获取还款统计
+### 26. 获取还款统计
 
 - **方法**：`GET`　**路径**：`/repayment/statistics`
 - **鉴权**：需权限点 collection:case
@@ -751,7 +840,7 @@
 
 ---
 
-### 25. 获取逾期统计
+### 27. 获取逾期统计
 
 - **方法**：`GET`　**路径**：`/repayment/overdue`
 - **鉴权**：需权限点 collection:case
@@ -771,7 +860,7 @@
 
 ## cs-service
 
-### 26. status
+### 28. status
 
 - **方法**：`GET`　**路径**：`/api/v1/cs/status`
 - **鉴权**：登录（未限角色）
@@ -783,7 +872,7 @@
 
 ---
 
-### 27. AI 客服对话
+### 29. AI 客服对话
 
 - **方法**：`POST`　**路径**：`/api/v1/cs/chat`
 - **鉴权**：需登录（角色 USER）
@@ -816,7 +905,7 @@
 
 ---
 
-### 28. 会话历史消息
+### 30. 会话历史消息
 
 - **方法**：`GET`　**路径**：`/api/v1/cs/conversations/{conversationId}/messages`
 - **鉴权**：需登录（角色 USER）
@@ -841,7 +930,7 @@
 
 ---
 
-### 29. 提交转人工工单
+### 31. 提交转人工工单
 
 - **方法**：`POST`　**路径**：`/api/v1/cs/tickets`
 - **鉴权**：需登录（角色 USER）
@@ -870,7 +959,7 @@
 
 ---
 
-### 30. 我的工单列表
+### 32. 我的工单列表
 
 - **方法**：`GET`　**路径**：`/api/v1/cs/tickets`
 - **鉴权**：需登录（角色 USER）

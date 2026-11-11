@@ -30,7 +30,7 @@
 | 500 | 服务器内部错误 |
 
 ### 鉴权方式
-- 管理员登录后，请求头携带 `Authorization: Bearer <JWT>`（管理员登录接口返回 `token`）。
+- 登录后，请求头携带 `Authorization: Bearer <JWT>`（登录接口返回 `token`）。
 - 各接口所需权限点见「鉴权」列，由后台为管理员角色分配对应权限点。
 
 ### 权限点总表
@@ -54,8 +54,6 @@
 - 多数列表接口返回 `{ "list": [ ... ], "total": N }`；
 - 部分返回 `{ "records": [ ... ], "total": N, "size": N, "current": N, "pages": N }`。
 - 具体以各接口「响应体」说明为准。
-
-
 
 
 ## user-service
@@ -2419,7 +2417,96 @@
 
 ---
 
-### 89. 额度统计
+### 89. 获客推荐漏斗指标
+
+- **方法**：`GET`　**路径**：`/admin/products/recommendation/metrics`
+- **鉴权**：需权限点 sys:product
+- **所属模块**：获客推荐（管理端）
+
+**请求参数**
+
+| 参数 | 位置 | 类型 | 必填 |
+|---|---|---|---|
+| `scene` | query | string | 是 |
+| `days` | query | number | 否 |
+
+**响应体**
+
+`data` 为 JSON 对象，字段如下（类型以实际联调为准）：
+
+| 字段 | 类型 |
+|---|---|
+| `applies` | 见联调 |
+| `applyConversionRate` | 见联调 |
+| `clickThroughRate` | 见联调 |
+| `clicks` | 见联调 |
+| `ctr` | 见联调 |
+| `cvr` | 见联调 |
+| `days` | 见联调 |
+| `detailViews` | 见联调 |
+| `impressions` | 见联调 |
+| `productId` | 见联调 |
+| `scene` | 见联调 |
+| `topProducts` | 见联调 |
+| `uniqueUsers` | 见联调 |
+
+---
+
+### 90. 获取推荐场景配置
+
+- **方法**：`GET`　**路径**：`/admin/products/recommendation/config`
+- **鉴权**：需权限点 sys:product
+- **所属模块**：获客推荐（管理端）
+
+**请求参数**
+
+| 参数 | 位置 | 类型 | 必填 |
+|---|---|---|---|
+| `scene` | query | string | 是 |
+
+**响应体**
+
+`data` 对象：`{ weights: { ... }, candidateLimit, explorationRate, maxPerInstitution, maxPerCategory, fatigueDays, fatiguePenalty }` 等推荐参数。
+
+---
+
+### 91. 保存推荐场景配置
+
+- **方法**：`PUT`　**路径**：`/admin/products/recommendation/config`
+- **鉴权**：需权限点 sys:product
+- **所属模块**：获客推荐（管理端）
+
+**请求参数**
+
+| 参数 | 位置 | 类型 | 必填 |
+|---|---|---|---|
+| `scene` | query | string | 是 |
+| `request` | body | RecommendationConfigRequest | 是 |
+
+**请求体**（`application/json`，类型 `RecommendationConfigRequest`）
+
+| 字段 | 类型 | 必填 | 说明 | 示例 |
+|---|---|---|---|---|
+| `config` | object | 否 | — | — |
+| `enabled` | boolean | 否 | — | — |
+
+**响应体**
+
+`data` 为 JSON 对象，字段如下（类型以实际联调为准）：
+
+| 字段 | 类型 |
+|---|---|
+| `candidateLimit` | 见联调 |
+| `explorationRate` | 见联调 |
+| `fatigueDays` | 见联调 |
+| `fatiguePenalty` | 见联调 |
+| `maxPerCategory` | 见联调 |
+| `maxPerInstitution` | 见联调 |
+| `weights` | 见联调 |
+
+---
+
+### 92. 额度统计
 
 - **方法**：`GET`　**路径**：`/admin/credit/stats`
 - **鉴权**：需权限点 credit:adjust
@@ -2440,7 +2527,7 @@
 
 ---
 
-### 90. 额度列表
+### 93. 额度列表
 
 - **方法**：`GET`　**路径**：`/admin/credit/limits`
 - **鉴权**：需权限点 credit:adjust
@@ -2463,7 +2550,7 @@
 
 ---
 
-### 91. 调整用户额度
+### 94. 调整用户额度
 
 - **方法**：`POST`　**路径**：`/admin/credit/limits/{userId}/adjust`
 - **鉴权**：需权限点 credit:adjust:write
@@ -2496,7 +2583,7 @@
 
 ---
 
-### 92. 批量调整额度
+### 95. 批量调整额度
 
 - **方法**：`POST`　**路径**：`/admin/credit/limits/batch-adjust`
 - **鉴权**：需权限点 credit:adjust:write
@@ -2529,7 +2616,7 @@
 
 ---
 
-### 93. 额度调整历史
+### 96. 额度调整历史
 
 - **方法**：`GET`　**路径**：`/admin/credit/limits/{userId}/history`
 - **鉴权**：需权限点 credit:adjust
@@ -2560,7 +2647,7 @@
 
 ---
 
-### 94. 逾期调额规则
+### 97. 逾期调额规则
 
 - **方法**：`GET`　**路径**：`/admin/credit/overdue-rules`
 - **鉴权**：需权限点 credit:adjust
@@ -2581,7 +2668,7 @@
 
 ## cs-service
 
-### 95. 待接入/接待中的会话列表
+### 98. 待接入/接待中的会话列表
 
 - **方法**：`GET`　**路径**：`/api/v1/admin/cs/conversations`
 - **鉴权**：需权限点 cs:ticket
@@ -2608,7 +2695,7 @@
 
 ---
 
-### 96. 会话聊天记录
+### 99. 会话聊天记录
 
 - **方法**：`GET`　**路径**：`/api/v1/admin/cs/conversations/{conversationId}/messages`
 - **鉴权**：需权限点 cs:ticket
@@ -2633,7 +2720,7 @@
 
 ---
 
-### 97. 接管会话（转人工后由人工接入）
+### 100. 接管会话（转人工后由人工接入）
 
 - **方法**：`POST`　**路径**：`/api/v1/admin/cs/conversations/{conversationId}/takeover`
 - **鉴权**：需权限点 cs:ticket:write
@@ -2660,7 +2747,7 @@
 
 ---
 
-### 98. 人工回复用户
+### 101. 人工回复用户
 
 - **方法**：`POST`　**路径**：`/api/v1/admin/cs/conversations/{conversationId}/reply`
 - **鉴权**：需权限点 cs:ticket:write
@@ -2692,7 +2779,7 @@
 
 ---
 
-### 99. 结束会话
+### 102. 结束会话
 
 - **方法**：`POST`　**路径**：`/api/v1/admin/cs/conversations/{conversationId}/close`
 - **鉴权**：需权限点 cs:ticket:write
@@ -2719,7 +2806,7 @@
 
 ---
 
-### 100. 工单列表
+### 103. 工单列表
 
 - **方法**：`GET`　**路径**：`/api/v1/admin/cs/tickets`
 - **鉴权**：需权限点 cs:ticket
@@ -2744,7 +2831,7 @@
 
 ---
 
-### 101. 工单详情
+### 104. 工单详情
 
 - **方法**：`GET`　**路径**：`/api/v1/admin/cs/tickets/{ticketId}`
 - **鉴权**：需权限点 cs:ticket
@@ -2778,7 +2865,7 @@
 
 ---
 
-### 102. 领取工单（开始处理）
+### 105. 领取工单（开始处理）
 
 - **方法**：`POST`　**路径**：`/api/v1/admin/cs/tickets/{ticketId}/process`
 - **鉴权**：需权限点 cs:ticket:write
@@ -2812,7 +2899,7 @@
 
 ---
 
-### 103. 关闭工单
+### 106. 关闭工单
 
 - **方法**：`POST`　**路径**：`/api/v1/admin/cs/tickets/{ticketId}/close`
 - **鉴权**：需权限点 cs:ticket:write
