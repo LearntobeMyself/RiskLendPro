@@ -1,7 +1,9 @@
 -- ========================================================
 -- risk_supplement_material 表：图片核验功能字段迁移
 -- 执行环境：RiskLendPro 主业务库
--- 说明：为每张补充材料记录增加 OCR / AI生成检测 / 篡改检测 / 最终状态 字段
+-- 说明：为每张补充材料记录增加 OCR / EXIF 元数据风险 / 编辑痕迹 / 最终状态 字段
+--       注：verification_ai_score 是“EXIF 元数据风险分”，不是 AI 生成检测置信度，
+--           该字段无法判断图片是否由 AI 生成（详见 ImageVerificationService 类注释）。
 --
 -- 幂等：可重复执行。原版本使用裸 ALTER TABLE ADD COLUMN，
 --       在已补过列的环境或多人共享库上会因 Duplicate column 直接失败，
@@ -28,7 +30,7 @@ DELIMITER ;
 CALL sp_add_supplement_verification_column('verification_ocr',
     'verification_ocr TEXT NULL COMMENT ''OCR 识别到的完整文字内容''');
 CALL sp_add_supplement_verification_column('verification_ai_score',
-    'verification_ai_score DOUBLE NULL COMMENT ''AI 生成检测置信度（0-1）''');
+    'verification_ai_score DOUBLE NULL COMMENT ''EXIF 元数据风险分（0-1），非 AI 生成概率''');
 CALL sp_add_supplement_verification_column('verification_tamper_score',
     'verification_tamper_score DOUBLE NULL COMMENT ''篡改痕迹检测置信度（0-1）''');
 CALL sp_add_supplement_verification_column('verification_status',

@@ -8,8 +8,8 @@ import com.drew.metadata.exif.ExifSubIFDDirectory;
 import com.drew.metadata.file.FileTypeDirectory;
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
-import org.example.risklendpro.risk.supplement.dto.AiGenerateCheckResult;
 import org.example.risklendpro.risk.supplement.dto.ImageVerificationResult;
+import org.example.risklendpro.risk.supplement.dto.MetadataRiskResult;
 import org.example.risklendpro.risk.supplement.dto.OcrResult;
 import org.example.risklendpro.risk.supplement.dto.TamperCheckResult;
 import org.slf4j.Logger;
@@ -18,8 +18,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -43,6 +45,27 @@ public class ImageVerificationService {
 
     private final SupplementMaterialProperties properties;
 
+    public static final String STATUS_PASS = "PASS";
+    public static final String STATUS_WARN = "WARN";
+    public static final String STATUS_FAIL = "FAIL";
+    public static final String STATUS_SKIPPED = "SKIPPED";
+
+    private static final String ALGORITHM = "EXIF_METADATA_RULES";
+    private static final String NOTICE =
+            "本项为基于 EXIF 元数据的图片安全检查（不使用视觉模型、不分析像素），"
+                    + "仅作风险提示与留痕；改写或擦除 EXIF 即可绕过，不能据此断言图片是否由 AI 生成。";
+
+    /** 命中 AI 工具自报的 Software 字段，属确定性证据，直接阻断。 */
+    private static final double RISK_AI_TOOL = 0.95;
+    /** 存在编辑软件痕迹（可能只是裁剪调色，单独不阻断）。 */
+    private static final double RISK_EDITED = 0.85;
+    /** 无任何 EXIF 的非 PNG 图片：高概率被二次处理，仅提示。 */
+    private static final double RISK_NO_EXIF = 0.70;
+    /** EXIF 存在但缺拍摄设备信息。 */
+    private static final double RISK_NO_DEVICE = 0.60;
+    /** PNG 无 EXIF（截图、导出图常见），信号很弱。 */
+    private static final double RISK_PNG_NO_EXIF = 0.35;
+
     public ImageVerificationService(SupplementMaterialProperties properties) {
         this.properties = properties;
     }
@@ -52,10 +75,14 @@ public class ImageVerificationService {
         try {
             String filename = file.getOriginalFilename() == null ? "upload.bin" : file.getOriginalFilename();
             tempFile = Files.createTempFile("risklendpro_", "_" + filename);
-            file.transferTo(tempFile.toFile());
+            // 必须用流复制而不是 MultipartFile.transferTo：transferTo 在容器实现上
+            // 可能把上传临时文件移走，后续保存材料时就读不到了。
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            }
             return verifyAll(tempFile, supplementId, file.getContentType());
         } catch (Exception e) {
-            log.warn("Demo 模式文件落盘失败: {}", e.getMessage());
+            log.warn("图片校验临时文件处理失败: {}", e.getMessage());
             return buildSkipResult(supplementId, "文件处理失败: " + e.getMessage());
         } finally {
             if (tempFile != null) {
@@ -70,19 +97,23 @@ public class ImageVerificationService {
 
     private ImageVerificationResult verifyAll(Path imagePath, String supplementId, String contentType) {
         OcrResult ocr = extractText(imagePath, contentType);
-        AiGenerateCheckResult aiCheck = detectAIGenerated(imagePath);
-        TamperCheckResult tamperCheck = detectTampered(imagePath);
+        ExifSnapshot exif = readExif(imagePath);
+        MetadataRiskResult metadataRisk = checkExifRisk(exif);
+        TamperCheckResult tamperCheck = detectTampered(exif);
 
-        String status = computeStatus(aiCheck, tamperCheck);
-        String detail = buildDetail(ocr, aiCheck, tamperCheck);
+        String status = computeStatus(metadataRisk, tamperCheck);
+        boolean blocked = STATUS_FAIL.equals(status);
+        metadataRisk.setBlocked(blocked);
 
         return ImageVerificationResult.builder()
                 .supplementId(supplementId)
                 .ocr(ocr)
-                .aiGenerate(aiCheck)
+                .metadataRisk(metadataRisk)
                 .tamper(tamperCheck)
                 .status(status)
-                .detail(detail)
+                .blocked(blocked)
+                .notice(NOTICE)
+                .detail(buildDetail(ocr, metadataRisk, tamperCheck, status))
                 .build();
     }
 
@@ -170,12 +201,24 @@ public class ImageVerificationService {
         return null;
     }
 
-    private AiGenerateCheckResult detectAIGenerated(Path imagePath) {
-        boolean hasAnyExif = false;
+    /** EXIF 只读快照，一次解析供元数据风险与篡改提示共用。 */
+    record ExifSnapshot(boolean hasExif, boolean isPng,
+                                String software, String make, String model) {
+        boolean captureDevicePresent() {
+            return notBlank(make) || notBlank(model);
+        }
+    }
+
+    private static boolean notBlank(String v) {
+        return v != null && !v.isBlank();
+    }
+
+    private ExifSnapshot readExif(Path imagePath) {
+        boolean hasExif = false;
+        boolean isPng = false;
         String software = null;
         String make = null;
         String model = null;
-        boolean isPng = false;
 
         try {
             Metadata metadata = ImageMetadataReader.readMetadata(imagePath.toFile());
@@ -191,7 +234,7 @@ public class ImageVerificationService {
             ExifSubIFDDirectory subIfd = metadata.getFirstDirectoryOfType(ExifSubIFDDirectory.class);
 
             if (ifd0 != null) {
-                hasAnyExif = true;
+                hasExif = true;
                 if (ifd0.containsTag(ExifDirectoryBase.TAG_SOFTWARE)) {
                     software = ifd0.getString(ExifDirectoryBase.TAG_SOFTWARE);
                 }
@@ -203,163 +246,144 @@ public class ImageVerificationService {
                 }
             }
             if (subIfd != null) {
-                hasAnyExif = true;
+                hasExif = true;
             }
         } catch (Exception e) {
-            log.debug("AI 检测元数据读取异常: {}", e.getMessage());
+            log.debug("EXIF 元数据读取异常: {}", e.getMessage());
         }
+        return new ExifSnapshot(hasExif, isPng, software, make, model);
+    }
 
-        if (software != null) {
-            String softwareLower = software.toLowerCase();
+    /**
+     * 基于 EXIF 的元数据风险评估。
+     *
+     * <p>唯一可以定性的是 Software 字段自报为 AI 生成工具（工具会主动写入），
+     * 其余信号（无 EXIF、缺设备信息、PNG 无 EXIF）都只能作为风险提示，
+     * 因为压缩、微信传输、截图、手动擦除都会造成同样的结果。</p>
+     */
+    MetadataRiskResult checkExifRisk(ExifSnapshot exif) {
+        if (exif.software() != null) {
+            String softwareLower = exif.software().toLowerCase();
             for (String kw : AI_SOFTWARE_KEYWORDS) {
                 if (softwareLower.contains(kw)) {
-                    return AiGenerateCheckResult.builder()
-                            .aiGenerated(true)
-                            .confidence(0.95)
-                            .reason("EXIF Software 字段含 AI 工具标识: " + software)
+                    return metadataResult(true, RISK_AI_TOOL, "HIGH", exif.captureDevicePresent(),
+                            "EXIF Software 字段标注了 AI 生成工具：" + exif.software()
+                                    + "（该字段由导出工具写入，属确定性证据）");
+                }
+            }
+        }
+
+        if (!exif.hasExif()) {
+            if (exif.isPng()) {
+                return metadataResult(true, RISK_PNG_NO_EXIF, "LOW", false,
+                        "图片无 EXIF 元数据（PNG 截图/导出图常见，无法判定来源）");
+            }
+            return metadataResult(true, RISK_NO_EXIF, "MEDIUM", false,
+                    "图片无 EXIF 元数据（可能经二次处理、压缩或擦除，来源不可验证）");
+        }
+
+        if (!exif.captureDevicePresent()) {
+            return metadataResult(true, RISK_NO_DEVICE, "MEDIUM", false,
+                    "EXIF 存在但缺少拍摄设备信息（Make / Model 均为空）");
+        }
+
+        StringBuilder reason = new StringBuilder("检测到拍摄设备信息");
+        if (exif.make() != null) reason.append("，Make=").append(exif.make());
+        if (exif.model() != null) reason.append("，Model=").append(exif.model());
+        if (exif.software() != null) reason.append("，Software=").append(exif.software());
+        return metadataResult(false, 0.0, "NONE", true, reason.toString());
+    }
+
+    private MetadataRiskResult metadataResult(boolean suspicious, double riskScore, String level,
+                                             boolean captureDevicePresent, String reason) {
+        return MetadataRiskResult.builder()
+                .suspicious(suspicious)
+                .riskScore(riskScore)
+                .level(level)
+                .captureDevicePresent(captureDevicePresent)
+                .reason(reason)
+                .algorithm(ALGORITHM)
+                .visualModelUsed(false)
+                .build();
+    }
+
+    /**
+     * 编辑痕迹提示：仅依据 EXIF Software 字段。
+     *
+     * <p>已移除旧版"文件大于 512KB 且为 JPEG 即判篡改（55%）"的规则——
+     * 手机原图普遍 2~5MB，那条规则会对正常照片稳定误报。</p>
+     */
+    TamperCheckResult detectTampered(ExifSnapshot exif) {
+        if (exif.software() != null) {
+            String softwareLower = exif.software().toLowerCase();
+            for (String kw : EDITION_SOFTWARE_KEYWORDS) {
+                if (softwareLower.contains(kw)) {
+                    return TamperCheckResult.builder()
+                            .tampered(true)
+                            .confidence(RISK_EDITED)
+                            .reason("EXIF Software 字段显示经编辑软件处理: " + exif.software())
                             .build();
                 }
             }
         }
-
-        String reason;
-        double confidence;
-        boolean aiGenerated;
-
-        if (!hasAnyExif) {
-            if (isPng) {
-                confidence = 0.35;
-                reason = "图片无 EXIF 元数据（PNG 常见情况，无法判定）";
-            } else {
-                confidence = 0.70;
-                reason = "图片无 EXIF 元数据（非 PNG 格式下高概率为 AI 生成或被处理过）";
-            }
-            aiGenerated = isPng ? false : confidence >= 0.70;
-        } else if (make == null && model == null && software == null) {
-            confidence = 0.60;
-            reason = "EXIF 存在但缺少拍摄设备信息（Make/Model 均为空）";
-            aiGenerated = false;
-        } else {
-            confidence = 0.05;
-            StringBuilder sb = new StringBuilder("检测到真实拍摄设备信息");
-            if (make != null) sb.append("，Make=").append(make);
-            if (model != null) sb.append("，Model=").append(model);
-            if (software != null) sb.append("，Software=").append(software);
-            reason = sb.toString();
-            aiGenerated = false;
-        }
-
-        return AiGenerateCheckResult.builder()
-                .aiGenerated(aiGenerated)
-                .confidence(confidence)
-                .reason(reason)
-                .build();
-    }
-
-    private TamperCheckResult detectTampered(Path imagePath) {
-        String software = null;
-        boolean suspiciousCompression = false;
-
-        try {
-            Metadata metadata = ImageMetadataReader.readMetadata(imagePath.toFile());
-            ExifIFD0Directory ifd0 = metadata.getFirstDirectoryOfType(ExifIFD0Directory.class);
-
-            if (ifd0 != null && ifd0.containsTag(ExifDirectoryBase.TAG_SOFTWARE)) {
-                software = ifd0.getString(ExifDirectoryBase.TAG_SOFTWARE);
-            }
-
-            suspiciousCompression = checkSuspiciousCompression(imagePath);
-        } catch (Exception e) {
-            log.debug("篡改检测元数据读取异常: {}", e.getMessage());
-        }
-
-        boolean tampered = false;
-        double confidence = 0.0;
-        StringBuilder reason = new StringBuilder();
-
-        if (software != null) {
-            String softwareLower = software.toLowerCase();
-            for (String kw : EDITION_SOFTWARE_KEYWORDS) {
-                if (softwareLower.contains(kw)) {
-                    tampered = true;
-                    confidence = 0.85;
-                    reason.append("EXIF Software 字段含编辑软件: ").append(software).append("; ");
-                    break;
-                }
-            }
-        }
-
-        if (suspiciousCompression) {
-            if (!tampered) {
-                tampered = true;
-                confidence = 0.55;
-            }
-            reason.append("检测到可疑的 JPEG 压缩痕迹; ");
-        }
-
-        if (!tampered) {
-            reason.append("未发现明显篡改痕迹");
-        }
-
         return TamperCheckResult.builder()
-                .tampered(tampered)
-                .confidence(confidence)
-                .reason(reason.toString())
+                .tampered(false)
+                .confidence(0.0)
+                .reason("EXIF 未显示编辑软件痕迹")
                 .build();
     }
 
-    private boolean checkSuspiciousCompression(Path file) {
-        try {
-            long size = Files.size(file);
-            if (size < 512L * 1024) {
-                return false;
-            }
-            byte[] header = new byte[2];
-            try (var in = Files.newInputStream(file)) {
-                if (in.read(header) < 2) return false;
-            }
-            boolean isJpeg = header[0] == (byte) 0xFF && header[1] == (byte) 0xD8;
-            return isJpeg;
-        } catch (IOException e) {
-            return false;
+    /**
+     * 状态判定（EXIF 信号分层）：
+     * <ul>
+     *   <li>FAIL：EXIF Software 自报 AI 生成工具；或既有编辑软件痕迹又无拍摄设备信息 —— 拒绝保存</li>
+     *   <li>WARN：无 EXIF、缺设备信息、PNG 无 EXIF、有拍摄来源但经编辑 —— 允许保存，提示复核</li>
+     *   <li>PASS：存在拍摄设备信息且无编辑痕迹</li>
+     * </ul>
+     */
+    String computeStatus(MetadataRiskResult metadata, TamperCheckResult tamper) {
+        if (metadata.getRiskScore() >= RISK_AI_TOOL) {
+            return STATUS_FAIL;
         }
+        if (tamper.isTampered() && !metadata.isCaptureDevicePresent()) {
+            return STATUS_FAIL;
+        }
+        if (tamper.isTampered() || metadata.getRiskScore() >= RISK_PNG_NO_EXIF) {
+            return STATUS_WARN;
+        }
+        return STATUS_PASS;
     }
 
-    private String computeStatus(AiGenerateCheckResult ai, TamperCheckResult tamper) {
-        if (ai.isAiGenerated() || tamper.isTampered()) {
-            if (ai.getConfidence() >= 0.85 || tamper.getConfidence() >= 0.80) {
-                return "FAIL";
-            }
-            return "WARN";
-        }
-        if (ai.getConfidence() >= 0.50 || tamper.getConfidence() >= 0.40) {
-            return "WARN";
-        }
-        return "PASS";
-    }
-
-    private String buildDetail(OcrResult ocr, AiGenerateCheckResult ai, TamperCheckResult tamper) {
+    private String buildDetail(OcrResult ocr, MetadataRiskResult metadata, TamperCheckResult tamper, String status) {
         StringBuilder sb = new StringBuilder();
+        sb.append("检测方式: EXIF 元数据规则（非视觉模型）; ");
         if (ocr.isSuccess()) {
             sb.append("OCR 提取字数: ").append(ocr.getText().length()).append("; ");
         } else {
             sb.append("OCR 未通过: ").append(ocr.getError()).append("; ");
         }
-        sb.append("AI生成概率: ").append(String.format("%.0f%%", ai.getConfidence() * 100))
-                .append("（").append(ai.isAiGenerated() ? "是" : "否").append("）; ");
-        sb.append("篡改概率: ").append(String.format("%.0f%%", tamper.getConfidence() * 100))
-                .append("（").append(tamper.isTampered() ? "是" : "否").append("）");
+        sb.append("元数据风险分: ").append(String.format("%.0f%%", metadata.getRiskScore() * 100))
+                .append("（").append(metadata.getLevel()).append("）; ");
+        sb.append("编辑痕迹: ").append(tamper.isTampered() ? "有" : "无").append("; ");
+        sb.append("处置: ").append(switch (status) {
+            case STATUS_FAIL -> "已拒绝保存";
+            case STATUS_WARN -> "需人工复核";
+            case STATUS_PASS -> "通过";
+            default -> "未执行";
+        });
         return sb.toString();
     }
 
     private ImageVerificationResult buildSkipResult(String supplementId, String msg) {
         OcrResult ocr = OcrResult.builder().success(false).text("").error(msg).build();
-        AiGenerateCheckResult ai = AiGenerateCheckResult.builder().aiGenerated(false).confidence(0).reason("").build();
-        TamperCheckResult tamper = TamperCheckResult.builder().tampered(false).confidence(0).reason("").build();
+        MetadataRiskResult metadata = metadataResult(false, 0.0, "NONE", false, "元数据未检查");
+        TamperCheckResult tamper = TamperCheckResult.builder().tampered(false).confidence(0).reason("未检查").build();
         return ImageVerificationResult.builder()
                 .supplementId(supplementId)
-                .ocr(ocr).aiGenerate(ai).tamper(tamper)
-                .status("SKIPPED")
+                .ocr(ocr).metadataRisk(metadata).tamper(tamper)
+                .status(STATUS_SKIPPED)
+                .blocked(false)
+                .notice(NOTICE)
                 .detail(msg)
                 .build();
     }

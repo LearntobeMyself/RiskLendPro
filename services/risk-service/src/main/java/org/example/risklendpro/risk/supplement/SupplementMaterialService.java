@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.risklendpro.api.contract.IdentityProofMaterials;
+import org.example.risklendpro.common.CatalogBusinessException;
 import org.example.risklendpro.risk.supplement.SupplementMaterialProperties;
 import org.example.risklendpro.risk.supplement.dto.ImageVerificationResult;
 import org.example.risklendpro.risk.entity.RiskAssessment;
@@ -20,7 +21,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -188,6 +188,12 @@ public class SupplementMaterialService {
             throw new RuntimeException("该类型材料已上传，请勿重复提交");
         }
 
+        // 先核验、通过后才落盘落库：命中阻断规则时文件与记录都不会留下
+        ImageVerificationResult verification = verifySafely(file, assessment.getApplyId());
+        if (verification.isBlocked()) {
+            throw new CatalogBusinessException(40001, buildRejectMessage(verification));
+        }
+
         try {
             FileStorageService.StoredFile stored = fileStorageService.store(assessment.getApplyId(), file);
             RiskSupplementMaterial row = new RiskSupplementMaterial();
@@ -201,32 +207,8 @@ public class SupplementMaterialService {
             row.setRemark(remark);
             row.setUploadTime(new Date());
             row.setExpireAt(addDays(new Date(), properties.getRetentionDays()));
+            applyVerification(row, verification);
             materialMapper.insert(row);
-
-            Map<String, Object> resp = new LinkedHashMap<>();
-            resp.put("materialId", row.getId());
-            resp.put("applyId", assessment.getApplyId());
-            resp.put("materialType", materialType);
-            resp.put("supplementStatus", assessment.getSupplementStatus());
-            resp.put("expireAt", row.getExpireAt());
-
-            try {
-                ImageVerificationResult vr = imageVerificationService.verifyAll(
-                        Path.of(stored.storedPath()), String.valueOf(row.getId()));
-                row.setVerificationOcr(vr.getOcr() != null ? vr.getOcr().getText() : null);
-                row.setVerificationAiScore(vr.getAiGenerate() != null ? vr.getAiGenerate().getConfidence() : null);
-                row.setVerificationTamperScore(vr.getTamper() != null ? vr.getTamper().getConfidence() : null);
-                row.setVerificationStatus(vr.getStatus());
-                row.setVerificationTime(new Date());
-                materialMapper.updateById(row);
-                resp.put("verification", vr);
-            } catch (Exception ve) {
-                log.warn("图片校验执行失败，跳过: {}", ve.getMessage());
-                row.setVerificationStatus("SKIPPED");
-                row.setVerificationTime(new Date());
-                materialMapper.updateById(row);
-                resp.put("verificationSkipped", true);
-            }
 
             if (allRequiredUploaded(assessment.getApplyId(), requirements)) {
                 assessment.setSupplementStatus(STATUS_SUBMITTED);
@@ -235,12 +217,63 @@ public class SupplementMaterialService {
             }
             riskAssessmentMapper.updateById(assessment);
 
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("materialId", row.getId());
+            resp.put("applyId", assessment.getApplyId());
+            resp.put("materialType", materialType);
+            resp.put("supplementStatus", assessment.getSupplementStatus());
+            resp.put("expireAt", row.getExpireAt());
+            resp.put("verification", verification);
+            resp.put("verificationStatus", verification.getStatus());
             return resp;
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("材料上传失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 图片核验；核验本身异常时不阻断业务流程（记为 SKIPPED），
+     * 避免 OCR/元数据库缺失把上传接口整体打挂。
+     */
+    private ImageVerificationResult verifySafely(MultipartFile file, String applyId) {
+        try {
+            return imageVerificationService.verifyAll(file, applyId);
+        } catch (Exception e) {
+            log.warn("图片核验执行失败，按 SKIPPED 处理: {}", e.getMessage());
+            return ImageVerificationResult.builder()
+                    .status(ImageVerificationService.STATUS_SKIPPED)
+                    .blocked(false)
+                    .detail("图片核验未执行: " + e.getMessage())
+                    .build();
+        }
+    }
+
+    private void applyVerification(RiskSupplementMaterial row, ImageVerificationResult vr) {
+        if (vr == null) {
+            return;
+        }
+        row.setVerificationOcr(vr.getOcr() != null ? vr.getOcr().getText() : null);
+        // 列名沿用 verification_ai_score，语义已修正为“EXIF 元数据风险分”
+        row.setVerificationAiScore(vr.getMetadataRisk() != null ? vr.getMetadataRisk().getRiskScore() : null);
+        row.setVerificationTamperScore(vr.getTamper() != null ? vr.getTamper().getConfidence() : null);
+        row.setVerificationStatus(vr.getStatus());
+        row.setVerificationTime(new Date());
+    }
+
+    private String buildRejectMessage(ImageVerificationResult vr) {
+        String reason = "";
+        if (vr.getMetadataRisk() != null) {
+            reason = vr.getMetadataRisk().getReason();
+        }
+        if ((reason == null || reason.isBlank()) && vr.getTamper() != null) {
+            reason = vr.getTamper().getReason();
+        }
+        if (reason == null || reason.isBlank()) {
+            reason = "图片未通过安全检查";
+        }
+        return "图片校验未通过：" + reason + "。请上传未经编辑的原始拍摄图片，材料未提交。";
     }
 
     public List<Map<String, Object>> listByApplyIdForReport(String applyId) {
@@ -341,6 +374,10 @@ public class SupplementMaterialService {
         if (uploaded) {
             throw new RuntimeException("该身份证明已上传，请勿重复提交");
         }
+        ImageVerificationResult verification = verifySafely(file, assessment.getApplyId());
+        if (verification.isBlocked()) {
+            throw new CatalogBusinessException(40001, buildRejectMessage(verification));
+        }
         try {
             FileStorageService.StoredFile stored = fileStorageService.store(assessment.getApplyId(), file);
             RiskSupplementMaterial row = new RiskSupplementMaterial();
@@ -354,6 +391,7 @@ public class SupplementMaterialService {
             row.setRemark(remark);
             row.setUploadTime(new Date());
             row.setExpireAt(addDays(new Date(), properties.getRetentionDays()));
+            applyVerification(row, verification);
             materialMapper.insert(row);
 
             Map<String, Object> resp = new LinkedHashMap<>();
@@ -361,6 +399,8 @@ public class SupplementMaterialService {
             resp.put("applyId", assessment.getApplyId());
             resp.put("materialType", materialType);
             resp.put("expireAt", row.getExpireAt());
+            resp.put("verification", verification);
+            resp.put("verificationStatus", verification.getStatus());
             return resp;
         } catch (RuntimeException e) {
             throw e;
