@@ -2,6 +2,7 @@
   <configuration default="false" name="RiskLendPro - Risk Service" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
     <module name="risk-service" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="org.example.risklendpro.risk.RiskServiceApplication" />
+    <option name="VM_PARAMETERS" value="-Dspring.config.additional-location=optional:file:$PROJECT_DIR$/config/local/" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

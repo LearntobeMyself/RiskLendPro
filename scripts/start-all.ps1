@@ -233,7 +233,10 @@ try {
         Set-Content -LiteralPath $outLog -Value '' -Encoding UTF8
         Set-Content -LiteralPath $errLog -Value '' -Encoding UTF8
 
-        $process = Start-Process -FilePath (Join-Path $selectedJavaHome 'bin\java.exe') -ArgumentList @('-jar', $jarPath) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
+        # 显式指定密钥配置目录：不依赖工作目录，jar 从任何位置启动都能读到
+        # config/local/application-local.yml（COS / DeepSeek / 扣子凭据）。optional: 前缀保证文件缺失时不影响启动。
+        $configLocation = "optional:file:$root/config/local/"
+        $process = Start-Process -FilePath (Join-Path $selectedJavaHome 'bin\java.exe') -ArgumentList @("-Dspring.config.additional-location=$configLocation", '-jar', $jarPath) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
 
         Start-Sleep -Seconds 2
         if ($process.HasExited) {

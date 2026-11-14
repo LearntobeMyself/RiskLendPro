@@ -2,6 +2,7 @@
   <configuration default="false" name="RiskLendPro - Gateway" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
     <module name="gateway" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="org.example.risklendpro.gateway.GatewayApplication" />
+    <option name="VM_PARAMETERS" value="-Dspring.config.additional-location=optional:file:$PROJECT_DIR$/config/local/" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
