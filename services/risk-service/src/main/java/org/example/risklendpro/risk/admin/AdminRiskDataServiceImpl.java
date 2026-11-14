@@ -39,6 +39,13 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
 
     private static final String ANTI_FRAUD_KEY_PREFIX = "risk:anti-fraud:handle:";
 
+    /**
+     * 现存用户 ID 子查询：用于过滤「用户主记录已删除、只剩业务行」的孤立数据。
+     * 列表接口与详情接口（/admin/risk/users/{id}、/admin/users/{id}）口径保持一致，
+     * 避免出现列表有记录、点进去却返回「用户不存在」的情况。
+     */
+    private static final String EXISTING_USER_IDS_SQL = "SELECT id FROM `user`";
+
     @Autowired
     private RiskAssessmentMapper riskAssessmentMapper;
     @Autowired
@@ -93,6 +100,8 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
     public Map<String, Object> listCreditScores(Integer page, Integer size, String userName, String riskLevel) {
         Page<RiskAssessment> pageInfo = new Page<>(page, size);
         QueryWrapper<RiskAssessment> qw = new QueryWrapper<RiskAssessment>().eq("is_final", true);
+        // 过滤用户主记录已不存在的孤立评分，保证列表分页总数与详情接口一致
+        qw.inSql("user_id", EXISTING_USER_IDS_SQL);
         if (userName != null && !userName.isBlank()) {
             qw.like("name", userName);
         }
@@ -300,6 +309,8 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
     @Override
     public Map<String, Object> exportRiskData(String status) {
         QueryWrapper<RiskAssessment> qw = new QueryWrapper<>();
+        // 导出口径与列表一致：不导出用户主记录已删除的孤立评分
+        qw.inSql("user_id", EXISTING_USER_IDS_SQL);
         if (status != null && !status.isBlank()) {
             qw.eq("status", status);
         }
