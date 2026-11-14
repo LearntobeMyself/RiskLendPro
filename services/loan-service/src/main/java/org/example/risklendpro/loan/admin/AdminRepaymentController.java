@@ -7,6 +7,7 @@ import org.example.risklendpro.loan.repay.RepaymentReportRequest;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.loan.admin.AdminRepaymentQueryService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -111,10 +112,10 @@ public class AdminRepaymentController {
         return CommonResponse.success("提醒发送成功", adminRepaymentQueryService.sendReminder(request));
     }
 
-    @Operation(summary = "生成还款报表")
+    @Operation(summary = "生成还款报表（直接返回 CSV 文件流）")
     @PreAuthorize("hasAuthority('collection:action:write')")
     @PostMapping("/report")
-    public CommonResponse<Map<String, Object>> report(@RequestBody RepaymentReportRequest request) {
-        return CommonResponse.success("报表生成成功", adminRepaymentQueryService.generateReport(request));
+    public ResponseEntity<byte[]> report(@RequestBody RepaymentReportRequest request) {
+        return adminRepaymentQueryService.generateReport(request);
     }
 }

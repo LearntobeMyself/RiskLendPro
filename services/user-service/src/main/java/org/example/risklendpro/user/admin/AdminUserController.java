@@ -8,6 +8,7 @@ import org.example.risklendpro.user.admin.AdminUserUpdateRequest;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.user.admin.AdminUserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -48,10 +49,10 @@ public class AdminUserController {
                 adminUserService.listUsers(page, size, resolvedStatus, resolvedName, resolvedPhone));
     }
 
-    @Operation(summary = "用户导出")
+    @Operation(summary = "用户导出（直接返回 CSV 文件流）")
     @PreAuthorize("hasAuthority('sys:user:write')")
     @GetMapping("/export")
-    public CommonResponse<Map<String, Object>> export(
+    public ResponseEntity<byte[]> export(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String accountStatus,
             @RequestParam(required = false) String name,
@@ -61,8 +62,7 @@ public class AdminUserController {
         String resolvedStatus = accountStatus != null && !accountStatus.isBlank() ? accountStatus : status;
         String resolvedName = realName != null && !realName.isBlank() ? realName : name;
         String resolvedPhone = phoneNumber != null && !phoneNumber.isBlank() ? phoneNumber : phone;
-        return CommonResponse.success("导出成功",
-                adminUserService.exportUsers(resolvedStatus, resolvedName, resolvedPhone));
+        return adminUserService.exportUsers(resolvedStatus, resolvedName, resolvedPhone);
     }
 
     @Operation(summary = "用户详情")

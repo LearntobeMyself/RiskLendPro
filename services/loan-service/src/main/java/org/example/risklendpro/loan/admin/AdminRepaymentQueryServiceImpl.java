@@ -19,6 +19,7 @@ import org.example.risklendpro.common.admin.AdminExportHelper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
 import org.example.risklendpro.common.mail.EmailUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -313,7 +314,7 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
     }
 
     @Override
-    public Map<String, Object> generateReport(RepaymentReportRequest request) {
+    public ResponseEntity<byte[]> generateReport(RepaymentReportRequest request) {
         QueryWrapper<RepaymentRecord> qw = new QueryWrapper<>();
         Date start = AdminDateHelper.parseDateStart(request.getStartDate());
         Date end = AdminDateHelper.parseDateEnd(request.getEndDate());
@@ -333,8 +334,7 @@ public class AdminRepaymentQueryServiceImpl implements AdminRepaymentQueryServic
                 String.valueOf(r.getStatus()),
                 AdminDateHelper.formatDateTime(r.getRepaymentDate())
         )).toList();
-        String path = adminExportHelper.writeCsv("repayment-report", headers, rows);
-        return adminExportHelper.downloadMeta(path);
+        return adminExportHelper.csv("repayment-report", headers, rows);
     }
 
     private Map<String, Object> toPlanMap(RepaymentPlan plan) {

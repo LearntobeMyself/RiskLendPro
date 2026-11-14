@@ -20,6 +20,7 @@ import org.example.risklendpro.common.admin.AdminEntityMapper;
 import org.example.risklendpro.common.admin.AdminExportHelper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -271,7 +272,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
     }
 
     @Override
-    public Map<String, Object> exportRecords(String status, String userName, String startDate, String endDate) {
+    public ResponseEntity<byte[]> exportRecords(String status, String userName, String startDate, String endDate) {
         QueryWrapper<Loan> qw = buildRecordQuery(status, userName, startDate, endDate);
         List<Loan> loans = loanMapper.selectList(qw);
         // 批量预取用户与还款计划，替代逐行 getUser + plan 查询的 N+1（导出全量行时尤为致命）
@@ -292,8 +293,7 @@ public class AdminLoanQueryServiceImpl implements AdminLoanQueryService {
                     String.valueOf(item.get("loanTime"))
             ));
         }
-        String path = adminExportHelper.writeCsv("loan-records", headers, rows);
-        return adminExportHelper.downloadMeta(path);
+        return adminExportHelper.csv("loan-records", headers, rows);
     }
 
     private QueryWrapper<Loan> buildRecordQuery(String status, String userName, String startDate, String endDate) {

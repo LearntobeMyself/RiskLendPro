@@ -1,5 +1,7 @@
 package org.example.risklendpro.loan.admin;
 
+import org.springframework.http.ResponseEntity;
+
 import java.util.Map;
 
 public interface AdminLoanQueryService {
@@ -14,5 +16,6 @@ public interface AdminLoanQueryService {
 
     Map<String, Object> getRecordDetail(Long loanId);
 
-    Map<String, Object> exportRecords(String status, String userName, String startDate, String endDate);
+    /** 直接返回 CSV 文件流，不再返回二次下载地址。 */
+    ResponseEntity<byte[]> exportRecords(String status, String userName, String startDate, String endDate);
 }

@@ -27,6 +27,7 @@ import org.example.risklendpro.common.admin.AdminDateHelper;
 import org.example.risklendpro.common.admin.AdminExportHelper;
 import org.example.risklendpro.common.admin.AdminPageHelper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -307,7 +308,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
     }
 
     @Override
-    public Map<String, Object> exportRiskData(String status) {
+    public ResponseEntity<byte[]> exportRiskData(String status) {
         QueryWrapper<RiskAssessment> qw = new QueryWrapper<>();
         // 导出口径与列表一致：不导出用户主记录已删除的孤立评分
         qw.inSql("user_id", EXISTING_USER_IDS_SQL);
@@ -324,8 +325,7 @@ public class AdminRiskDataServiceImpl implements AdminRiskDataService {
                 csvCell(a.getStatus()),
                 csvCell(AdminDateHelper.formatDateTime(a.getSubmitTime()))
         )).toList();
-        String path = adminExportHelper.writeCsv("risk-export", headers, rows);
-        return adminExportHelper.downloadMeta(path);
+        return adminExportHelper.csv("risk-export", headers, rows);
     }
 
     /** CSV 单元格空值安全：null 输出空串而非字面量 "null" 或 NPE。 */

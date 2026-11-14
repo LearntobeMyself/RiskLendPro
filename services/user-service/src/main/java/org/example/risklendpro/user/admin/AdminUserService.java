@@ -3,6 +3,7 @@ package org.example.risklendpro.user.admin;
 import org.example.risklendpro.user.admin.AdminUserCreateRequest;
 import org.example.risklendpro.user.admin.AdminUserStatusRequest;
 import org.example.risklendpro.user.admin.AdminUserUpdateRequest;
+import org.springframework.http.ResponseEntity;
 
 import java.util.Map;
 
@@ -18,5 +19,6 @@ public interface AdminUserService {
 
     Map<String, Object> updateUserStatus(Long userId, AdminUserStatusRequest request);
 
-    Map<String, Object> exportUsers(String status, String name, String phone);
+    /** 直接返回 CSV 文件流，不再返回二次下载地址。 */
+    ResponseEntity<byte[]> exportUsers(String status, String name, String phone);
 }

@@ -21,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -194,7 +195,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     @Override
-    public Map<String, Object> exportUsers(String status, String name, String phone) {
+    public ResponseEntity<byte[]> exportUsers(String status, String name, String phone) {
         List<User> users = userMapper.selectList(buildUserQuery(status, name, phone));
         // 批量预取额度/评估/贷款摘要，替代逐行 3 次 Feign（1 万用户即 3 万次 HTTP 的 N+1）
         List<Long> userIds = users.stream().map(User::getId).filter(Objects::nonNull).distinct().toList();
@@ -218,8 +219,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     String.valueOf(item.get("creditLimit"))
             ));
         }
-        String path = adminExportHelper.writeCsv("users", headers, rows);
-        return adminExportHelper.downloadMeta(path);
+        return adminExportHelper.csv("users", headers, rows);
     }
 
     /** 批量调用失败时返回兜底空集合，不阻断导出主流程。 */

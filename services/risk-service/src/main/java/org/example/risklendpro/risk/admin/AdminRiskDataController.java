@@ -7,6 +7,7 @@ import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.risk.admin.AdminRiskDataService;
 import org.example.risklendpro.common.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -94,11 +95,11 @@ public class AdminRiskDataController {
         return CommonResponse.success("查询成功", adminRiskDataService.getCreditReportDetail(userId));
     }
 
-    @Operation(summary = "风控数据导出")
+    @Operation(summary = "风控数据导出（直接返回 CSV 文件流）")
     @PreAuthorize("hasAuthority('risk:approve:write')")
     @GetMapping("/export")
-    public CommonResponse<Map<String, Object>> export(
+    public ResponseEntity<byte[]> export(
             @RequestParam(required = false) String status) {
-        return CommonResponse.success("导出成功", adminRiskDataService.exportRiskData(status));
+        return adminRiskDataService.exportRiskData(status);
     }
 }

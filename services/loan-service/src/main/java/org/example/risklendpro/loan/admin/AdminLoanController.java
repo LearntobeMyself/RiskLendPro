@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.risklendpro.common.api.CommonResponse;
 import org.example.risklendpro.loan.admin.AdminLoanQueryService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -63,15 +64,14 @@ public class AdminLoanController {
         return CommonResponse.success("查询成功", adminLoanQueryService.getRecordDetail(loanId));
     }
 
-    @Operation(summary = "借款记录导出")
+    @Operation(summary = "借款记录导出（直接返回 CSV 文件流）")
     @PreAuthorize("hasAuthority('loan:approve:write')")
     @GetMapping("/records/export")
-    public CommonResponse<Map<String, Object>> exportRecords(
+    public ResponseEntity<byte[]> exportRecords(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String userName,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate) {
-        return CommonResponse.success("导出成功",
-                adminLoanQueryService.exportRecords(status, userName, startDate, endDate));
+        return adminLoanQueryService.exportRecords(status, userName, startDate, endDate);
     }
 }

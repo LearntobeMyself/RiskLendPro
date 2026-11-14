@@ -2,6 +2,7 @@ package org.example.risklendpro.loan.admin;
 
 import org.example.risklendpro.loan.repay.RepaymentReminderRequest;
 import org.example.risklendpro.loan.repay.RepaymentReportRequest;
+import org.springframework.http.ResponseEntity;
 
 import java.util.Map;
 
@@ -26,5 +27,6 @@ public interface AdminRepaymentQueryService {
 
     Map<String, Object> sendReminder(RepaymentReminderRequest request);
 
-    Map<String, Object> generateReport(RepaymentReportRequest request);
+    /** 直接返回 CSV 文件流，不再返回二次下载地址。 */
+    ResponseEntity<byte[]> generateReport(RepaymentReportRequest request);
 }
